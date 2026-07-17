@@ -27,6 +27,8 @@ npm run dev   # → http://localhost:3000
 
 設計資料（要件定義書・基本設計書・DB設計・詳細設計・画面遷移図）は [docs/](docs/) に同梱しています。開発規約は [CLAUDE.md](CLAUDE.md) を参照してください。
 
+Git / GitHub が初めてのメンバーは [docs/00_GitHub初心者ガイド.md](docs/00_GitHub初心者ガイド.md) から読んでください。
+
 **AI（Claude Code 等）を使って開発するメンバーは、必ず [docs/06_AI開発ガイド.md](docs/06_AI開発ガイド.md) を先に読んでください**（プロジェクトへの設定方法・ブランチの切り方・AI への指示のコツ・禁止事項をまとめています）。
 
 ---
