@@ -25,7 +25,7 @@ npm run dev   # → http://localhost:3000
 
 **Google Sheets の設定は不要で開発を始められます** — 未設定の場合は `data/*.json` へのローカル保存＋モックデータで全画面が動作します。
 
-設計資料（要件定義書・基本設計書・DB設計・詳細設計・画面遷移図）は [docs/](docs/) に同梱しています。開発規約は [CLAUDE.md](CLAUDE.md) を参照してください。
+詳しいセットアップ手順は [docs/07_MVP版セットアップ手順書.md](docs/07_MVP版セットアップ手順書.md) を参照してください。設計資料（要件定義書・基本設計書・DB設計・詳細設計・画面遷移図）は [docs/](docs/) に同梱しています。開発規約は [CLAUDE.md](CLAUDE.md) を参照してください。
 
 Git / GitHub が初めてのメンバーは [docs/00_GitHub初心者ガイド.md](docs/00_GitHub初心者ガイド.md) から読んでください。
 
