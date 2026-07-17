@@ -22,3 +22,6 @@ data/
 # misc
 .DS_Store
 *.pem
+
+# TypeScript build cache
+*.tsbuildinfo
