@@ -1,0 +1,24 @@
+# dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# next.js
+.next/
+out/
+
+# env files — 絶対にコミットしないこと
+.env
+.env.local
+.env.*.local
+
+# Firebase
+.firebase/
+firebase-debug.log
+
+# ローカル永続化データ（Sheets未設定時のフォールバック保存先）
+data/
+
+# misc
+.DS_Store
+*.pem
