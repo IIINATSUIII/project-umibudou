@@ -127,7 +127,7 @@ export async function getReservations(): Promise<Reservation[]> {
 }
 
 export async function addReservation(data: Reservation): Promise<void> {
-  await appendRow(SHEET.RESERVATIONS, objToRow(HEADERS.RESERVATIONS, data as Record<string, unknown>))
+  await appendRow(SHEET.RESERVATIONS, objToRow(HEADERS.RESERVATIONS, data as unknown as Record<string, unknown>))
 }
 
 export async function updateReservation(id: string, data: Partial<Reservation>): Promise<void> {
@@ -147,7 +147,7 @@ export async function getQuestionnaires(): Promise<QuestionnaireData[]> {
 export async function addQuestionnaire(data: QuestionnaireData): Promise<void> {
   await appendRow(
     SHEET.QUESTIONNAIRES,
-    objToRow(HEADERS.QUESTIONNAIRES, data as Record<string, unknown>)
+    objToRow(HEADERS.QUESTIONNAIRES, data as unknown as Record<string, unknown>)
   )
 }
 
@@ -159,7 +159,7 @@ export async function getCustomers(): Promise<Customer[]> {
 }
 
 export async function addCustomer(data: Customer): Promise<void> {
-  await appendRow(SHEET.CUSTOMERS, objToRow(HEADERS.CUSTOMERS, data as Record<string, unknown>))
+  await appendRow(SHEET.CUSTOMERS, objToRow(HEADERS.CUSTOMERS, data as unknown as Record<string, unknown>))
 }
 
 export async function updateCustomer(id: string, data: Partial<Customer>): Promise<void> {
