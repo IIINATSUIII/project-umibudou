@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { store } from '@/lib/dataStore'
+import { patchReservation } from '@/lib/reservations'
 import type { QuestionnaireData, Customer } from '@/types'
 
 /**
@@ -28,9 +29,6 @@ export async function POST(req: NextRequest) {
     }
     await store.addQuestionnaire(qData)
 
-    // 予約に問診票IDをリンク
-    await store.updateReservation(reservationId, { questionnaireId })
-
     // 顧客台帳に自動登録（氏名で重複チェック）
     const customers = await store.getCustomers()
     const fullName = `${qData.lastName} ${qData.firstName}`
@@ -39,9 +37,11 @@ export async function POST(req: NextRequest) {
     )
     const today = new Date().toISOString().slice(0, 10)
 
+    let customerId: string
     if (!existing) {
+      customerId = `C${Date.now()}`
       const newCustomer: Customer = {
-        id: `C${Date.now()}`,
+        id: customerId,
         lastName: qData.lastName,
         firstName: qData.firstName,
         lastNameKana: qData.lastNameKana,
@@ -66,11 +66,15 @@ export async function POST(req: NextRequest) {
       }
       await store.addCustomer(newCustomer)
     } else {
+      customerId = existing.id
       await store.updateCustomer(existing.id, {
         visitCount: existing.visitCount + 1,
         lastVisit: today,
       })
     }
+
+    // 予約に問診完了フラグ・顧客IDを反映
+    await patchReservation(reservationId, { questionnaireCompleted: true, customerId })
 
     return NextResponse.json({ ok: true, questionnaireId })
   } catch (err) {

@@ -7,19 +7,36 @@ import type { Reservation, QuestionnaireData, Customer } from '@/types'
 
 // ─── 予約 ─────────────────────────────────────────────────────
 
+/** 予約新規登録の入力。id・登録日時・コース名等の転記はサーバー側で行う。 */
+export type NewReservationForm = {
+  guestName: string
+  guestPhone: string
+  guestEmail: string
+  diveDate: string
+  timeSlot: Reservation['timeSlot']
+  courseId: string
+  guestCount: number
+  channel: Reservation['channel']
+  status?: string
+  staffId?: string
+  divePoint?: string
+  staffNote?: string
+}
+
 export async function fetchReservations(): Promise<Reservation[]> {
   const res = await fetch('/api/reservations')
   if (!res.ok) throw new Error('Failed to fetch reservations')
   return res.json()
 }
 
-export async function createReservation(data: Reservation): Promise<void> {
+export async function createReservation(data: NewReservationForm): Promise<{ id: string }> {
   const res = await fetch('/api/reservations', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
   })
   if (!res.ok) throw new Error('Failed to create reservation')
+  return res.json()
 }
 
 export async function patchReservation(id: string, delta: Partial<Reservation>): Promise<void> {

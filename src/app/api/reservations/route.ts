@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { store } from '@/lib/dataStore'
+import { createReservation, patchReservation, type NewReservationInput } from '@/lib/reservations'
+import { CONFIRMED_STATUS_ID } from '@/lib/masters'
 
 /** GET /api/reservations — 予約一覧取得 */
 export async function GET() {
@@ -11,12 +13,25 @@ export async function GET() {
   }
 }
 
-/** POST /api/reservations — 予約追加 */
+/** POST /api/reservations — 予約追加（スタッフによる手動登録。ID採番・コース名転記はサーバー側で行う） */
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json()
-    await store.addReservation(body)
-    return NextResponse.json({ ok: true })
+    const body = await req.json() as Partial<NewReservationInput>
+    const reservation = await createReservation({
+      guestName: String(body.guestName ?? ''),
+      guestPhone: String(body.guestPhone ?? ''),
+      guestEmail: String(body.guestEmail ?? ''),
+      diveDate: String(body.diveDate ?? ''),
+      timeSlot: body.timeSlot ?? 'unspecified',
+      courseId: String(body.courseId ?? ''),
+      guestCount: Number(body.guestCount) || 1,
+      channel: body.channel ?? 'phone',
+      status: body.status ?? CONFIRMED_STATUS_ID, // 手動登録は即確定扱い
+      staffId: body.staffId,
+      divePoint: body.divePoint,
+      staffNote: body.staffNote,
+    })
+    return NextResponse.json({ ok: true, id: reservation.id })
   } catch (err) {
     console.error('[POST /api/reservations]', err)
     return NextResponse.json({ error: 'Failed to add reservation' }, { status: 500 })
@@ -27,7 +42,7 @@ export async function POST(req: NextRequest) {
 export async function PATCH(req: NextRequest) {
   try {
     const { id, ...delta } = await req.json()
-    await store.updateReservation(id, delta)
+    await patchReservation(id, delta)
     return NextResponse.json({ ok: true })
   } catch (err) {
     console.error('[PATCH /api/reservations]', err)
