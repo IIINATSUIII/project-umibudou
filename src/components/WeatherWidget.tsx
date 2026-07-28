@@ -37,6 +37,7 @@ export default function WeatherWidget() {
               {d.weather.length > 12 ? d.weather.slice(0, 12) + '…' : d.weather}
             </div>
             <div className="text-xs text-gray-500">波 {d.wave}</div>
+            <div className="text-xs text-gray-500">{d.tempHigh}° / {d.tempLow}°</div>
           </div>
         ))}
       </div>
