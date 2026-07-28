@@ -5,29 +5,26 @@ import { useRouter } from 'next/navigation'
 import Navigation from '@/components/Navigation'
 import { useAuth } from '@/lib/authContext'
 import { createReservation } from '@/lib/api'
+import { COURSES, CONFIRMED_STATUS_ID } from '@/lib/masters'
 import type { Reservation } from '@/types'
 
-const COURSES = [
-  '体験ダイビング',
-  'ファンダイビング（2本）',
-  'ファンダイビング（3本）',
-  'ナイトダイビング',
-  'シュノーケリング',
-  'その他',
+const TIME_SLOTS: [Reservation['timeSlot'], string][] = [
+  ['morning', '午前'], ['afternoon', '午後'], ['full', '1日'], ['unspecified', '指定なし'],
 ]
 
 export default function NewReservationPage() {
   const user = useAuth()
   const router = useRouter()
   const [form, setForm] = useState({
-    date: new Date().toISOString().slice(0, 10),
-    time: '09:00',
-    course: '体験ダイビング',
+    diveDate: new Date().toISOString().slice(0, 10),
+    timeSlot: 'morning' as Reservation['timeSlot'],
+    courseId: COURSES[0].id,
     guestName: '',
     guestCount: 1,
-    phone: '',
+    guestPhone: '',
+    guestEmail: '',
     channel: 'phone' as Reservation['channel'],
-    notes: '',
+    staffNote: '',
   })
   const [saving, setSaving] = useState(false)
 
@@ -43,11 +40,8 @@ export default function NewReservationPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setSaving(true)
-    await createReservation({
-      id: `R${Date.now()}`,
-      ...form,
-      status: 'confirmed',
-    })
+    // スタッフによる手動登録は即確定扱い
+    await createReservation({ ...form, status: CONFIRMED_STATUS_ID })
     router.push('/reservations')
   }
 
@@ -63,26 +57,27 @@ export default function NewReservationPage() {
         <form onSubmit={handleSubmit} className="bg-white rounded-xl border border-gray-200 p-6 space-y-4">
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">日付 *</label>
-              <input type="date" value={form.date} onChange={(e) => set('date', e.target.value)}
+              <label className="block text-sm font-medium text-gray-700 mb-1">ダイブ日 *</label>
+              <input type="date" value={form.diveDate} onChange={(e) => set('diveDate', e.target.value)}
                 required className={inp} />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">時間 *</label>
-              <input type="time" value={form.time} onChange={(e) => set('time', e.target.value)}
-                required className={inp} />
+              <label className="block text-sm font-medium text-gray-700 mb-1">時間帯 *</label>
+              <select value={form.timeSlot} onChange={(e) => set('timeSlot', e.target.value as Reservation['timeSlot'])} className={inp}>
+                {TIME_SLOTS.map(([v, label]) => <option key={v} value={v}>{label}</option>)}
+              </select>
             </div>
           </div>
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">コース *</label>
-            <select value={form.course} onChange={(e) => set('course', e.target.value)} className={inp}>
-              {COURSES.map((c) => <option key={c}>{c}</option>)}
+            <select value={form.courseId} onChange={(e) => set('courseId', e.target.value)} className={inp}>
+              {COURSES.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">ゲスト名 *</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">代表者氏名 *</label>
             <input type="text" value={form.guestName} onChange={(e) => set('guestName', e.target.value)}
               placeholder="田中 花子" required className={inp} />
           </div>
@@ -94,27 +89,33 @@ export default function NewReservationPage() {
                 onChange={(e) => set('guestCount', Number(e.target.value))} className={inp} />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">受付チャネル</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">予約取込元</label>
               <select value={form.channel}
                 onChange={(e) => set('channel', e.target.value as Reservation['channel'])} className={inp}>
-                <option value="hp">HP</option>
+                <option value="hp">HP手動入力</option>
                 <option value="email">メール</option>
                 <option value="phone">電話</option>
-                <option value="ota">OTA</option>
-                <option value="sns">SNS</option>
+                <option value="ota">OTA-CSV</option>
               </select>
             </div>
           </div>
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">電話番号 *</label>
-            <input type="tel" value={form.phone} onChange={(e) => set('phone', e.target.value)}
-              placeholder="090-0000-0000" required className={inp} />
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">電話番号 *</label>
+              <input type="tel" value={form.guestPhone} onChange={(e) => set('guestPhone', e.target.value)}
+                placeholder="090-0000-0000" required className={inp} />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">メールアドレス *</label>
+              <input type="email" value={form.guestEmail} onChange={(e) => set('guestEmail', e.target.value)}
+                placeholder="guest@example.com" required className={inp} />
+            </div>
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">メモ</label>
-            <textarea value={form.notes} onChange={(e) => set('notes', e.target.value)}
+            <label className="block text-sm font-medium text-gray-700 mb-1">スタッフメモ</label>
+            <textarea value={form.staffNote} onChange={(e) => set('staffNote', e.target.value)}
               placeholder="特記事項など" rows={3}
               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ocean-500 resize-none" />
           </div>
