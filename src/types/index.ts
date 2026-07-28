@@ -115,5 +115,7 @@ export interface WeatherDay {
   weather: string
   wind: string
   wave: string
+  tempHigh: string
+  tempLow: string
   icon: string
 }
