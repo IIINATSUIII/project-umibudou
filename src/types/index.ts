@@ -16,6 +16,13 @@ export interface QuestionnaireData {
   id: string
   reservationId: string
   submittedAt: string
+  qrToken: string
+  qrIssuedAt: string
+  qrExpiresAt: string
+  qrUsed: boolean
+  doctorClearance: '持参あり' | 'なし' | ''
+  staffCheckStatus: '未確認' | '要対応' | '確認済'
+  staffCheckNote: string
   // 基本情報
   lastName: string
   firstName: string
@@ -56,6 +63,27 @@ export interface QuestionnaireData {
   agreeRisk: boolean
   agreeMedical: boolean
   agreePhoto: boolean
+}
+
+export interface RosterEntry {
+  id: string
+  diveDate: string
+  reservationId: string
+  questionnaireId: string
+  customerId: string
+  name: string
+  nameKana: string
+  birthDate: string
+  age: number
+  gender: string
+  address: string
+  phone: string
+  emergencyContact: string
+  emergencyPhone: string
+  course: string
+  staffName: string
+  checkedInAt: string
+  checkInMethod: 'QR読取' | '手動照合'
 }
 
 export interface Customer {
