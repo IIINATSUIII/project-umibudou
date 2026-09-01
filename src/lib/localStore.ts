@@ -71,6 +71,17 @@ export async function addQuestionnaire(data: QuestionnaireData): Promise<void> {
   await writeStore('questionnaires', all)
 }
 
+export async function updateQuestionnaire(
+  id: string,
+  data: Partial<QuestionnaireData>
+): Promise<void> {
+  const all = await getQuestionnaires()
+  const idx = all.findIndex((q) => q.id === id)
+  if (idx === -1) throw new Error(`Questionnaire ${id} not found`)
+  all[idx] = { ...all[idx], ...data }
+  await writeStore('questionnaires', all)
+}
+
 // ─── 顧客台帳 ─────────────────────────────────────────────────
 
 export async function getCustomers(): Promise<Customer[]> {

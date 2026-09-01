@@ -41,11 +41,17 @@ export const HEADERS = {
     'flightWithin48h',
     'hasCCard','cCardType','cCardOrg','lastDiveDate','totalDives',
     'agreeRisk','agreeMedical','agreePhoto',
+    // 顧客自動登録で追加した列。既存シートの列ズレを避けるため末尾に足す
+    // （メールアドレス＝5-3-3 No.13 相当／顧客ID＝5-3-3 No.4 の書き戻し先）
+    'email','customerId',
   ],
   CUSTOMERS: [
     'id','lastName','firstName','lastNameKana','firstNameKana',
     'phone','email','lastVisit','visitCount',
     'hasCCard','cCardType','totalDives','healthNotes','guideNotes','updatedAt',
+    // 顧客自動登録で書き込む列（詳細設計書 5-3-1 No.2・8〜20）。既存シートの列ズレを避けるため末尾に足す
+    'createdAt','birthDate','gender','address',
+    'emergencyName','emergencyRelation','emergencyPhone','cCardOrg','lastDiveDate',
   ],
 }
 
@@ -148,6 +154,21 @@ export async function addQuestionnaire(data: QuestionnaireData): Promise<void> {
   await appendRow(
     SHEET.QUESTIONNAIRES,
     objToRow(HEADERS.QUESTIONNAIRES, data as unknown as Record<string, unknown>)
+  )
+}
+
+export async function updateQuestionnaire(
+  id: string,
+  data: Partial<QuestionnaireData>
+): Promise<void> {
+  const all = await getQuestionnaires()
+  const existing = all.find((q) => q.id === id)
+  if (!existing) throw new Error(`Questionnaire ${id} not found`)
+  await updateRowById(
+    SHEET.QUESTIONNAIRES,
+    HEADERS.QUESTIONNAIRES,
+    id,
+    { ...existing, ...data } as unknown as Record<string, unknown>
   )
 }
 

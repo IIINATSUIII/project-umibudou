@@ -1,11 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { store } from '@/lib/dataStore'
-import type { QuestionnaireData, Customer } from '@/types'
+import {
+  upsertCustomerFromQuestionnaire,
+  validateCustomerKeys,
+  type CustomerSource,
+} from '@/lib/customerRegistration'
+import type { QuestionnaireData } from '@/types'
 
 /**
  * POST /api/public/questionnaires — 問診票提出（ログイン不要）
  * 提出に伴う「予約への紐付け」「顧客台帳への反映」はすべてサーバー側で行う。
  * 客側に顧客台帳を読ませない・予約を任意に書き換えさせないための境界。
+ *
+ * 顧客自動登録（詳細設計書 4-4）：
+ *  メールアドレスをユニークキー・電話番号を副キーとして顧客台帳を照合し、
+ *  新規登録／既存更新のうえ、採番された顧客IDを問診回答へ書き戻す。
  */
 export async function POST(req: NextRequest) {
   try {
@@ -17,6 +26,16 @@ export async function POST(req: NextRequest) {
     const reservation = reservations.find((r) => r.id === reservationId)
     if (!reservation) {
       return NextResponse.json({ error: '予約が見つかりません' }, { status: 404 })
+    }
+
+    // 顧客台帳のキー列が欠けている行は作らない（詳細設計書 4-4 末尾）。
+    // 画面側でも必須にしているが、サーバーサイドを正として検証する。
+    const fields = validateCustomerKeys(body as Partial<CustomerSource>)
+    if (Object.keys(fields).length > 0) {
+      return NextResponse.json(
+        { error: 'VALIDATION_ERROR', message: '入力内容を確認してください。', fields },
+        { status: 400 }
+      )
     }
 
     const questionnaireId = `Q${Date.now()}`
@@ -31,48 +50,11 @@ export async function POST(req: NextRequest) {
     // 予約に問診票IDをリンク
     await store.updateReservation(reservationId, { questionnaireId })
 
-    // 顧客台帳に自動登録（氏名で重複チェック）
-    const customers = await store.getCustomers()
-    const fullName = `${qData.lastName} ${qData.firstName}`
-    const existing = customers.find(
-      (c) => `${c.lastName} ${c.firstName}` === fullName
-    )
-    const today = new Date().toISOString().slice(0, 10)
+    // 顧客台帳へ自動登録・更新し、顧客IDを問診回答へ書き戻す
+    const { customerId } = await upsertCustomerFromQuestionnaire(store, qData)
+    await store.updateQuestionnaire(questionnaireId, { customerId })
 
-    if (!existing) {
-      const newCustomer: Customer = {
-        id: `C${Date.now()}`,
-        lastName: qData.lastName,
-        firstName: qData.firstName,
-        lastNameKana: qData.lastNameKana,
-        firstNameKana: qData.firstNameKana,
-        phone: qData.phone,
-        email: '',
-        lastVisit: today,
-        visitCount: 1,
-        hasCCard: qData.hasCCard,
-        cCardType: qData.cCardType,
-        totalDives: qData.totalDives,
-        healthNotes: [
-          qData.heartDisease       && '心臓疾患',
-          qData.respiratoryDisease && '呼吸器疾患',
-          qData.earDisease         && '耳の疾患',
-          qData.epilepsy           && 'てんかん',
-          qData.diabetes           && '糖尿病',
-          qData.medication         && `服薬：${qData.medicationName}`,
-          qData.latexAllergy       && 'ラテックスアレルギー',
-        ].filter(Boolean).join('、') || '特記なし',
-        guideNotes: '',
-      }
-      await store.addCustomer(newCustomer)
-    } else {
-      await store.updateCustomer(existing.id, {
-        visitCount: existing.visitCount + 1,
-        lastVisit: today,
-      })
-    }
-
-    return NextResponse.json({ ok: true, questionnaireId })
+    return NextResponse.json({ ok: true, questionnaireId, customerId })
   } catch (err) {
     console.error('[POST /api/public/questionnaires]', err)
     return NextResponse.json({ error: 'Failed to save questionnaire' }, { status: 500 })
