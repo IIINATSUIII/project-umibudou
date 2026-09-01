@@ -33,6 +33,11 @@ const KANA_RE = /^[ァ-ヶー・　\s]+$/
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const PHONE_RE = /^[0-9-]+$/
 
+/** メールアドレスの形式判定（顧客情報編集・顧客自動登録で共用） */
+export function isValidEmail(value: string): boolean {
+  return EMAIL_RE.test(value)
+}
+
 const LABEL: Record<EditableCustomerField, string> = {
   lastName: '姓（漢字）',
   firstName: '名（漢字）',
@@ -117,7 +122,7 @@ export function validateCustomerUpdate(
 
   // メールアドレスは顧客照合のユニークキー（詳細設計書 4-4）。空欄は既存データ互換のため許容する。
   if (delta.email !== undefined && delta.email !== '') {
-    if (!EMAIL_RE.test(delta.email)) {
+    if (!isValidEmail(delta.email)) {
       errors.email = 'メールアドレスの形式が正しくありません。'
     } else if (
       others.some((c) => c.id !== current.id && c.email.toLowerCase() === delta.email!.toLowerCase())

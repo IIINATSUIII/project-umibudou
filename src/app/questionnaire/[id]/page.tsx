@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { useParams } from 'next/navigation'
 import { QRCodeSVG } from 'qrcode.react'
+import { isValidEmail } from '@/lib/customerValidation'
 import type { QuestionnaireData } from '@/types'
 
 type Step = 'intro' | 'basic' | 'health' | 'today' | 'experience' | 'agree' | 'done'
@@ -11,7 +12,7 @@ const STEP_LABELS = ['はじめに', '基本情報', '健康状態', '当日体�
 
 const BLANK: Omit<QuestionnaireData, 'id' | 'reservationId' | 'submittedAt'> = {
   lastName: '', firstName: '', lastNameKana: '', firstNameKana: '',
-  birthDate: '', gender: 'male', address: '', phone: '',
+  birthDate: '', gender: 'male', address: '', phone: '', email: '',
   emergencyName: '', emergencyRelation: '', emergencyPhone: '',
   heartDisease: false, respiratoryDisease: false, earDisease: false,
   epilepsy: false, diabetes: false, pregnant: false, panicDisorder: false,
@@ -28,6 +29,16 @@ export default function QuestionnairePage() {
   const [form, setForm] = useState(BLANK)
   const [qId, setQId] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [submitError, setSubmitError] = useState('')
+
+  // 顧客自動登録のキーになる項目（メール・電話・生年月日・緊急連絡先）は
+  // 揃っていないとサーバー側で弾かれるため、①基本情報を抜けられないようにする。
+  const basicFilled =
+    !!form.lastName && !!form.firstName &&
+    !!form.lastNameKana && !!form.firstNameKana &&
+    !!form.birthDate && !!form.address &&
+    !!form.phone && isValidEmail(form.email.trim()) &&
+    !!form.emergencyName && !!form.emergencyPhone
 
   function set<K extends keyof typeof form>(key: K, value: typeof form[K]) {
     setForm((f) => ({ ...f, [key]: value }))
@@ -45,6 +56,7 @@ export default function QuestionnairePage() {
 
   async function handleSubmit() {
     setSubmitting(true)
+    setSubmitError('')
 
     // 予約への紐付け・顧客台帳への反映はサーバー側（公開API）で行う
     const res = await fetch('/api/public/questionnaires', {
@@ -55,7 +67,15 @@ export default function QuestionnairePage() {
     setSubmitting(false)
 
     if (!res.ok) {
-      alert('送信に失敗しました。時間をおいて再度お試しください。')
+      // 必須項目の欠落はサーバー側でも検証している（顧客自動登録のキー列）
+      const body = await res.json().catch(() => null)
+      const fields: Record<string, string> = body?.fields ?? {}
+      const detail = Object.values(fields)
+      setSubmitError(
+        detail.length > 0
+          ? `${body.message}（${detail.join(' / ')}）①基本情報をご確認ください。`
+          : '送信に失敗しました。時間をおいて再度お試しください。'
+      )
       return
     }
 
@@ -126,6 +146,11 @@ export default function QuestionnairePage() {
             </F>
             <F label="住所 *"><input value={form.address} onChange={(e) => set('address', e.target.value)} placeholder="東京都渋谷区" required className={inp} /></F>
             <F label="電話番号 *"><input type="tel" value={form.phone} onChange={(e) => set('phone', e.target.value)} placeholder="090-0000-0000" required className={inp} /></F>
+            <F label="メールアドレス *">
+              <input type="email" inputMode="email" value={form.email} onChange={(e) => set('email', e.target.value)}
+                placeholder="guest@example.com" required className={inp} />
+              <p className="text-xs text-gray-400 mt-1">次回以降のご来店時の照合に使用します</p>
+            </F>
             <div className="border-t border-gray-100 pt-4">
               <p className="text-xs font-medium text-gray-700 mb-2">緊急連絡先</p>
               <div className="space-y-3">
@@ -136,7 +161,7 @@ export default function QuestionnairePage() {
                 </div>
               </div>
             </div>
-            <Nav onPrev={prev} onNext={next} canNext={!!form.lastName && !!form.firstName && !!form.birthDate} />
+            <Nav onPrev={prev} onNext={next} canNext={basicFilled} />
           </div>
         )}
 
@@ -260,6 +285,9 @@ export default function QuestionnairePage() {
                 <span className="text-sm text-gray-700">{label}</span>
               </label>
             ))}
+            {submitError && (
+              <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{submitError}</p>
+            )}
             <div className="flex gap-3 pt-4">
               <button onClick={prev} className="flex-1 border border-gray-300 text-gray-700 py-3 rounded-xl text-sm hover:bg-gray-50">← 戻る</button>
               <button onClick={handleSubmit} disabled={!form.agreeRisk || !form.agreeMedical || submitting}
