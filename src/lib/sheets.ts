@@ -45,7 +45,7 @@ export const HEADERS = {
   CUSTOMERS: [
     'id','lastName','firstName','lastNameKana','firstNameKana',
     'phone','email','lastVisit','visitCount',
-    'hasCCard','cCardType','totalDives','healthNotes','guideNotes',
+    'hasCCard','cCardType','totalDives','healthNotes','guideNotes','updatedAt',
   ],
 }
 

@@ -4,6 +4,7 @@
  */
 
 import type { Reservation, QuestionnaireData, Customer } from '@/types'
+import type { CustomerFieldErrors } from './customerValidation'
 
 // ─── 予約 ─────────────────────────────────────────────────────
 
@@ -65,11 +66,40 @@ export async function createCustomer(data: Customer): Promise<void> {
   if (!res.ok) throw new Error('Failed to create customer')
 }
 
-export async function patchCustomer(id: string, delta: Partial<Customer>): Promise<void> {
+/** 顧客情報更新の結果。バリデーションエラー・更新競合を画面で出し分けるために型で返す。 */
+export type PatchCustomerResult =
+  | { status: 'ok'; message: string; customer: Customer }
+  /** サーバーサイドバリデーションで弾かれた（フィールド名 → メッセージ） */
+  | { status: 'invalid'; message: string; fields: CustomerFieldErrors }
+  /** 他スタッフが先に更新していた（MSG-20）。customer は最新の内容 */
+  | { status: 'conflict'; message: string; customer: Customer }
+  | { status: 'error'; message: string }
+
+export interface PatchCustomerOptions {
+  /** 画面が読み込んだ時点の最終更新日時。渡すと更新競合を検知する */
+  expectedUpdatedAt?: string
+  /** true で競合を無視して上書き（原則後勝ち） */
+  force?: boolean
+}
+
+export async function patchCustomer(
+  id: string,
+  delta: Partial<Customer>,
+  options: PatchCustomerOptions = {}
+): Promise<PatchCustomerResult> {
   const res = await fetch('/api/customers', {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ id, ...delta }),
+    body: JSON.stringify({ id, ...delta, ...options }),
   })
-  if (!res.ok) throw new Error('Failed to update customer')
+  const body = await res.json().catch(() => ({}))
+
+  if (res.ok) return { status: 'ok', message: body.message ?? '', customer: body.customer }
+  if (res.status === 409) {
+    return { status: 'conflict', message: body.message ?? '', customer: body.customer }
+  }
+  if (body?.error === 'VALIDATION_ERROR') {
+    return { status: 'invalid', message: body.message ?? '', fields: body.fields ?? {} }
+  }
+  return { status: 'error', message: body?.message ?? '保存に失敗しました。' }
 }

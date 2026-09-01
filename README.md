@@ -98,6 +98,7 @@ http://localhost:3000/api/setup
 ```
 
 にアクセスすると「予約」「問診票」「顧客台帳」シートにヘッダー行を書き込みます。  
+※ 顧客台帳に `updatedAt`（最終更新日時）列を追加したため、既存のスプレッドシートでも一度実行してください。  
 **本番環境では実行後に `src/app/api/setup/route.ts` を削除してください。**
 
 ---
@@ -136,13 +137,15 @@ src/
 │   ├── reservations/               ← 予約一覧・登録
 │   ├── questionnaire/[id]/         ← 問診票入力（ダイバー向け・認証不要）
 │   ├── questionnaire/scan/         ← QR 読取（スタッフ向け）
-│   └── customers/[id]/             ← 顧客詳細・ガイドメモ
+│   └── customers/[id]/             ← 顧客詳細・基本情報編集・ガイドメモ
 ├── lib/
 │   ├── session.ts       ← JWT 生成・検証・認証情報照合（jose）
 │   ├── authContext.tsx  ← Auth 状態管理（useAuth）
 │   ├── auth.ts          ← login() / logout() クライアント関数
 │   ├── sheets.ts        ← Google Sheets API クライアント（サーバーサイド）
 │   ├── api.ts           ← クライアント側 fetch 関数
+│   ├── customerValidation.ts ← 顧客情報のバリデーション（サーバー／クライアント共用）
+│   ├── messages.ts      ← 画面表示メッセージ（MSG-13 / MSG-20）
 │   ├── mockData.ts      ← フォールバック用モックデータ
 │   └── weather.ts       ← 気象庁オープンデータ（沖縄）
 ├── middleware.ts         ← Edge Middleware：JWT Cookie でルート保護
