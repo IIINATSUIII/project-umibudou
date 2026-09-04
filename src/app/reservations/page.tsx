@@ -32,9 +32,17 @@ export default function ReservationsPage() {
   const router = useRouter()
   const [reservations, setReservations] = useState<Reservation[]>([])
   const [questionnaires, setQuestionnaires] = useState<QuestionnaireData[]>([])
+  const [successMessage, setSuccessMessage] = useState('')
   // 空文字 = 全件表示。日付を選ぶとその日のみ表示
   const [dateFilter, setDateFilter] = useState('')
   const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get('saved') === '1') {
+      setSuccessMessage('保存しました。')
+      window.history.replaceState({}, '', '/reservations')
+    }
+  }, [])
 
   useEffect(() => {
     if (user === undefined) return
@@ -114,6 +122,12 @@ export default function ReservationsPage() {
             ＋ 予約追加
           </Link>
         </div>
+
+        {successMessage && (
+          <div role="status" className="rounded-lg bg-green-50 border border-green-200 px-3 py-2 text-sm text-green-700">
+            {successMessage}
+          </div>
+        )}
 
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
           {filtered.length === 0 ? (

@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import Navigation from '@/components/Navigation'
 import { useAuth } from '@/lib/authContext'
 import { ApiRequestError, createReservation } from '@/lib/api'
-import { COURSES, CONFIRMED_STATUS_ID, STATUSES } from '@/lib/masters'
+import { COURSES, CONFIRMED_STATUS_ID, STAFF, STATUSES } from '@/lib/masters'
 import type { Reservation } from '@/types'
 
 const TIME_SLOTS: [Reservation['timeSlot'], string][] = [
@@ -25,6 +25,7 @@ export default function NewReservationPage() {
     guestEmail: '',
     channel: 'phone' as Reservation['channel'],
     status: CONFIRMED_STATUS_ID,
+    staffId: '',
     staffNote: '',
   })
   const [saving, setSaving] = useState(false)
@@ -47,7 +48,7 @@ export default function NewReservationPage() {
     setFieldErrors({})
     try {
       await createReservation(form)
-      router.push('/reservations')
+      router.push('/reservations?saved=1')
     } catch (err) {
       if (err instanceof ApiRequestError) {
         setError(err.message)
@@ -138,6 +139,16 @@ export default function NewReservationPage() {
               ))}
             </select>
             {fieldErrors.status && <p className={fieldError}>{fieldErrors.status}</p>}
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">諡・ｽ薙せ繧ｿ繝・ヵ</label>
+            <select value={form.staffId} onChange={(e) => set('staffId', e.target.value)}
+              aria-invalid={Boolean(fieldErrors.staffId)} className={inp}>
+              <option value="">指定なし</option>
+              {STAFF.map((staff) => <option key={staff.id} value={staff.id}>{staff.name}</option>)}
+            </select>
+            {fieldErrors.staffId && <p className={fieldError}>{fieldErrors.staffId}</p>}
           </div>
 
           <div className="grid grid-cols-2 gap-4">
