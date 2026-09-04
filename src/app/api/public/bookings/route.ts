@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createReservation } from '@/lib/reservations'
 import { COURSES, DEFAULT_STATUS_ID } from '@/lib/masters'
+import { ReservationValidationError } from '@/lib/reservationValidation'
 import type { Reservation } from '@/types'
 
 const TIME_SLOTS: Reservation['timeSlot'][] = ['morning', 'afternoon', 'full', 'unspecified']
@@ -49,6 +50,13 @@ export async function POST(req: NextRequest) {
     // 完了画面でQR生成・予約番号表示に使うため id を返す
     return NextResponse.json({ ok: true, id: reservation.id })
   } catch (err) {
+    if (err instanceof ReservationValidationError) {
+      return NextResponse.json({
+        error: 'VALIDATION_ERROR',
+        message: err.message,
+        fields: err.fields,
+      }, { status: 400 })
+    }
     console.error('[POST /api/public/bookings]', err)
     return NextResponse.json({ error: 'Failed to create booking' }, { status: 500 })
   }

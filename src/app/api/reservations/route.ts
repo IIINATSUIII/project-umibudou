@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { store } from '@/lib/dataStore'
-import { createReservation, patchReservation, type NewReservationInput } from '@/lib/reservations'
+import { createReservation, patchReservation } from '@/lib/reservations'
 import { CONFIRMED_STATUS_ID } from '@/lib/masters'
+import {
+  validateNewReservationInput,
+  ReservationValidationError,
+  type NewReservationInput,
+} from '@/lib/reservationValidation'
 
 /** GET /api/reservations — 予約一覧取得 */
 export async function GET() {
@@ -17,22 +22,28 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json() as Partial<NewReservationInput>
+    const validation = validateNewReservationInput(body, { allowOta: false })
+    if (!validation.ok) {
+      return NextResponse.json({
+        error: 'VALIDATION_ERROR',
+        message: validation.message,
+        fields: validation.fields,
+      }, { status: 400 })
+    }
+
     const reservation = await createReservation({
-      guestName: String(body.guestName ?? ''),
-      guestPhone: String(body.guestPhone ?? ''),
-      guestEmail: String(body.guestEmail ?? ''),
-      diveDate: String(body.diveDate ?? ''),
-      timeSlot: body.timeSlot ?? 'unspecified',
-      courseId: String(body.courseId ?? ''),
-      guestCount: Number(body.guestCount) || 1,
-      channel: body.channel ?? 'phone',
-      status: body.status ?? CONFIRMED_STATUS_ID, // 手動登録は即確定扱い
-      staffId: body.staffId,
-      divePoint: body.divePoint,
-      staffNote: body.staffNote,
+      ...validation.data,
+      status: validation.data.status ?? CONFIRMED_STATUS_ID, // 手動登録は初期値を確定扱い
     })
     return NextResponse.json({ ok: true, id: reservation.id })
   } catch (err) {
+    if (err instanceof ReservationValidationError) {
+      return NextResponse.json({
+        error: 'VALIDATION_ERROR',
+        message: err.message,
+        fields: err.fields,
+      }, { status: 400 })
+    }
     console.error('[POST /api/reservations]', err)
     return NextResponse.json({ error: 'Failed to add reservation' }, { status: 500 })
   }

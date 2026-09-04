@@ -4,8 +4,8 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Navigation from '@/components/Navigation'
 import { useAuth } from '@/lib/authContext'
-import { createReservation } from '@/lib/api'
-import { COURSES, CONFIRMED_STATUS_ID } from '@/lib/masters'
+import { ApiRequestError, createReservation } from '@/lib/api'
+import { COURSES, CONFIRMED_STATUS_ID, STATUSES } from '@/lib/masters'
 import type { Reservation } from '@/types'
 
 const TIME_SLOTS: [Reservation['timeSlot'], string][] = [
@@ -24,9 +24,12 @@ export default function NewReservationPage() {
     guestPhone: '',
     guestEmail: '',
     channel: 'phone' as Reservation['channel'],
+    status: CONFIRMED_STATUS_ID,
     staffNote: '',
   })
   const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
 
   useEffect(() => {
     if (user === undefined) return
@@ -40,9 +43,21 @@ export default function NewReservationPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setSaving(true)
-    // スタッフによる手動登録は即確定扱い
-    await createReservation({ ...form, status: CONFIRMED_STATUS_ID })
-    router.push('/reservations')
+    setError('')
+    setFieldErrors({})
+    try {
+      await createReservation(form)
+      router.push('/reservations')
+    } catch (err) {
+      if (err instanceof ApiRequestError) {
+        setError(err.message)
+        setFieldErrors(err.fields ?? {})
+      } else {
+        setError('予約の登録に失敗しました。時間をおいて再度お試しください')
+      }
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
@@ -55,38 +70,52 @@ export default function NewReservationPage() {
         </div>
 
         <form onSubmit={handleSubmit} className="bg-white rounded-xl border border-gray-200 p-6 space-y-4">
+          {error && (
+            <div role="alert" className="rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700">
+              {error}
+            </div>
+          )}
+
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">ダイブ日 *</label>
               <input type="date" value={form.diveDate} onChange={(e) => set('diveDate', e.target.value)}
-                required className={inp} />
+                required aria-invalid={Boolean(fieldErrors.diveDate)} className={inp} />
+              {fieldErrors.diveDate && <p className={fieldError}>{fieldErrors.diveDate}</p>}
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">時間帯 *</label>
-              <select value={form.timeSlot} onChange={(e) => set('timeSlot', e.target.value as Reservation['timeSlot'])} className={inp}>
+              <select value={form.timeSlot} onChange={(e) => set('timeSlot', e.target.value as Reservation['timeSlot'])}
+                required aria-invalid={Boolean(fieldErrors.timeSlot)} className={inp}>
                 {TIME_SLOTS.map(([v, label]) => <option key={v} value={v}>{label}</option>)}
               </select>
+              {fieldErrors.timeSlot && <p className={fieldError}>{fieldErrors.timeSlot}</p>}
             </div>
           </div>
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">コース *</label>
-            <select value={form.courseId} onChange={(e) => set('courseId', e.target.value)} className={inp}>
+            <select value={form.courseId} onChange={(e) => set('courseId', e.target.value)}
+              required aria-invalid={Boolean(fieldErrors.courseId)} className={inp}>
               {COURSES.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
+            {fieldErrors.courseId && <p className={fieldError}>{fieldErrors.courseId}</p>}
           </div>
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">代表者氏名 *</label>
             <input type="text" value={form.guestName} onChange={(e) => set('guestName', e.target.value)}
-              placeholder="田中 花子" required className={inp} />
+              placeholder="田中 花子" maxLength={50} required aria-invalid={Boolean(fieldErrors.guestName)} className={inp} />
+            {fieldErrors.guestName && <p className={fieldError}>{fieldErrors.guestName}</p>}
           </div>
 
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">人数 *</label>
               <input type="number" min={1} max={20} value={form.guestCount}
-                onChange={(e) => set('guestCount', Number(e.target.value))} className={inp} />
+                onChange={(e) => set('guestCount', Number(e.target.value))}
+                required step={1} aria-invalid={Boolean(fieldErrors.guestCount)} className={inp} />
+              {fieldErrors.guestCount && <p className={fieldError}>{fieldErrors.guestCount}</p>}
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">予約取込元</label>
@@ -95,28 +124,43 @@ export default function NewReservationPage() {
                 <option value="hp">HP手動入力</option>
                 <option value="email">メール</option>
                 <option value="phone">電話</option>
-                <option value="ota">OTA-CSV</option>
               </select>
+              {fieldErrors.channel && <p className={fieldError}>{fieldErrors.channel}</p>}
             </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">予約ステータス *</label>
+            <select value={form.status} onChange={(e) => set('status', e.target.value)}
+              required aria-invalid={Boolean(fieldErrors.status)} className={inp}>
+              {STATUSES.filter((status) => ['STS-01', 'STS-02', 'STS-03'].includes(status.id)).map((status) => (
+                <option key={status.id} value={status.id}>{status.name}</option>
+              ))}
+            </select>
+            {fieldErrors.status && <p className={fieldError}>{fieldErrors.status}</p>}
           </div>
 
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">電話番号 *</label>
               <input type="tel" value={form.guestPhone} onChange={(e) => set('guestPhone', e.target.value)}
-                placeholder="090-0000-0000" required className={inp} />
+                placeholder="090-0000-0000" maxLength={20} pattern="[0-9-]+" required
+                aria-invalid={Boolean(fieldErrors.guestPhone)} className={inp} />
+              {fieldErrors.guestPhone && <p className={fieldError}>{fieldErrors.guestPhone}</p>}
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">メールアドレス *</label>
               <input type="email" value={form.guestEmail} onChange={(e) => set('guestEmail', e.target.value)}
-                placeholder="guest@example.com" required className={inp} />
+                placeholder="guest@example.com" maxLength={100} required
+                aria-invalid={Boolean(fieldErrors.guestEmail)} className={inp} />
+              {fieldErrors.guestEmail && <p className={fieldError}>{fieldErrors.guestEmail}</p>}
             </div>
           </div>
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">スタッフメモ</label>
             <textarea value={form.staffNote} onChange={(e) => set('staffNote', e.target.value)}
-              placeholder="特記事項など" rows={3}
+              placeholder="特記事項など" rows={3} maxLength={500}
               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ocean-500 resize-none" />
           </div>
 
@@ -137,3 +181,4 @@ export default function NewReservationPage() {
 }
 
 const inp = 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ocean-500'
+const fieldError = 'text-xs text-red-600 mt-1'

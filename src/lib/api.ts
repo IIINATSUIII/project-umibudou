@@ -23,6 +23,18 @@ export type NewReservationForm = {
   staffNote?: string
 }
 
+export class ApiRequestError extends Error {
+  readonly status: number
+  readonly fields?: Record<string, string>
+
+  constructor(message: string, status: number, fields?: Record<string, string>) {
+    super(message)
+    this.name = 'ApiRequestError'
+    this.status = status
+    this.fields = fields
+  }
+}
+
 export async function fetchReservations(): Promise<Reservation[]> {
   const res = await fetch('/api/reservations')
   if (!res.ok) throw new Error('Failed to fetch reservations')
@@ -35,8 +47,15 @@ export async function createReservation(data: NewReservationForm): Promise<{ id:
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
   })
-  if (!res.ok) throw new Error('Failed to create reservation')
-  return res.json()
+  const body = await res.json().catch(() => ({}))
+  if (!res.ok) {
+    throw new ApiRequestError(
+      body?.message ?? '予約の登録に失敗しました。入力内容を確認してください',
+      res.status,
+      body?.fields,
+    )
+  }
+  return body
 }
 
 export async function patchReservation(id: string, delta: Partial<Reservation>): Promise<void> {
