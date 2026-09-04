@@ -49,7 +49,7 @@ export default function BookingPage() {
       window.scrollTo(0, 0)
     } else {
       const data = await res.json().catch(() => ({}))
-      setError(data.error ?? '送信に失敗しました。時間をおいて再度お試しください。')
+      setError(data.message ?? data.error ?? '送信に失敗しました。時間をおいて再度お試しください。')
     }
   }
 

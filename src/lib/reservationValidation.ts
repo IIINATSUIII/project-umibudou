@@ -23,6 +23,13 @@ export type ReservationValidationResult =
   | { ok: true; data: NewReservationInput }
   | { ok: false; message: string; fields: ReservationFieldErrors }
 
+export type ReservationValidationOptions = {
+  /** 手動登録ではOTA-CSVを許可せず、公開予約でもサーバー固定値を検証する。 */
+  allowOta?: boolean
+  /** 公開予約など、過去日を許可しない経路で false にする。 */
+  allowPastDate?: boolean
+}
+
 export class ReservationValidationError extends Error {
   readonly fields: ReservationFieldErrors
 
@@ -105,7 +112,7 @@ function isValidDateOnly(value: string): boolean {
  */
 export function validateNewReservationInput(
   input: unknown,
-  options: { allowOta?: boolean } = {}
+  options: ReservationValidationOptions = {}
 ): ReservationValidationResult {
   const fields: ReservationFieldErrors = {}
   if (!isRecord(input)) {
@@ -129,9 +136,14 @@ export function validateNewReservationInput(
   const diveDate = input.diveDate
   if (typeof diveDate !== 'string' || !isValidDateOnly(diveDate)) {
     fields.diveDate = 'ダイブ日を正しく入力してください'
+  } else if (options.allowPastDate === false && diveDate < new Date().toISOString().slice(0, 10)) {
+    fields.diveDate = '過去の日付は指定できません'
   }
 
-  const timeSlot = input.timeSlot
+  // 時間帯は設計上任意項目のため、省略時は「指定なし」に正規化する。
+  const timeSlot = input.timeSlot === undefined || input.timeSlot === null || input.timeSlot === ''
+    ? 'unspecified'
+    : input.timeSlot
   if (!TIME_SLOT_VALUES.includes(timeSlot as Reservation['timeSlot'])) {
     fields.timeSlot = '時間帯を選択してください'
   }

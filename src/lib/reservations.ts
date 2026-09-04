@@ -11,13 +11,23 @@ import type { Reservation } from '@/types'
 
 export type { NewReservationInput } from './reservationValidation'
 
+// 同一プロセス内での「採番 → 保存」を直列化し、同時POSTによる採番重複を防ぐ。
+// 複数インスタンス間の排他はストア側のトランザクション機能が必要なため別途検討する。
+let reservationWriteQueue = Promise.resolve()
+
+function withReservationWriteLock<T>(operation: () => Promise<T>): Promise<T> {
+  const result = reservationWriteQueue.then(operation, operation)
+  reservationWriteQueue = result.then(() => undefined, () => undefined)
+  return result
+}
+
 /** 予約ID採番: "R-" + YYYYMMDD + 連番3桁（例: R-20260615-001） */
 export async function generateReservationId(diveDate: string): Promise<string> {
   const ymd = diveDate.replace(/-/g, '')
   const prefix = `R-${ymd}-`
   const all = await store.getReservations()
   const maxSequence = all.reduce((max, reservation) => {
-    const match = reservation.id.match(new RegExp(`^${prefix}(\\d+)$`))
+    const match = reservation.id.match(new RegExp(`^R-${ymd}-(\\d+)$`))
     if (!match) return max
     return Math.max(max, Number(match[1]))
   }, 0)
@@ -26,30 +36,32 @@ export async function generateReservationId(diveDate: string): Promise<string> {
 
 export async function createReservation(input: NewReservationInput): Promise<Reservation> {
   const validated = assertValidNewReservationInput(input)
-  const now = new Date().toISOString()
-  const reservation: Reservation = {
-    id: await generateReservationId(validated.diveDate),
-    createdAt: now,
-    updatedAt: now,
-    customerId: validated.customerId,
-    guestName: validated.guestName,
-    guestPhone: validated.guestPhone,
-    guestEmail: validated.guestEmail,
-    diveDate: validated.diveDate,
-    timeSlot: validated.timeSlot,
-    courseId: validated.courseId,
-    courseName: getCourseName(validated.courseId),
-    guestCount: validated.guestCount,
-    status: validated.status ?? DEFAULT_STATUS_ID,
-    staffId: validated.staffId,
-    staffName: getStaffName(validated.staffId),
-    channel: validated.channel,
-    questionnaireCompleted: false,
-    divePoint: validated.divePoint,
-    staffNote: validated.staffNote,
-  }
-  await store.addReservation(reservation)
-  return reservation
+  return withReservationWriteLock(async () => {
+    const now = new Date().toISOString()
+    const reservation: Reservation = {
+      id: await generateReservationId(validated.diveDate),
+      createdAt: now,
+      updatedAt: now,
+      customerId: validated.customerId,
+      guestName: validated.guestName,
+      guestPhone: validated.guestPhone,
+      guestEmail: validated.guestEmail,
+      diveDate: validated.diveDate,
+      timeSlot: validated.timeSlot,
+      courseId: validated.courseId,
+      courseName: getCourseName(validated.courseId),
+      guestCount: validated.guestCount,
+      status: validated.status ?? DEFAULT_STATUS_ID,
+      staffId: validated.staffId,
+      staffName: getStaffName(validated.staffId),
+      channel: validated.channel,
+      questionnaireCompleted: false,
+      divePoint: validated.divePoint,
+      staffNote: validated.staffNote,
+    }
+    await store.addReservation(reservation)
+    return reservation
+  })
 }
 
 /** 予約更新。最終更新日時を自動更新し、courseId/staffId 変更時は表示用の名称も転記し直す。 */

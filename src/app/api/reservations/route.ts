@@ -21,7 +21,7 @@ export async function GET() {
 /** POST /api/reservations — 予約追加（スタッフによる手動登録。ID採番・コース名転記はサーバー側で行う） */
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json() as Partial<NewReservationInput>
+    const body = await req.json().catch(() => null) as unknown
     const validation = validateNewReservationInput(body, { allowOta: false })
     if (!validation.ok) {
       return NextResponse.json({
