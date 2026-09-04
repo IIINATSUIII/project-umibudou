@@ -73,6 +73,8 @@ export interface Customer {
   totalDives: number
   healthNotes: string
   guideNotes: string
+  /** 最終更新日時（ISO 8601）。顧客情報編集で更新される（詳細設計書 5-3-1 No.3） */
+  updatedAt?: string
 }
 
 export interface WeatherDay {
