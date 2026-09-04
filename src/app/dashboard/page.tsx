@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import Navigation from '@/components/Navigation'
 import WeatherWidget from '@/components/WeatherWidget'
+import WindyWidget from '@/components/WindyWidget'
 import { useAuth } from '@/lib/authContext'
 import { fetchReservations, patchReservation } from '@/lib/api'
 import type { Reservation } from '@/types'
@@ -111,6 +112,8 @@ export default function DashboardPage() {
         </div>
 
         <WeatherWidget />
+
+        <WindyWidget />
 
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
           <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
