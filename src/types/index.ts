@@ -16,6 +16,10 @@ export interface QuestionnaireData {
   id: string
   reservationId: string
   submittedAt: string
+  qrToken: string
+  qrIssuedAt: string
+  qrExpiresAt: string
+  qrUsed: boolean
   // 基本情報
   lastName: string
   firstName: string

@@ -1,6 +1,41 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { store } from '@/lib/dataStore'
 import type { QuestionnaireData, Customer } from '@/types'
+import { randomBytes, randomUUID } from 'crypto'
+
+function qrExpiryFor(date: string): Date {
+  return new Date(new Date(`${date}T00:00:00+09:00`).getTime() + 24 * 60 * 60 * 1000)
+}
+
+/** GET /api/public/questionnaires?reservationId=... — 提出済みQRの再表示情報 */
+export async function GET(req: NextRequest) {
+  try {
+    const reservationId = req.nextUrl.searchParams.get('reservationId')?.trim() ?? ''
+    if (!reservationId) return NextResponse.json({ error: '予約が見つかりません' }, { status: 404 })
+
+    const questionnaires = await store.getQuestionnaires()
+    const questionnaire = questionnaires.find((item) => item.reservationId === reservationId)
+    if (!questionnaire) return NextResponse.json({ submitted: false })
+    if (!questionnaire.qrExpiresAt || new Date(questionnaire.qrExpiresAt).getTime() <= Date.now()) {
+      return NextResponse.json({ error: 'MSG-18：ページが見つかりません。URLをご確認ください。', code: 'EXPIRED' }, { status: 410 })
+    }
+
+    return NextResponse.json({
+      submitted: true,
+      questionnaireId: questionnaire.id,
+      qrToken: questionnaire.qrToken,
+      qrIssuedAt: questionnaire.qrIssuedAt,
+      qrExpiresAt: questionnaire.qrExpiresAt,
+      lastName: questionnaire.lastName,
+      firstName: questionnaire.firstName,
+      lastNameKana: questionnaire.lastNameKana,
+      firstNameKana: questionnaire.firstNameKana,
+    })
+  } catch (err) {
+    console.error('[GET /api/public/questionnaires]', err)
+    return NextResponse.json({ error: 'Failed to fetch questionnaire' }, { status: 500 })
+  }
+}
 
 /**
  * POST /api/public/questionnaires — 問診票提出（ログイン不要）
@@ -19,12 +54,36 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: '予約が見つかりません' }, { status: 404 })
     }
 
+    const existingQuestionnaire = (await store.getQuestionnaires()).find((item) => item.reservationId === reservationId)
+    if (existingQuestionnaire) {
+      if (!existingQuestionnaire.qrExpiresAt || new Date(existingQuestionnaire.qrExpiresAt).getTime() <= Date.now()) {
+        return NextResponse.json({ error: 'MSG-18：ページが見つかりません。URLをご確認ください。' }, { status: 410 })
+      }
+      return NextResponse.json({
+        ok: true,
+        questionnaireId: existingQuestionnaire.id,
+        qrToken: existingQuestionnaire.qrToken,
+        qrIssuedAt: existingQuestionnaire.qrIssuedAt,
+        qrExpiresAt: existingQuestionnaire.qrExpiresAt,
+        lastName: existingQuestionnaire.lastName,
+        firstName: existingQuestionnaire.firstName,
+        lastNameKana: existingQuestionnaire.lastNameKana,
+        firstNameKana: existingQuestionnaire.firstNameKana,
+        alreadySubmitted: true,
+      })
+    }
+
     const questionnaireId = `Q${Date.now()}`
+    const qrIssuedAt = new Date()
     const qData: QuestionnaireData = {
       ...body,
       id: questionnaireId,
       reservationId,
-      submittedAt: new Date().toISOString(),
+      submittedAt: qrIssuedAt.toISOString(),
+      qrToken: randomBytes(32).toString('hex'),
+      qrIssuedAt: qrIssuedAt.toISOString(),
+      qrExpiresAt: qrExpiryFor(reservation.date).toISOString(),
+      qrUsed: false,
     }
     await store.addQuestionnaire(qData)
 

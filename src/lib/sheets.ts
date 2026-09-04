@@ -32,6 +32,7 @@ export const HEADERS = {
   RESERVATIONS:   ['id','date','time','course','guestName','guestCount','phone','channel','status','questionnaireId','notes'],
   QUESTIONNAIRES: [
     'id','reservationId','submittedAt',
+    'qrToken','qrIssuedAt','qrExpiresAt','qrUsed',
     'lastName','firstName','lastNameKana','firstNameKana',
     'birthDate','gender','address','phone',
     'emergencyName','emergencyRelation','emergencyPhone',
