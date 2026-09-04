@@ -75,6 +75,30 @@ export interface Customer {
   guideNotes: string
 }
 
+// 条例が定める備付け要件を満たす参加者名簿（QR読取・手動照合時に追記。追記のみ・上書き削除不可）
+export interface RosterEntry {
+  id: string           // "L-"+連番5桁
+  diveDate: string
+  reservationId: string
+  questionnaireId: string
+  customerId: string
+  lastName: string
+  firstName: string
+  lastNameKana: string
+  firstNameKana: string
+  birthDate: string
+  age: number
+  gender: 'male' | 'female' | 'other'
+  address: string
+  phone: string
+  emergencyContact: string  // 緊急連絡先氏名・続柄
+  emergencyPhone: string
+  courseName: string
+  staffName: string
+  receivedAt: string        // 名簿への追加日時
+  receivedMethod: 'qr' | 'manual'
+}
+
 export interface WeatherDay {
   date: string
   weather: string

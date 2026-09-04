@@ -7,11 +7,12 @@
 
 import { promises as fs } from 'fs'
 import path from 'path'
-import type { Reservation, QuestionnaireData, Customer } from '@/types'
+import type { Reservation, QuestionnaireData, Customer, RosterEntry } from '@/types'
 import {
   MOCK_RESERVATIONS,
   MOCK_QUESTIONNAIRES,
   MOCK_CUSTOMERS,
+  MOCK_ROSTER,
 } from './mockData'
 
 const DATA_DIR = path.join(process.cwd(), 'data')
@@ -92,4 +93,16 @@ export async function updateCustomer(
   if (idx === -1) throw new Error(`Customer ${id} not found`)
   all[idx] = { ...all[idx], ...data }
   await writeStore('customers', all)
+}
+
+// ─── 名簿（追記のみ・上書き更新不可） ───────────────────────────
+
+export async function getRoster(): Promise<RosterEntry[]> {
+  return readStore<RosterEntry>('roster', MOCK_ROSTER)
+}
+
+export async function addRosterEntry(data: RosterEntry): Promise<void> {
+  const all = await getRoster()
+  all.push(data)
+  await writeStore('roster', all)
 }

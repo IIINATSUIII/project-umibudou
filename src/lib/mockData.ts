@@ -1,4 +1,4 @@
-import type { Reservation, Customer, QuestionnaireData } from '@/types'
+import type { Reservation, Customer, QuestionnaireData, RosterEntry } from '@/types'
 
 // ─── 予約データ ────────────────────────────────────────────
 const today = new Date().toISOString().slice(0, 10)
@@ -188,6 +188,10 @@ export const MOCK_CUSTOMERS: Customer[] = [
     guideNotes: '常連。深場好き。マンタシーズンには必ず来店。リクエストはいつも久米島。',
   },
 ]
+
+// ─── 名簿データ ───────────────────────────────────────────
+// 名簿は受付操作（QR読取・手動照合）で都度追記されるものなので、初期データは空にしておく
+export const MOCK_ROSTER: RosterEntry[] = []
 
 // ─── localStorage との同期ユーティリティ ──────────────────────
 export function getReservations(): Reservation[] {
