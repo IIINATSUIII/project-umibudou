@@ -7,7 +7,7 @@
 
 import { promises as fs } from 'fs'
 import path from 'path'
-import type { Reservation, QuestionnaireData, Customer } from '@/types'
+import type { Reservation, QuestionnaireData, Customer, RosterEntry } from '@/types'
 import {
   MOCK_RESERVATIONS,
   MOCK_QUESTIONNAIRES,
@@ -69,6 +69,25 @@ export async function addQuestionnaire(data: QuestionnaireData): Promise<void> {
   const all = await getQuestionnaires()
   all.push(data)
   await writeStore('questionnaires', all)
+}
+
+export async function updateQuestionnaire(id: string, data: Partial<QuestionnaireData>): Promise<void> {
+  const all = await getQuestionnaires()
+  const idx = all.findIndex((q) => q.id === id)
+  if (idx === -1) throw new Error(`Questionnaire ${id} not found`)
+  all[idx] = { ...all[idx], ...data }
+  await writeStore('questionnaires', all)
+}
+
+export async function getRoster(): Promise<RosterEntry[]> {
+  return readStore<RosterEntry>('roster', [])
+}
+
+export async function addRoster(data: RosterEntry): Promise<void> {
+  const all = await getRoster()
+  if (all.some((entry) => entry.questionnaireId === data.questionnaireId)) return
+  all.push(data)
+  await writeStore('roster', all)
 }
 
 // ─── 顧客台帳 ─────────────────────────────────────────────────

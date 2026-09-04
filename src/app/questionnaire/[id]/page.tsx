@@ -9,7 +9,7 @@ type Step = 'intro' | 'basic' | 'health' | 'today' | 'experience' | 'agree' | 'd
 const STEPS: Step[] = ['intro', 'basic', 'health', 'today', 'experience', 'agree', 'done']
 const STEP_LABELS = ['はじめに', '基本情報', '健康状態', '当日体調', '経験・スキル', '同意事項', '完了']
 
-const BLANK: Omit<QuestionnaireData, 'id' | 'reservationId' | 'submittedAt'> = {
+const BLANK: Omit<QuestionnaireData, 'id' | 'reservationId' | 'submittedAt' | 'qrToken' | 'qrIssuedAt' | 'qrExpiresAt' | 'qrUsed' | 'doctorClearance' | 'staffCheckStatus' | 'staffCheckNote'> = {
   lastName: '', firstName: '', lastNameKana: '', firstNameKana: '',
   birthDate: '', gender: 'male', address: '', phone: '',
   emergencyName: '', emergencyRelation: '', emergencyPhone: '',
@@ -27,6 +27,7 @@ export default function QuestionnairePage() {
   const [step, setStep] = useState<Step>('intro')
   const [form, setForm] = useState(BLANK)
   const [qId, setQId] = useState('')
+  const [qrToken, setQrToken] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
   function set<K extends keyof typeof form>(key: K, value: typeof form[K]) {
@@ -61,6 +62,7 @@ export default function QuestionnairePage() {
 
     const data = await res.json()
     setQId(data.questionnaireId)
+    setQrToken(data.qrToken)
     setStep('done')
     window.scrollTo(0, 0)
   }
@@ -278,9 +280,11 @@ export default function QuestionnairePage() {
               <p className="text-sm text-gray-500">受付でこの画面を見せてください</p>
             </div>
             <div className="flex justify-center">
-              <QRCodeSVG value={qId} size={200} />
+              {qrToken ? <QRCodeSVG value={qrToken} size={200} /> : (
+                <p className="text-sm text-red-600">受付用QRコードを取得できませんでした。スタッフにお伝えください。</p>
+              )}
             </div>
-            <p className="text-xs text-gray-400">QRコード ID: {qId}</p>
+            <p className="text-xs text-gray-400">受付用QRコード</p>
             <div className="bg-ocean-50 rounded-xl p-4 text-left">
               <p className="text-sm font-medium text-ocean-800 mb-1">提出者</p>
               <p className="text-lg font-bold text-gray-800">{form.lastName} {form.firstName}</p>

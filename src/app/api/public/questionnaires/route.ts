@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { store } from '@/lib/dataStore'
 import type { QuestionnaireData, Customer } from '@/types'
+import { randomUUID } from 'crypto'
 
 /**
  * POST /api/public/questionnaires — 問診票提出（ログイン不要）
@@ -19,12 +20,22 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: '予約が見つかりません' }, { status: 404 })
     }
 
-    const questionnaireId = `Q${Date.now()}`
+    const questionnaireId = `Q-${randomUUID()}`
+    const qrIssuedAt = new Date()
+    const diveDate = new Date(`${reservation.date}T00:00:00+09:00`)
+    const qrExpiresAt = new Date(diveDate.getTime() + 86400000)
     const qData: QuestionnaireData = {
       ...body,
       id: questionnaireId,
       reservationId,
       submittedAt: new Date().toISOString(),
+      qrToken: randomUUID().replaceAll('-', '') + randomUUID().replaceAll('-', ''),
+      qrIssuedAt: qrIssuedAt.toISOString(),
+      qrExpiresAt: qrExpiresAt.toISOString(),
+      qrUsed: false,
+      doctorClearance: '',
+      staffCheckStatus: '未確認',
+      staffCheckNote: '',
     }
     await store.addQuestionnaire(qData)
 
@@ -41,7 +52,7 @@ export async function POST(req: NextRequest) {
 
     if (!existing) {
       const newCustomer: Customer = {
-        id: `C${Date.now()}`,
+        id: `C-${randomUUID()}`,
         lastName: qData.lastName,
         firstName: qData.firstName,
         lastNameKana: qData.lastNameKana,
@@ -72,7 +83,7 @@ export async function POST(req: NextRequest) {
       })
     }
 
-    return NextResponse.json({ ok: true, questionnaireId })
+    return NextResponse.json({ ok: true, questionnaireId, qrToken: qData.qrToken })
   } catch (err) {
     console.error('[POST /api/public/questionnaires]', err)
     return NextResponse.json({ error: 'Failed to save questionnaire' }, { status: 500 })
