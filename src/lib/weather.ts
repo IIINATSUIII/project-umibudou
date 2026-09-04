@@ -3,6 +3,9 @@ import type { WeatherDay } from '@/types'
 // 気象庁オープンデータ（沖縄地方 471000）
 const JMA_URL = 'https://www.jma.go.jp/bosai/forecast/data/forecast/471000.json'
 
+// MSG-16: 海況情報の取得失敗時にウィジェット側が判別・表示するためのメッセージ
+export const WEATHER_ERROR_MESSAGE = '海況情報を取得できませんでした'
+
 const WEATHER_ICONS: Record<string, string> = {
   '晴れ': '☀️',
   '晴': '☀️',
@@ -81,7 +84,7 @@ export async function fetchWeather(): Promise<WeatherDay[]> {
       dt.setDate(today.getDate() + d)
       return {
         date: dt.toISOString().slice(0, 10),
-        weather: '海況情報を取得できませんでした',
+        weather: WEATHER_ERROR_MESSAGE,
         wind: '－',
         wave: '－',
         tempHigh: '－',

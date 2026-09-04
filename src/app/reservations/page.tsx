@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import Navigation from '@/components/Navigation'
+import WeatherWidget from '@/components/WeatherWidget'
 import { useAuth } from '@/lib/authContext'
 import { fetchReservations, patchReservation } from '@/lib/api'
 import type { Reservation } from '@/types'
@@ -95,6 +96,8 @@ export default function ReservationsPage() {
             ＋ 予約追加
           </Link>
         </div>
+
+        <WeatherWidget />
 
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
           {filtered.length === 0 ? (

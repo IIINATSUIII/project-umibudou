@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { fetchWeather } from '@/lib/weather'
+import { fetchWeather, WEATHER_ERROR_MESSAGE } from '@/lib/weather'
 import type { WeatherDay } from '@/types'
 
 export default function WeatherWidget() {
@@ -19,6 +19,17 @@ export default function WeatherWidget() {
         <div className="flex gap-3">
           {[0, 1, 2].map((i) => <div key={i} className="flex-1 h-20 bg-gray-100 rounded-lg" />)}
         </div>
+      </div>
+    )
+  }
+
+  const isError = days.every((d) => d.weather === WEATHER_ERROR_MESSAGE)
+
+  if (isError) {
+    return (
+      <div className="bg-white rounded-xl border border-gray-200 p-4">
+        <h2 className="text-sm font-semibold text-gray-500 mb-2">🌊 沖縄海況（気象庁）</h2>
+        <p className="text-sm text-red-500">⚠️ {WEATHER_ERROR_MESSAGE}</p>
       </div>
     )
   }
