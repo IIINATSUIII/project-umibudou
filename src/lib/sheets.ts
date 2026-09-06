@@ -29,7 +29,14 @@ const SHEET = {
 
 // ─── ヘッダー行（スプレッドシート初期化用） ─────────────────────
 export const HEADERS = {
-  RESERVATIONS:   ['id','date','time','course','guestName','guestCount','phone','channel','status','questionnaireId','notes'],
+  RESERVATIONS: [
+    'id','createdAt','updatedAt','customerId',
+    'guestName','guestPhone','guestEmail',
+    'diveDate','timeSlot','courseId','courseName','guestCount',
+    'status','staffId','staffName','channel',
+    'questionnaireToken','questionnaireTokenExpiresAt','questionnaireCompleted',
+    'divePoint','staffNote',
+  ],
   QUESTIONNAIRES: [
     'id','reservationId','submittedAt',
     'lastName','firstName','lastNameKana','firstNameKana',
@@ -62,6 +69,10 @@ function rowToObj<T>(headers: string[], row: string[]): T {
     // number 変換
     else if (h === 'guestCount' || h === 'sleepHours' || h === 'totalDives' || h === 'visitCount') {
       obj[h] = val === '' ? 0 : Number(val)
+    }
+    // boolean 変換（空文字は false 扱い）
+    else if (h === 'questionnaireCompleted') {
+      obj[h] = val === 'TRUE' || val === 'true'
     }
     else obj[h] = val
   })

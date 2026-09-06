@@ -5,25 +5,33 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import Navigation from '@/components/Navigation'
 import { useAuth } from '@/lib/authContext'
-import { fetchReservations, patchReservation } from '@/lib/api'
-import type { Reservation } from '@/types'
+import { fetchReservations, fetchQuestionnaires, patchReservation } from '@/lib/api'
+import { getStatusName, DEFAULT_STATUS_ID, CONFIRMED_STATUS_ID, CANCELLED_STATUS_ID } from '@/lib/masters'
+import type { Reservation, QuestionnaireData } from '@/types'
 
-const CHANNEL_LABELS: Record<string, string> = {
-  hp: 'HP', email: 'メール', phone: '電話', ota: 'OTA', sns: 'SNS',
+const CHANNEL_LABELS: Record<Reservation['channel'], string> = {
+  hp: 'HP', email: 'メール', phone: '電話', ota: 'OTA',
+}
+const TIME_SLOT_LABELS: Record<Reservation['timeSlot'], string> = {
+  morning: '午前', afternoon: '午後', full: '1日', unspecified: '指定なし',
+}
+const TIME_SLOT_ORDER: Record<Reservation['timeSlot'], number> = {
+  morning: 0, afternoon: 1, full: 2, unspecified: 3,
 }
 const STATUS_STYLES: Record<string, string> = {
-  confirmed: 'bg-green-100 text-green-700',
-  pending:   'bg-yellow-100 text-yellow-700',
-  cancelled: 'bg-red-100 text-red-700',
-}
-const STATUS_LABELS: Record<string, string> = {
-  confirmed: '確定', pending: '仮押さえ', cancelled: 'キャンセル',
+  'STS-01': 'bg-yellow-100 text-yellow-700',
+  'STS-02': 'bg-orange-100 text-orange-700',
+  'STS-03': 'bg-green-100 text-green-700',
+  'STS-04': 'bg-red-100 text-red-700',
+  'STS-05': 'bg-gray-200 text-gray-700',
+  'STS-06': 'bg-blue-100 text-blue-700',
 }
 
 export default function ReservationsPage() {
   const user = useAuth()
   const router = useRouter()
   const [reservations, setReservations] = useState<Reservation[]>([])
+  const [questionnaires, setQuestionnaires] = useState<QuestionnaireData[]>([])
   // 空文字 = 全件表示。日付を選ぶとその日のみ表示
   const [dateFilter, setDateFilter] = useState('')
   const [loading, setLoading] = useState(true)
@@ -31,7 +39,11 @@ export default function ReservationsPage() {
   useEffect(() => {
     if (user === undefined) return
     if (!user) { router.push('/login'); return }
-    const load = () => fetchReservations().then((data) => { setReservations(data); setLoading(false) })
+    const load = () => Promise.all([fetchReservations(), fetchQuestionnaires()]).then(([res, qs]) => {
+      setReservations(res)
+      setQuestionnaires(qs)
+      setLoading(false)
+    })
     load()
     // 客側フォームからの申し込みを自動反映（10秒ごと＋ウィンドウ復帰時）
     const iv = setInterval(load, 10000)
@@ -39,22 +51,29 @@ export default function ReservationsPage() {
     return () => { clearInterval(iv); window.removeEventListener('focus', load) }
   }, [user, router])
 
+  function questionnaireIdFor(reservationId: string): string | undefined {
+    return questionnaires.find((q) => q.reservationId === reservationId)?.id
+  }
+
   const filtered = reservations
-    .filter((r) => !dateFilter || r.date === dateFilter)
-    .sort((a, b) => a.date.localeCompare(b.date) || a.time.localeCompare(b.time))
+    .filter((r) => !dateFilter || r.diveDate === dateFilter)
+    .sort((a, b) =>
+      a.diveDate.localeCompare(b.diveDate) ||
+      TIME_SLOT_ORDER[a.timeSlot] - TIME_SLOT_ORDER[b.timeSlot]
+    )
 
   async function handleCancel(id: string) {
     if (!confirm('この予約をキャンセルしますか？')) return
-    await patchReservation(id, { status: 'cancelled' })
+    await patchReservation(id, { status: CANCELLED_STATUS_ID })
     setReservations((prev) =>
-      prev.map((r) => r.id === id ? { ...r, status: 'cancelled' } : r)
+      prev.map((r) => r.id === id ? { ...r, status: CANCELLED_STATUS_ID } : r)
     )
   }
 
   async function handleConfirm(id: string) {
-    await patchReservation(id, { status: 'confirmed' })
+    await patchReservation(id, { status: CONFIRMED_STATUS_ID })
     setReservations((prev) =>
-      prev.map((r) => r.id === id ? { ...r, status: 'confirmed' } : r)
+      prev.map((r) => r.id === id ? { ...r, status: CONFIRMED_STATUS_ID } : r)
     )
   }
 
@@ -103,56 +122,59 @@ export default function ReservationsPage() {
             </p>
           ) : (
             <div className="divide-y divide-gray-100">
-              {filtered.map((r) => (
-                <div key={r.id} className="px-4 py-4">
-                  <div className="flex items-start gap-3">
-                    <div className="pt-0.5 w-14 shrink-0">
-                      {!dateFilter && (
-                        <div className="text-xs text-gray-500">
-                          {r.date.slice(5).replace('-', '/')}
-                        </div>
-                      )}
-                      <div className="text-sm font-mono font-bold text-ocean-600">{r.time}</div>
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex flex-wrap items-center gap-2 mb-1">
-                        <span className="font-semibold text-gray-800">{r.guestName}</span>
-                        <span className="text-sm text-gray-500">{r.guestCount}名</span>
-                        <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded">{CHANNEL_LABELS[r.channel]}</span>
-                        <span className={`text-xs px-2 py-0.5 rounded ${STATUS_STYLES[r.status]}`}>{STATUS_LABELS[r.status]}</span>
+              {filtered.map((r) => {
+                const questionnaireId = questionnaireIdFor(r.id)
+                return (
+                  <div key={r.id} className="px-4 py-4">
+                    <div className="flex items-start gap-3">
+                      <div className="pt-0.5 w-14 shrink-0">
+                        {!dateFilter && (
+                          <div className="text-xs text-gray-500">
+                            {r.diveDate.slice(5).replace('-', '/')}
+                          </div>
+                        )}
+                        <div className="text-sm font-mono font-bold text-ocean-600">{TIME_SLOT_LABELS[r.timeSlot]}</div>
                       </div>
-                      <div className="text-sm text-gray-600">{r.course}</div>
-                      <div className="text-xs text-gray-400 mt-0.5">📞 {r.phone}</div>
-                      {r.notes && <div className="text-xs text-gray-500 mt-1 bg-gray-50 rounded px-2 py-1">💬 {r.notes}</div>}
-                    </div>
-                    <div className="flex flex-col gap-1.5 shrink-0">
-                      {r.questionnaireId ? (
-                        <Link href={`/questionnaire/scan?id=${r.questionnaireId}`}
-                          className="text-xs bg-teal-50 text-teal-700 border border-teal-200 px-2 py-1 rounded text-center hover:bg-teal-100">
-                          📋 問診確認
-                        </Link>
-                      ) : (
-                        <Link href={`/questionnaire/${r.id}`}
-                          className="text-xs bg-orange-50 text-orange-700 border border-orange-200 px-2 py-1 rounded text-center hover:bg-orange-100">
-                          📝 問診URL
-                        </Link>
-                      )}
-                      {r.status === 'pending' && (
-                        <button onClick={() => handleConfirm(r.id)}
-                          className="text-xs bg-green-600 text-white px-2 py-1 rounded hover:bg-green-700">
-                          ✓ 確定する
-                        </button>
-                      )}
-                      {r.status !== 'cancelled' && (
-                        <button onClick={() => handleCancel(r.id)}
-                          className="text-xs text-red-500 hover:text-red-700 px-2 py-1 border border-red-200 rounded hover:bg-red-50">
-                          キャンセル
-                        </button>
-                      )}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex flex-wrap items-center gap-2 mb-1">
+                          <span className="font-semibold text-gray-800">{r.guestName}</span>
+                          <span className="text-sm text-gray-500">{r.guestCount}名</span>
+                          <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded">{CHANNEL_LABELS[r.channel]}</span>
+                          <span className={`text-xs px-2 py-0.5 rounded ${STATUS_STYLES[r.status]}`}>{getStatusName(r.status)}</span>
+                        </div>
+                        <div className="text-sm text-gray-600">{r.courseName}</div>
+                        <div className="text-xs text-gray-400 mt-0.5">📞 {r.guestPhone}</div>
+                        {r.staffNote && <div className="text-xs text-gray-500 mt-1 bg-gray-50 rounded px-2 py-1">💬 {r.staffNote}</div>}
+                      </div>
+                      <div className="flex flex-col gap-1.5 shrink-0">
+                        {questionnaireId ? (
+                          <Link href={`/questionnaire/scan?id=${questionnaireId}`}
+                            className="text-xs bg-teal-50 text-teal-700 border border-teal-200 px-2 py-1 rounded text-center hover:bg-teal-100">
+                            📋 問診確認
+                          </Link>
+                        ) : (
+                          <Link href={`/questionnaire/${r.id}`}
+                            className="text-xs bg-orange-50 text-orange-700 border border-orange-200 px-2 py-1 rounded text-center hover:bg-orange-100">
+                            📝 問診URL
+                          </Link>
+                        )}
+                        {r.status === DEFAULT_STATUS_ID && (
+                          <button onClick={() => handleConfirm(r.id)}
+                            className="text-xs bg-green-600 text-white px-2 py-1 rounded hover:bg-green-700">
+                            ✓ 確定する
+                          </button>
+                        )}
+                        {r.status !== CANCELLED_STATUS_ID && (
+                          <button onClick={() => handleCancel(r.id)}
+                            className="text-xs text-red-500 hover:text-red-700 px-2 py-1 border border-red-200 rounded hover:bg-red-50">
+                            キャンセル
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
           )}
         </div>
