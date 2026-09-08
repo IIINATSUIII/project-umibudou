@@ -1,5 +1,6 @@
 export interface Reservation {
   id: string
+  questionnaireToken?: string
   date: string        // YYYY-MM-DD
   time: string        // HH:MM
   course: string
@@ -16,6 +17,10 @@ export interface QuestionnaireData {
   id: string
   reservationId: string
   submittedAt: string
+  qrToken: string
+  qrIssuedAt: string
+  qrExpiresAt: string
+  qrUsed: boolean
   // 基本情報
   lastName: string
   firstName: string

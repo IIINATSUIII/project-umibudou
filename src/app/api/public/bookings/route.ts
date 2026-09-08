@@ -1,6 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { store } from '@/lib/dataStore'
 import type { Reservation } from '@/types'
+import { randomBytes } from 'crypto'
+
+function isValidDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
+  const date = new Date(`${value}T00:00:00+09:00`)
+  return !Number.isNaN(date.getTime()) && date.toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' }) === value
+}
 
 /**
  * POST /api/public/bookings — 客側予約申し込み（ログイン不要）
@@ -19,7 +26,7 @@ export async function POST(req: NextRequest) {
     const phone = String(body.phone ?? '').trim().slice(0, 20)
     const notes = String(body.notes ?? '').slice(0, 500)
 
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(date))
+    if (!isValidDate(date))
       return NextResponse.json({ error: '日付が不正です' }, { status: 400 })
     if (date < new Date().toISOString().slice(0, 10))
       return NextResponse.json({ error: '過去の日付は指定できません' }, { status: 400 })
@@ -32,6 +39,7 @@ export async function POST(req: NextRequest) {
 
     const reservation: Reservation = {
       id: `R${Date.now()}`,
+      questionnaireToken: randomBytes(32).toString('hex'),
       date,
       time,
       course,
@@ -44,7 +52,7 @@ export async function POST(req: NextRequest) {
     }
     await store.addReservation(reservation)
     // 完了画面でQR生成・予約番号表示に使うため id を返す
-    return NextResponse.json({ ok: true, id: reservation.id })
+    return NextResponse.json({ ok: true, id: reservation.id, questionnaireToken: reservation.questionnaireToken })
   } catch (err) {
     console.error('[POST /api/public/bookings]', err)
     return NextResponse.json({ error: 'Failed to create booking' }, { status: 500 })

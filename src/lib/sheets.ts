@@ -29,9 +29,10 @@ const SHEET = {
 
 // ─── ヘッダー行（スプレッドシート初期化用） ─────────────────────
 export const HEADERS = {
-  RESERVATIONS:   ['id','date','time','course','guestName','guestCount','phone','channel','status','questionnaireId','notes'],
+  RESERVATIONS:   ['id','questionnaireToken','date','time','course','guestName','guestCount','phone','channel','status','questionnaireId','notes'],
   QUESTIONNAIRES: [
     'id','reservationId','submittedAt',
+    'qrToken','qrIssuedAt','qrExpiresAt','qrUsed',
     'lastName','firstName','lastNameKana','firstNameKana',
     'birthDate','gender','address','phone',
     'emergencyName','emergencyRelation','emergencyPhone',
@@ -48,6 +49,21 @@ export const HEADERS = {
     'hasCCard','cCardType','totalDives','healthNotes','guideNotes',
   ],
 }
+
+// QR列追加前の既存シートを読み取るための互換ヘッダー。
+const LEGACY_RESERVATION_HEADERS = ['id','date','time','course','guestName','guestCount','phone','channel','status','questionnaireId','notes']
+const LEGACY_QUESTIONNAIRE_HEADERS = [
+  'id','reservationId','submittedAt',
+  'lastName','firstName','lastNameKana','firstNameKana',
+  'birthDate','gender','address','phone',
+  'emergencyName','emergencyRelation','emergencyPhone',
+  'heartDisease','respiratoryDisease','earDisease','epilepsy',
+  'diabetes','pregnant','panicDisorder','medication','medicationName','latexAllergy',
+  'sleepHours','alcoholLastNight','alcoholToday','condition',
+  'flightWithin48h',
+  'hasCCard','cCardType','cCardOrg','lastDiveDate','totalDives',
+  'agreeRisk','agreeMedical','agreePhoto',
+]
 
 // ─── 汎用ヘルパー ─────────────────────────────────────────────
 
@@ -123,7 +139,10 @@ async function updateRowById(
 
 export async function getReservations(): Promise<Reservation[]> {
   const rows = await getRows(SHEET.RESERVATIONS, HEADERS.RESERVATIONS)
-  return rows.map((r) => rowToObj<Reservation>(HEADERS.RESERVATIONS, r))
+  return rows.map((r) => rowToObj<Reservation>(
+    /^\d{4}-\d{2}-\d{2}$/.test(r[1] ?? '') ? LEGACY_RESERVATION_HEADERS : HEADERS.RESERVATIONS,
+    r,
+  ))
 }
 
 export async function addReservation(data: Reservation): Promise<void> {
@@ -134,14 +153,18 @@ export async function updateReservation(id: string, data: Partial<Reservation>):
   const all = await getReservations()
   const existing = all.find((r) => r.id === id)
   if (!existing) throw new Error(`Reservation ${id} not found`)
-  await updateRowById(SHEET.RESERVATIONS, HEADERS.RESERVATIONS, id, { ...existing, ...data })
+  const headers = existing.questionnaireToken ? HEADERS.RESERVATIONS : LEGACY_RESERVATION_HEADERS
+  await updateRowById(SHEET.RESERVATIONS, headers, id, { ...existing, ...data })
 }
 
 // ─── 問診票 ───────────────────────────────────────────────────
 
 export async function getQuestionnaires(): Promise<QuestionnaireData[]> {
   const rows = await getRows(SHEET.QUESTIONNAIRES, HEADERS.QUESTIONNAIRES)
-  return rows.map((r) => rowToObj<QuestionnaireData>(HEADERS.QUESTIONNAIRES, r))
+  return rows.map((r) => rowToObj<QuestionnaireData>(
+    r.length >= HEADERS.QUESTIONNAIRES.length ? HEADERS.QUESTIONNAIRES : LEGACY_QUESTIONNAIRE_HEADERS,
+    r,
+  ))
 }
 
 export async function addQuestionnaire(data: QuestionnaireData): Promise<void> {

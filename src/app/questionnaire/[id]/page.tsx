@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
 import { QRCodeSVG } from 'qrcode.react'
 import type { QuestionnaireData } from '@/types'
@@ -9,7 +9,7 @@ type Step = 'intro' | 'basic' | 'health' | 'today' | 'experience' | 'agree' | 'd
 const STEPS: Step[] = ['intro', 'basic', 'health', 'today', 'experience', 'agree', 'done']
 const STEP_LABELS = ['はじめに', '基本情報', '健康状態', '当日体調', '経験・スキル', '同意事項', '完了']
 
-const BLANK: Omit<QuestionnaireData, 'id' | 'reservationId' | 'submittedAt'> = {
+const BLANK: Omit<QuestionnaireData, 'id' | 'reservationId' | 'submittedAt' | 'qrToken' | 'qrIssuedAt' | 'qrExpiresAt' | 'qrUsed'> = {
   lastName: '', firstName: '', lastNameKana: '', firstNameKana: '',
   birthDate: '', gender: 'male', address: '', phone: '',
   emergencyName: '', emergencyRelation: '', emergencyPhone: '',
@@ -27,7 +27,38 @@ export default function QuestionnairePage() {
   const [step, setStep] = useState<Step>('intro')
   const [form, setForm] = useState(BLANK)
   const [qId, setQId] = useState('')
+  const [qrToken, setQrToken] = useState('')
+  const [qrIssuedAt, setQrIssuedAt] = useState('')
+  const [qrExpiresAt, setQrExpiresAt] = useState('')
+  const [reservationDate, setReservationDate] = useState('')
+  const [course, setCourse] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
+
+  useEffect(() => {
+    let active = true
+    fetch(`/api/public/questionnaires?accessToken=${encodeURIComponent(id)}`)
+      .then(async (res) => {
+        const data = await res.json()
+        if (!active) return
+        if (res.status === 410) { setLoadError(data.error ?? 'MSG-18：ページが見つかりません。URLをご確認ください。'); return }
+        if (!res.ok) throw new Error(data.error)
+        if (data.submitted) {
+          setQId(data.questionnaireId)
+          setQrToken(data.qrToken)
+          setQrIssuedAt(data.qrIssuedAt)
+          setQrExpiresAt(data.qrExpiresAt)
+          setReservationDate(data.reservationDate ?? '')
+          setCourse(data.course ?? '')
+          setForm((current) => ({ ...current, lastName: data.lastName ?? '', firstName: data.firstName ?? '', lastNameKana: data.lastNameKana ?? '', firstNameKana: data.firstNameKana ?? '' }))
+          setStep('done')
+        }
+      })
+      .catch(() => { if (active) setLoadError('問診票を確認できませんでした。時間をおいて再度お試しください。') })
+      .finally(() => { if (active) setLoading(false) })
+    return () => { active = false }
+  }, [id])
 
   function set<K extends keyof typeof form>(key: K, value: typeof form[K]) {
     setForm((f) => ({ ...f, [key]: value }))
@@ -50,7 +81,7 @@ export default function QuestionnairePage() {
     const res = await fetch('/api/public/questionnaires', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ reservationId: id, ...form }),
+      body: JSON.stringify({ accessToken: id, ...form }),
     })
     setSubmitting(false)
 
@@ -61,12 +92,33 @@ export default function QuestionnairePage() {
 
     const data = await res.json()
     setQId(data.questionnaireId)
+    setQrToken(data.qrToken)
+    setQrIssuedAt(data.qrIssuedAt)
+    setQrExpiresAt(data.qrExpiresAt)
+    setReservationDate(data.reservationDate ?? '')
+    setCourse(data.course ?? '')
     setStep('done')
     window.scrollTo(0, 0)
   }
 
   const stepIdx = STEPS.indexOf(step)
   const progress = Math.round((stepIdx / (STEPS.length - 1)) * 100)
+
+  function downloadQr() {
+    const svg = document.getElementById('questionnaire-qr')
+    if (!svg) return
+    const source = new XMLSerializer().serializeToString(svg)
+    const blob = new Blob([source], { type: 'image/svg+xml;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `questionnaire-qr-${qId}.svg`
+    link.click()
+    URL.revokeObjectURL(url)
+  }
+
+  if (loading) return <div className="min-h-screen flex items-center justify-center text-sm text-gray-500">問診票を確認中…</div>
+  if (loadError) return <div className="min-h-screen bg-gray-50 px-4 py-10"><div className="max-w-lg mx-auto bg-white border border-red-200 rounded-xl p-6 text-center text-red-700">{loadError}</div></div>
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -274,13 +326,18 @@ export default function QuestionnairePage() {
           <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-6 text-center">
             <div className="text-5xl">✅</div>
             <div>
-              <h2 className="font-bold text-gray-800 text-lg mb-1">問診票を提出しました</h2>
-              <p className="text-sm text-gray-500">受付でこの画面を見せてください</p>
+              <h2 className="font-bold text-gray-800 text-lg mb-1">問診票の送信が完了しました</h2>
+              <p className="text-sm text-gray-500">受付でQRコードを提示してください。</p>
             </div>
             <div className="flex justify-center">
-              <QRCodeSVG value={qId} size={200} />
+              <QRCodeSVG id="questionnaire-qr" value={qrToken} size={200} />
             </div>
-            <p className="text-xs text-gray-400">QRコード ID: {qId}</p>
+            <div className="space-y-2 text-sm text-gray-600">
+              <p>有効期限：{qrExpiresAt ? new Date(qrExpiresAt).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' }) : '-'}</p>
+              <p>利用日：{reservationDate || '-'} ／ コース：{course || '-'}</p>
+              <button type="button" onClick={downloadQr} className="border border-ocean-600 text-ocean-700 px-4 py-2 rounded-lg font-medium">QR画像を保存</button>
+              <p className="text-xs text-gray-400">保存できない場合は、この画面をスクリーンショットして保管してください。</p>
+            </div>
             <div className="bg-ocean-50 rounded-xl p-4 text-left">
               <p className="text-sm font-medium text-ocean-800 mb-1">提出者</p>
               <p className="text-lg font-bold text-gray-800">{form.lastName} {form.firstName}</p>

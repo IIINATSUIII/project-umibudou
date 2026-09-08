@@ -1,6 +1,53 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { store } from '@/lib/dataStore'
 import type { QuestionnaireData, Customer } from '@/types'
+import { randomUUID } from 'crypto'
+import { createQrToken, isQrExpired, isValidDate, qrExpiryFor } from '@/lib/questionnaireQr'
+
+let questionnaireWriteLock = Promise.resolve()
+
+async function withQuestionnaireWriteLock<T>(work: () => Promise<T>): Promise<T> {
+  const previous = questionnaireWriteLock
+  let release!: () => void
+  questionnaireWriteLock = new Promise<void>((resolve) => { release = resolve })
+  await previous
+  try { return await work() } finally { release() }
+}
+
+/** GET /api/public/questionnaires?accessToken=... — 提出済みQRの再表示情報 */
+export async function GET(req: NextRequest) {
+  try {
+    const accessToken = (req.nextUrl.searchParams.get('accessToken') ?? req.nextUrl.searchParams.get('reservationId') ?? '').trim()
+    if (!accessToken) return NextResponse.json({ error: 'ページが見つかりません。URLをご確認ください。' }, { status: 404, headers: { 'Cache-Control': 'no-store' } })
+
+    const reservations = await store.getReservations()
+    const reservation = reservations.find((item) => item.questionnaireToken === accessToken || (!item.questionnaireToken && item.id === accessToken))
+    if (!reservation) return NextResponse.json({ error: 'ページが見つかりません。URLをご確認ください。' }, { status: 404, headers: { 'Cache-Control': 'no-store' } })
+    const questionnaires = await store.getQuestionnaires()
+    const questionnaire = questionnaires.find((item) => item.reservationId === reservation.id)
+    if (!questionnaire) return NextResponse.json({ submitted: false }, { headers: { 'Cache-Control': 'no-store' } })
+    if (isQrExpired(questionnaire.qrExpiresAt)) {
+      return NextResponse.json({ error: 'MSG-18：ページが見つかりません。URLをご確認ください。', code: 'EXPIRED' }, { status: 404, headers: { 'Cache-Control': 'no-store' } })
+    }
+
+    return NextResponse.json({
+      submitted: true,
+      questionnaireId: questionnaire.id,
+      qrToken: questionnaire.qrToken,
+      qrIssuedAt: questionnaire.qrIssuedAt,
+      qrExpiresAt: questionnaire.qrExpiresAt,
+      lastName: questionnaire.lastName,
+      firstName: questionnaire.firstName,
+      lastNameKana: questionnaire.lastNameKana,
+      firstNameKana: questionnaire.firstNameKana,
+      reservationDate: reservation.date,
+      course: reservation.course,
+    }, { headers: { 'Cache-Control': 'no-store' } })
+  } catch (err) {
+    console.error('[GET /api/public/questionnaires]', err)
+    return NextResponse.json({ error: 'Failed to fetch questionnaire' }, { status: 500 })
+  }
+}
 
 /**
  * POST /api/public/questionnaires — 問診票提出（ログイン不要）
@@ -10,38 +57,68 @@ import type { QuestionnaireData, Customer } from '@/types'
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
-    const reservationId = String(body.reservationId ?? '')
+    const accessToken = String(body.accessToken ?? body.reservationId ?? '').trim()
 
-    // 実在する予約に対する提出のみ受け付ける
-    const reservations = await store.getReservations()
-    const reservation = reservations.find((r) => r.id === reservationId)
-    if (!reservation) {
-      return NextResponse.json({ error: '予約が見つかりません' }, { status: 404 })
-    }
+    return await withQuestionnaireWriteLock(async () => {
+      const reservations = await store.getReservations()
+      const reservation = reservations.find((r) => r.questionnaireToken === accessToken || (!r.questionnaireToken && r.id === accessToken))
+      if (!reservation) {
+        return NextResponse.json({ error: '予約が見つかりません' }, { status: 404 })
+      }
 
-    const questionnaireId = `Q${Date.now()}`
-    const qData: QuestionnaireData = {
-      ...body,
-      id: questionnaireId,
-      reservationId,
-      submittedAt: new Date().toISOString(),
-    }
-    await store.addQuestionnaire(qData)
+      if (!isValidDate(reservation.date)) {
+        return NextResponse.json({ error: '予約日が不正です' }, { status: 500 })
+      }
 
-    // 予約に問診票IDをリンク
-    await store.updateReservation(reservationId, { questionnaireId })
+      const existingQuestionnaire = (await store.getQuestionnaires()).find((item) => item.reservationId === reservation.id)
+      if (existingQuestionnaire) {
+        if (isQrExpired(existingQuestionnaire.qrExpiresAt)) {
+          return NextResponse.json({ error: 'MSG-18：ページが見つかりません。URLをご確認ください。' }, { status: 404 })
+        }
+        return NextResponse.json({
+          ok: true,
+          questionnaireId: existingQuestionnaire.id,
+          qrToken: existingQuestionnaire.qrToken,
+          qrIssuedAt: existingQuestionnaire.qrIssuedAt,
+          qrExpiresAt: existingQuestionnaire.qrExpiresAt,
+          lastName: existingQuestionnaire.lastName,
+          firstName: existingQuestionnaire.firstName,
+          lastNameKana: existingQuestionnaire.lastNameKana,
+          firstNameKana: existingQuestionnaire.firstNameKana,
+          reservationDate: reservation.date,
+          course: reservation.course,
+          alreadySubmitted: true,
+        })
+      }
+
+      const questionnaireId = `Q-${randomUUID()}`
+      const qrIssuedAt = new Date()
+      const qData: QuestionnaireData = {
+        ...body,
+        id: questionnaireId,
+        reservationId: reservation.id,
+        submittedAt: qrIssuedAt.toISOString(),
+        qrToken: createQrToken(),
+        qrIssuedAt: qrIssuedAt.toISOString(),
+        qrExpiresAt: qrExpiryFor(reservation.date).toISOString(),
+        qrUsed: false,
+      }
+      await store.addQuestionnaire(qData)
+
+      // 予約に問診票IDをリンク
+      await store.updateReservation(reservation.id, { questionnaireId })
 
     // 顧客台帳に自動登録（氏名で重複チェック）
-    const customers = await store.getCustomers()
-    const fullName = `${qData.lastName} ${qData.firstName}`
-    const existing = customers.find(
-      (c) => `${c.lastName} ${c.firstName}` === fullName
-    )
-    const today = new Date().toISOString().slice(0, 10)
+      const customers = await store.getCustomers()
+      const fullName = `${qData.lastName} ${qData.firstName}`
+      const existing = customers.find(
+        (c) => `${c.lastName} ${c.firstName}` === fullName
+      )
+      const today = new Date().toISOString().slice(0, 10)
 
-    if (!existing) {
+      if (!existing) {
       const newCustomer: Customer = {
-        id: `C${Date.now()}`,
+        id: `C-${randomUUID()}`,
         lastName: qData.lastName,
         firstName: qData.firstName,
         lastNameKana: qData.lastNameKana,
@@ -64,15 +141,28 @@ export async function POST(req: NextRequest) {
         ].filter(Boolean).join('、') || '特記なし',
         guideNotes: '',
       }
-      await store.addCustomer(newCustomer)
-    } else {
-      await store.updateCustomer(existing.id, {
-        visitCount: existing.visitCount + 1,
-        lastVisit: today,
-      })
-    }
+        await store.addCustomer(newCustomer)
+      } else {
+        await store.updateCustomer(existing.id, {
+          visitCount: existing.visitCount + 1,
+          lastVisit: today,
+        })
+      }
 
-    return NextResponse.json({ ok: true, questionnaireId })
+      return NextResponse.json({
+        ok: true,
+        questionnaireId,
+        qrToken: qData.qrToken,
+        qrIssuedAt: qData.qrIssuedAt,
+        qrExpiresAt: qData.qrExpiresAt,
+        lastName: qData.lastName,
+        firstName: qData.firstName,
+        lastNameKana: qData.lastNameKana,
+        firstNameKana: qData.firstNameKana,
+        reservationDate: reservation.date,
+        course: reservation.course,
+      })
+    })
   } catch (err) {
     console.error('[POST /api/public/questionnaires]', err)
     return NextResponse.json({ error: 'Failed to save questionnaire' }, { status: 500 })
