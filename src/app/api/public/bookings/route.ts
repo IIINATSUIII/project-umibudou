@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { store } from '@/lib/dataStore'
 import type { Reservation } from '@/types'
+import { randomBytes } from 'crypto'
 
 /**
  * POST /api/public/bookings — 客側予約申し込み（ログイン不要）
@@ -32,6 +33,7 @@ export async function POST(req: NextRequest) {
 
     const reservation: Reservation = {
       id: `R${Date.now()}`,
+      questionnaireToken: randomBytes(32).toString('hex'),
       date,
       time,
       course,
@@ -44,7 +46,7 @@ export async function POST(req: NextRequest) {
     }
     await store.addReservation(reservation)
     // 完了画面でQR生成・予約番号表示に使うため id を返す
-    return NextResponse.json({ ok: true, id: reservation.id })
+    return NextResponse.json({ ok: true, id: reservation.id, questionnaireToken: reservation.questionnaireToken })
   } catch (err) {
     console.error('[POST /api/public/bookings]', err)
     return NextResponse.json({ error: 'Failed to create booking' }, { status: 500 })

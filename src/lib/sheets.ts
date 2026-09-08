@@ -29,7 +29,7 @@ const SHEET = {
 
 // ─── ヘッダー行（スプレッドシート初期化用） ─────────────────────
 export const HEADERS = {
-  RESERVATIONS:   ['id','date','time','course','guestName','guestCount','phone','channel','status','questionnaireId','notes'],
+  RESERVATIONS:   ['id','questionnaireToken','date','time','course','guestName','guestCount','phone','channel','status','questionnaireId','notes'],
   QUESTIONNAIRES: [
     'id','reservationId','submittedAt',
     'lastName','firstName','lastNameKana','firstNameKana',

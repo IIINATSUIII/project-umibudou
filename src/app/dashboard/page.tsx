@@ -144,7 +144,7 @@ export default function DashboardPage() {
                         📋 問診確認
                       </Link>
                     ) : (
-                      <Link href={`/questionnaire/${r.id}`}
+                        <Link href={`/questionnaire/${r.questionnaireToken || r.id}`}
                         className="text-xs bg-orange-50 text-orange-700 border border-orange-200 px-2 py-0.5 rounded hover:bg-orange-100">
                         📝 問診未提出
                       </Link>

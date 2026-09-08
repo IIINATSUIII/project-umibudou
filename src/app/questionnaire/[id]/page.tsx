@@ -28,6 +28,7 @@ export default function QuestionnairePage() {
   const [form, setForm] = useState(BLANK)
   const [qId, setQId] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [submitError, setSubmitError] = useState('')
 
   function set<K extends keyof typeof form>(key: K, value: typeof form[K]) {
     setForm((f) => ({ ...f, [key]: value }))
@@ -45,24 +46,33 @@ export default function QuestionnairePage() {
 
   async function handleSubmit() {
     setSubmitting(true)
+    setSubmitError('')
 
-    // 予約への紐付け・顧客台帳への反映はサーバー側（公開API）で行う
-    const res = await fetch('/api/public/questionnaires', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ reservationId: id, ...form }),
-    })
-    setSubmitting(false)
+    try {
+      // 予約への紐付け・顧客台帳への反映はサーバー側（公開API）で行う
+      const res = await fetch('/api/public/questionnaires', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accessToken: id, ...form }),
+      })
+      const data = await res.json().catch(() => ({}))
 
-    if (!res.ok) {
-      alert('送信に失敗しました。時間をおいて再度お試しください。')
-      return
+      if (!res.ok) {
+        const fieldErrors = data.fields && typeof data.fields === 'object'
+          ? Object.values(data.fields as Record<string, unknown>).filter((value): value is string => typeof value === 'string')
+          : []
+        setSubmitError(fieldErrors[0] ?? data.error ?? '送信に失敗しました。時間をおいて再度お試しください。')
+        return
+      }
+
+      setQId(data.questionnaireId)
+      setStep('done')
+      window.scrollTo(0, 0)
+    } catch {
+      setSubmitError('通信に失敗しました。時間をおいて再度お試しください。')
+    } finally {
+      setSubmitting(false)
     }
-
-    const data = await res.json()
-    setQId(data.questionnaireId)
-    setStep('done')
-    window.scrollTo(0, 0)
   }
 
   const stepIdx = STEPS.indexOf(step)
@@ -237,10 +247,10 @@ export default function QuestionnairePage() {
                     </select>
                   </F>
                 </div>
-                <F label="最後にダイビングした時期"><input type="month" value={form.lastDiveDate} onChange={(e) => set('lastDiveDate', e.target.value)} className={inp} /></F>
                 <F label="総ダイビング本数"><input type="number" min={0} value={form.totalDives || ''} onChange={(e) => set('totalDives', Number(e.target.value))} placeholder="0" className={inp} /></F>
               </div>
             )}
+            <F label="最後にダイビングした時期 *"><input type="month" value={form.lastDiveDate} onChange={(e) => set('lastDiveDate', e.target.value)} required className={inp} /></F>
             <Nav onPrev={prev} onNext={next} canNext />
           </div>
         )}
@@ -251,7 +261,7 @@ export default function QuestionnairePage() {
             {[
               ['agreeRisk', 'ダイビングにはリスクが伴うことを理解し、自己責任で参加することに同意します。'],
               ['agreeMedical', '緊急時に必要な医療処置を受けることに同意します。'],
-              ['agreePhoto', '当日の写真・動画をSNS等に使用することを許可します。（任意）'],
+              ['agreePhoto', '当日の写真・動画をSNS等に使用することを許可します。'],
             ].map(([key, label]) => (
               <label key={key} className="flex items-start gap-3 cursor-pointer">
                 <input type="checkbox" checked={form[key as keyof typeof form] as boolean}
@@ -267,6 +277,11 @@ export default function QuestionnairePage() {
                 {submitting ? '送信中…' : '提出する ✓'}
               </button>
             </div>
+            {submitError && (
+              <p role="alert" className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg p-3">
+                {submitError}
+              </p>
+            )}
           </div>
         )}
 
