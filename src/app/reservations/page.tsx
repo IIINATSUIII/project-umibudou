@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import Navigation from '@/components/Navigation'
 import { useAuth } from '@/lib/authContext'
-import { fetchReservations, patchReservation } from '@/lib/api'
+import { fetchReservations, issueQuestionnaireUrl, patchReservation } from '@/lib/api'
 import type { Reservation } from '@/types'
 
 const CHANNEL_LABELS: Record<string, string> = {
@@ -27,6 +27,9 @@ export default function ReservationsPage() {
   // 空文字 = 全件表示。日付を選ぶとその日のみ表示
   const [dateFilter, setDateFilter] = useState('')
   const [loading, setLoading] = useState(true)
+  const [issuedUrl, setIssuedUrl] = useState<{ reservationId: string; url: string; expiresAt: string } | null>(null)
+  const [issuingId, setIssuingId] = useState('')
+  const [issueError, setIssueError] = useState('')
 
   useEffect(() => {
     if (user === undefined) return
@@ -56,6 +59,39 @@ export default function ReservationsPage() {
     setReservations((prev) =>
       prev.map((r) => r.id === id ? { ...r, status: 'confirmed' } : r)
     )
+  }
+
+  async function handleQuestionnaireUrl(reservation: Reservation, force = false) {
+    setIssueError('')
+    const isStillValid = reservation.questionnaireToken && reservation.questionnaireExpiresAt
+      && Date.parse(reservation.questionnaireExpiresAt) > Date.now()
+
+    if (!force && isStillValid) {
+      setIssuedUrl({
+        reservationId: reservation.id,
+        url: `${window.location.origin}/questionnaire/${reservation.questionnaireToken}`,
+        expiresAt: reservation.questionnaireExpiresAt!,
+      })
+      return
+    }
+
+    setIssuingId(reservation.id)
+    try {
+      const result = await issueQuestionnaireUrl(reservation.id)
+      setReservations((prev) => prev.map((item) => item.id === reservation.id
+        ? { ...item, questionnaireToken: result.token, questionnaireExpiresAt: result.expiresAt }
+        : item))
+      setIssuedUrl({ reservationId: reservation.id, url: result.url, expiresAt: result.expiresAt })
+    } catch (err) {
+      setIssueError(err instanceof Error ? err.message : '問診票URLの発行に失敗しました')
+    } finally {
+      setIssuingId('')
+    }
+  }
+
+  async function copyIssuedUrl() {
+    if (!issuedUrl) return
+    await navigator.clipboard.writeText(issuedUrl.url)
   }
 
   function handleCsvImport(e: React.ChangeEvent<HTMLInputElement>) {
@@ -132,10 +168,10 @@ export default function ReservationsPage() {
                           📋 問診確認
                         </Link>
                       ) : (
-                        <Link href={`/questionnaire/${r.id}`}
-                          className="text-xs bg-orange-50 text-orange-700 border border-orange-200 px-2 py-1 rounded text-center hover:bg-orange-100">
-                          📝 問診URL
-                        </Link>
+                        <button onClick={() => handleQuestionnaireUrl(r)} disabled={issuingId === r.id || r.status === 'cancelled'}
+                          className="text-xs bg-orange-50 text-orange-700 border border-orange-200 px-2 py-1 rounded text-center hover:bg-orange-100 disabled:opacity-40">
+                          {issuingId === r.id ? '発行中…' : r.questionnaireToken ? '📝 URL表示' : '📝 URL発行'}
+                        </button>
                       )}
                       {r.status === 'pending' && (
                         <button onClick={() => handleConfirm(r.id)}
@@ -156,6 +192,41 @@ export default function ReservationsPage() {
             </div>
           )}
         </div>
+
+        {issueError && (
+          <div role="alert" className="bg-red-50 border border-red-200 rounded-xl p-4 text-sm text-red-700">
+            {issueError}
+          </div>
+        )}
+
+        {issuedUrl && (
+          <div className="bg-white rounded-xl border border-orange-200 p-4 space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="font-semibold text-gray-800">問診票URL</h2>
+              <button onClick={() => setIssuedUrl(null)} className="text-sm text-gray-500 hover:text-gray-700">閉じる</button>
+            </div>
+            <p className="break-all rounded-lg bg-gray-50 p-3 text-sm font-mono text-gray-700">{issuedUrl.url}</p>
+            <p className="text-xs text-gray-500">
+              有効期限：{new Date(issuedUrl.expiresAt).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })}
+            </p>
+            <div className="flex gap-2">
+              <button onClick={copyIssuedUrl}
+                className="bg-ocean-600 text-white text-sm px-4 py-2 rounded-lg hover:bg-ocean-700">
+                URLをコピー
+              </button>
+              <button
+                onClick={() => {
+                  const reservation = reservations.find((item) => item.id === issuedUrl.reservationId)
+                  if (reservation && confirm('再発行すると以前のURLは使えなくなります。再発行しますか？')) {
+                    handleQuestionnaireUrl(reservation, true)
+                  }
+                }}
+                className="border border-gray-300 text-gray-600 text-sm px-4 py-2 rounded-lg hover:bg-gray-50">
+                再発行
+              </button>
+            </div>
+          </div>
+        )}
       </main>
     </div>
   )

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { store } from '@/lib/dataStore'
 import type { QuestionnaireData, Customer } from '@/types'
+import { findReservationByQuestionnaireToken } from '@/lib/questionnaireToken'
 
 /**
  * POST /api/public/questionnaires — 問診票提出（ログイン不要）
@@ -10,14 +11,15 @@ import type { QuestionnaireData, Customer } from '@/types'
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
-    const reservationId = String(body.reservationId ?? '')
+    const token = String(body.token ?? '')
 
     // 実在する予約に対する提出のみ受け付ける
     const reservations = await store.getReservations()
-    const reservation = reservations.find((r) => r.id === reservationId)
+    const reservation = findReservationByQuestionnaireToken(reservations, token)
     if (!reservation) {
-      return NextResponse.json({ error: '予約が見つかりません' }, { status: 404 })
+      return NextResponse.json({ error: '問診票URLが無効、または有効期限切れです' }, { status: 404 })
     }
+    const reservationId = reservation.id
 
     const questionnaireId = `Q${Date.now()}`
     const qData: QuestionnaireData = {
@@ -26,6 +28,7 @@ export async function POST(req: NextRequest) {
       reservationId,
       submittedAt: new Date().toISOString(),
     }
+    delete (qData as QuestionnaireData & { token?: string }).token
     await store.addQuestionnaire(qData)
 
     // 予約に問診票IDをリンク

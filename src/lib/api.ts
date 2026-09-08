@@ -31,6 +31,21 @@ export async function patchReservation(id: string, delta: Partial<Reservation>):
   if (!res.ok) throw new Error('Failed to update reservation')
 }
 
+export interface QuestionnaireUrlResult {
+  url: string
+  token: string
+  expiresAt: string
+}
+
+export async function issueQuestionnaireUrl(id: string): Promise<QuestionnaireUrlResult> {
+  const res = await fetch(`/api/reservations/${encodeURIComponent(id)}/questionnaire-url`, {
+    method: 'POST',
+  })
+  const data = await res.json()
+  if (!res.ok) throw new Error(data.error || 'Failed to issue questionnaire URL')
+  return data
+}
+
 // ─── 問診票 ───────────────────────────────────────────────────
 
 export async function fetchQuestionnaires(): Promise<QuestionnaireData[]> {
