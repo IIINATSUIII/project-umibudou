@@ -4,7 +4,7 @@
  */
 
 import { google } from 'googleapis'
-import type { Reservation, QuestionnaireData, Customer, RosterEntry } from '@/types'
+import type { Reservation, QuestionnaireData, Customer } from '@/types'
 
 // ─── 認証・クライアント初期化 ─────────────────────────────────
 function getSheetsClient() {
@@ -25,7 +25,6 @@ const SHEET = {
   RESERVATIONS:   '予約',
   QUESTIONNAIRES: '問診票',
   CUSTOMERS:      '顧客台帳',
-  ROSTER:         '名簿',
 } as const
 
 // ─── ヘッダー行（スプレッドシート初期化用） ─────────────────────
@@ -48,12 +47,6 @@ export const HEADERS = {
     'phone','email','lastVisit','visitCount',
     'hasCCard','cCardType','totalDives','healthNotes','guideNotes',
   ],
-  ROSTER: [
-    'id','diveDate','reservationId','questionnaireId','customerId',
-    'lastName','firstName','lastNameKana','firstNameKana','birthDate','age','gender',
-    'address','phone','emergencyContact','emergencyPhone',
-    'courseName','staffName','receivedAt','receivedMethod',
-  ],
 }
 
 // ─── 汎用ヘルパー ─────────────────────────────────────────────
@@ -67,7 +60,7 @@ function rowToObj<T>(headers: string[], row: string[]): T {
     if (val === 'TRUE' || val === 'true') obj[h] = true
     else if (val === 'FALSE' || val === 'false') obj[h] = false
     // number 変換
-    else if (h === 'guestCount' || h === 'sleepHours' || h === 'totalDives' || h === 'visitCount' || h === 'age') {
+    else if (h === 'guestCount' || h === 'sleepHours' || h === 'totalDives' || h === 'visitCount') {
       obj[h] = val === '' ? 0 : Number(val)
     }
     else obj[h] = val
@@ -176,17 +169,6 @@ export async function updateCustomer(id: string, data: Partial<Customer>): Promi
   await updateRowById(SHEET.CUSTOMERS, HEADERS.CUSTOMERS, id, { ...existing, ...data })
 }
 
-// ─── 名簿（追記のみ・上書き更新不可） ───────────────────────────
-
-export async function getRoster(): Promise<RosterEntry[]> {
-  const rows = await getRows(SHEET.ROSTER, HEADERS.ROSTER)
-  return rows.map((r) => rowToObj<RosterEntry>(HEADERS.ROSTER, r))
-}
-
-export async function addRosterEntry(data: RosterEntry): Promise<void> {
-  await appendRow(SHEET.ROSTER, objToRow(HEADERS.ROSTER, data as unknown as Record<string, unknown>))
-}
-
 // ─── スプレッドシート初期化（初回セットアップ用） ────────────────
 /**
  * 各シートのヘッダー行を書き込む。
@@ -199,7 +181,6 @@ export async function initializeSheets(): Promise<void> {
     [SHEET.RESERVATIONS, HEADERS.RESERVATIONS],
     [SHEET.QUESTIONNAIRES, HEADERS.QUESTIONNAIRES],
     [SHEET.CUSTOMERS, HEADERS.CUSTOMERS],
-    [SHEET.ROSTER, HEADERS.ROSTER],
   ] as const) {
     await sheets.spreadsheets.values.update({
       spreadsheetId: SPREADSHEET_ID,

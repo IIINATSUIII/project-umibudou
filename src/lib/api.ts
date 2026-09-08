@@ -3,7 +3,7 @@
  * サーバーの API ルートを fetch し、Google Sheets のデータを操作する。
  */
 
-import type { Reservation, QuestionnaireData, Customer, RosterEntry } from '@/types'
+import type { Reservation, QuestionnaireData, Customer } from '@/types'
 
 // ─── 予約 ─────────────────────────────────────────────────────
 
@@ -72,24 +72,4 @@ export async function patchCustomer(id: string, delta: Partial<Customer>): Promi
     body: JSON.stringify({ id, ...delta }),
   })
   if (!res.ok) throw new Error('Failed to update customer')
-}
-
-// ─── 名簿 ─────────────────────────────────────────────────────
-
-export async function fetchRoster(): Promise<RosterEntry[]> {
-  const res = await fetch('/api/roster')
-  if (!res.ok) throw new Error('Failed to fetch roster')
-  return res.json()
-}
-
-type RosterDraft = Omit<RosterEntry, 'id' | 'age' | 'receivedAt'>
-
-export async function addRosterEntry(data: RosterDraft): Promise<{ ok: boolean; duplicate?: boolean }> {
-  const res = await fetch('/api/roster', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data),
-  })
-  if (!res.ok) throw new Error('Failed to add roster entry')
-  return res.json()
 }

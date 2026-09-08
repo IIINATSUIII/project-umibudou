@@ -4,8 +4,8 @@ import { useEffect, useState, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Navigation from '@/components/Navigation'
 import { useAuth } from '@/lib/authContext'
-import { fetchQuestionnaires, fetchReservations, fetchRoster, addRosterEntry } from '@/lib/api'
-import type { QuestionnaireData, Reservation, RosterEntry } from '@/types'
+import { fetchQuestionnaires } from '@/lib/api'
+import type { QuestionnaireData } from '@/types'
 
 const HEALTH_FLAGS: [keyof QuestionnaireData, string][] = [
   ['heartDisease', '心臓・循環器系疾患'],
@@ -28,69 +28,29 @@ function ScanContent() {
   const [result, setResult] = useState<QuestionnaireData | null>(null)
   const [notFound, setNotFound] = useState(false)
   const [allQs, setAllQs] = useState<QuestionnaireData[]>([])
-  const [reservations, setReservations] = useState<Reservation[]>([])
-  const [roster, setRoster] = useState<RosterEntry[]>([])
-  const [receivedMethod, setReceivedMethod] = useState<'qr' | 'manual'>('manual')
-  const [adding, setAdding] = useState(false)
 
   useEffect(() => {
     if (user === undefined) return
     if (!user) { router.push('/login'); return }
-    Promise.all([fetchQuestionnaires(), fetchReservations(), fetchRoster()]).then(
-      ([qs, res, rosterList]) => {
-        setAllQs(qs)
-        setReservations(res)
-        setRoster(rosterList)
-        const id = searchParams.get('id')
-        if (id) lookup(id, qs, 'qr')
-      }
-    )
+    fetchQuestionnaires().then((data) => {
+      setAllQs(data)
+      const id = searchParams.get('id')
+      if (id) lookup(id, data)
+    })
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, router])
 
-  function lookup(id: string, qs: QuestionnaireData[] = allQs, method: 'qr' | 'manual' = 'manual') {
+  function lookup(id: string, qs: QuestionnaireData[] = allQs) {
     setNotFound(false)
     setResult(null)
     const found = qs.find((q) => q.id === id)
-    if (found) { setResult(found); setReceivedMethod(method) }
+    if (found) setResult(found)
     else setNotFound(true)
   }
 
   function handleSearch(e: React.FormEvent) {
     e.preventDefault()
     lookup(qId.trim())
-  }
-
-  const reservation = result ? reservations.find((r) => r.id === result.reservationId) : undefined
-  const alreadyAdded = result ? roster.some((r) => r.questionnaireId === result.id) : false
-
-  async function handleAddToRoster() {
-    if (!result) return
-    setAdding(true)
-    try {
-      await addRosterEntry({
-        diveDate: reservation?.date ?? '',
-        reservationId: result.reservationId,
-        questionnaireId: result.id,
-        customerId: '',
-        lastName: result.lastName,
-        firstName: result.firstName,
-        lastNameKana: result.lastNameKana,
-        firstNameKana: result.firstNameKana,
-        birthDate: result.birthDate,
-        gender: result.gender,
-        address: result.address,
-        phone: result.phone,
-        emergencyContact: `${result.emergencyName}（${result.emergencyRelation}）`,
-        emergencyPhone: result.emergencyPhone,
-        courseName: reservation?.course ?? '',
-        staffName: '',
-        receivedMethod,
-      })
-      setRoster(await fetchRoster())
-    } finally {
-      setAdding(false)
-    }
   }
 
   const alerts = result ? HEALTH_FLAGS.filter(([key]) => result[key] === true) : []
@@ -177,20 +137,6 @@ function ScanContent() {
                 <p>{result.agreePhoto ? '✅' : '⬜'} 写真・動画使用許可</p>
               </div>
             </div>
-
-            {alreadyAdded ? (
-              <div className="bg-green-50 border border-green-200 rounded-xl p-4 text-center text-sm text-green-700 font-medium">
-                ✅ 名簿に追加しました。
-              </div>
-            ) : (
-              <button
-                onClick={handleAddToRoster}
-                disabled={adding}
-                className="w-full bg-ocean-600 text-white py-3 rounded-xl font-medium hover:bg-ocean-700 transition-colors disabled:opacity-50"
-              >
-                {adding ? '追加中…' : '📋 名簿へ追加'}
-              </button>
-            )}
           </div>
         )}
       </main>
