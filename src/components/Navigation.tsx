@@ -10,6 +10,7 @@ const links = [
   { href: '/reservations',       label: '📅 予約管理' },
   { href: '/customers',          label: '👥 顧客台帳' },
   { href: '/questionnaire/scan', label: '📷 QR読取' },
+  { href: '/roster',             label: '📋 名簿' },
 ]
 
 export default function Navigation() {

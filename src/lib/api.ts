@@ -48,6 +48,12 @@ export async function submitQuestionnaire(data: QuestionnaireData): Promise<void
   if (!res.ok) throw new Error('Failed to submit questionnaire')
 }
 
+export async function fetchRoster(): Promise<RosterEntry[]> {
+  const res = await fetch('/api/roster')
+  if (!res.ok) throw new Error('Failed to fetch roster')
+  return res.json()
+}
+
 export async function addRoster(questionnaireId: string, method: RosterEntry['checkInMethod'], qrToken?: string): Promise<RosterEntry> {
   const res = await fetch('/api/roster', {
     method: 'POST',
