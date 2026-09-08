@@ -1,15 +1,50 @@
+/**
+ * 予約一覧（Reservations シート）
+ * 列定義は docs/03_基本設計書_DB設計編.md §3-2 に準拠。
+ */
 export interface Reservation {
-  id: string
-  date: string        // YYYY-MM-DD
-  time: string        // HH:MM
-  course: string
-  guestName: string
-  guestCount: number
-  phone: string
-  channel: 'hp' | 'email' | 'phone' | 'ota' | 'sns'
-  status: 'confirmed' | 'pending' | 'cancelled'
-  questionnaireId?: string
-  notes?: string
+  id: string                  // 予約ID: "R-" + YYYYMMDD + 連番3桁
+  createdAt: string           // 登録日時（ISO datetime）
+  updatedAt: string           // 最終更新日時（排他制御の後勝ち検知に使用）
+  customerId?: string         // 顧客ID（顧客台帳を参照。問診送信後に紐づく）
+  guestName: string           // 代表者氏名
+  guestPhone: string          // 代表者電話番号
+  guestEmail: string          // 代表者メールアドレス
+  diveDate: string            // ダイブ日 YYYY-MM-DD
+  timeSlot: 'morning' | 'afternoon' | 'full' | 'unspecified' // 時間帯
+  courseId: string            // コースID（コースマスタを参照）
+  courseName: string          // コース名（表示用。コースマスタから転記）
+  guestCount: number          // 参加人数
+  status: string              // 予約ステータス（ステータスマスタのIDを参照）
+  staffId?: string            // 担当スタッフID（スタッフマスタを参照）
+  staffName?: string          // 担当スタッフ名（表示用。スタッフマスタから転記）
+  channel: 'hp' | 'email' | 'phone' | 'ota' // 予約取込元
+  questionnaireToken?: string          // 問診票URL用トークン
+  questionnaireTokenExpiresAt?: string // 問診票URL有効期限（ダイブ日翌日0時まで）
+  questionnaireCompleted: boolean      // 問診完了フラグ
+  divePoint?: string          // ダイブポイント
+  staffNote?: string          // スタッフメモ／キャンセル理由
+}
+
+/** コースマスタ（Courses シート） */
+export interface Course {
+  id: string    // コースID: "CRS-" + 連番3桁
+  name: string
+  type: string
+}
+
+/** スタッフマスタ（Staff シート） */
+export interface Staff {
+  id: string    // スタッフID: "STF-" + 連番3桁
+  name: string
+  isAdmin: boolean
+}
+
+/** ステータスマスタ（Status シート） */
+export interface StatusDef {
+  id: string    // ステータスID: "STS-" + 連番2桁
+  name: string
+  color: string // 条件付き書式の表示色（#RRGGBB）
 }
 
 export interface QuestionnaireData {
@@ -80,5 +115,7 @@ export interface WeatherDay {
   weather: string
   wind: string
   wave: string
+  tempHigh: string
+  tempLow: string
   icon: string
 }

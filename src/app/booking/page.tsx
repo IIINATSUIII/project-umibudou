@@ -2,25 +2,23 @@
 
 import { useState } from 'react'
 import { QRCodeCanvas } from 'qrcode.react'
+import { COURSES } from '@/lib/masters'
+import type { Reservation } from '@/types'
 
-const COURSES = [
-  '体験ダイビング',
-  'ファンダイビング（2本）',
-  'ファンダイビング（3本）',
-  'ナイトダイビング',
-  'シュノーケリング',
-  'その他',
+const TIME_SLOTS: [Reservation['timeSlot'], string][] = [
+  ['morning', '午前'], ['afternoon', '午後'], ['full', '1日'], ['unspecified', '指定なし'],
 ]
 
 export default function BookingPage() {
   const [form, setForm] = useState({
-    date: new Date(Date.now() + 86400000).toISOString().slice(0, 10),
-    time: '09:00',
-    course: '体験ダイビング',
+    diveDate: new Date(Date.now() + 86400000).toISOString().slice(0, 10),
+    timeSlot: 'morning' as Reservation['timeSlot'],
+    courseId: COURSES[0].id,
     guestName: '',
     guestCount: 1,
-    phone: '',
-    notes: '',
+    guestPhone: '',
+    guestEmail: '',
+    staffNote: '',
   })
   const [sending, setSending] = useState(false)
   const [done, setDone] = useState(false)
@@ -30,6 +28,9 @@ export default function BookingPage() {
   function set<K extends keyof typeof form>(key: K, value: typeof form[K]) {
     setForm((f) => ({ ...f, [key]: value }))
   }
+
+  const courseName = COURSES.find((c) => c.id === form.courseId)?.name ?? ''
+  const timeSlotLabel = TIME_SLOTS.find(([v]) => v === form.timeSlot)?.[1] ?? ''
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -81,8 +82,8 @@ export default function BookingPage() {
               <QRCodeCanvas id="booking-qr" value={qrUrl} size={180} includeMargin />
             </div>
             <div className="text-left text-sm text-gray-700 mt-4 space-y-1">
-              <p>📅 {form.date} {form.time}</p>
-              <p>🤿 {form.course}</p>
+              <p>📅 {form.diveDate}（{timeSlotLabel}）</p>
+              <p>🤿 {courseName}</p>
               <p>👤 {form.guestName} 様（{form.guestCount}名）</p>
             </div>
             <p className="text-xs text-gray-500 mt-4 leading-relaxed">
@@ -119,21 +120,23 @@ export default function BookingPage() {
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">希望日 *</label>
-              <input type="date" value={form.date}
+              <input type="date" value={form.diveDate}
                 min={new Date().toISOString().slice(0, 10)}
-                onChange={(e) => set('date', e.target.value)} required className={inp} />
+                onChange={(e) => set('diveDate', e.target.value)} required className={inp} />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">希望時間 *</label>
-              <input type="time" value={form.time}
-                onChange={(e) => set('time', e.target.value)} required className={inp} />
+              <label className="block text-sm font-medium text-gray-700 mb-1">希望時間帯 *</label>
+              <select value={form.timeSlot}
+                onChange={(e) => set('timeSlot', e.target.value as Reservation['timeSlot'])} className={inp}>
+                {TIME_SLOTS.map(([v, label]) => <option key={v} value={v}>{label}</option>)}
+              </select>
             </div>
           </div>
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">コース *</label>
-            <select value={form.course} onChange={(e) => set('course', e.target.value)} className={inp}>
-              {COURSES.map((c) => <option key={c}>{c}</option>)}
+            <select value={form.courseId} onChange={(e) => set('courseId', e.target.value)} className={inp}>
+              {COURSES.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
           </div>
 
@@ -152,15 +155,22 @@ export default function BookingPage() {
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">電話番号 *</label>
-              <input type="tel" value={form.phone}
-                onChange={(e) => set('phone', e.target.value)}
+              <input type="tel" value={form.guestPhone}
+                onChange={(e) => set('guestPhone', e.target.value)}
                 placeholder="090-0000-0000" required className={inp} />
             </div>
           </div>
 
           <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">メールアドレス *</label>
+            <input type="email" value={form.guestEmail}
+              onChange={(e) => set('guestEmail', e.target.value)}
+              placeholder="guest@example.com" required className={inp} />
+          </div>
+
+          <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">ご要望・メモ</label>
-            <textarea value={form.notes} onChange={(e) => set('notes', e.target.value)}
+            <textarea value={form.staffNote} onChange={(e) => set('staffNote', e.target.value)}
               placeholder="ライセンスの有無、送迎希望など" rows={3}
               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ocean-500 resize-none" />
           </div>
