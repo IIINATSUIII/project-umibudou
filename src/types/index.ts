@@ -17,6 +17,10 @@ export interface QuestionnaireData {
   id: string
   reservationId: string
   submittedAt: string
+  qrToken?: string
+  qrIssuedAt?: string
+  qrExpiresAt?: string
+  qrUsed?: boolean
   // 基本情報
   lastName: string
   firstName: string
@@ -24,13 +28,16 @@ export interface QuestionnaireData {
   firstNameKana: string
   birthDate: string
   gender: 'male' | 'female' | 'other'
+  postalCode?: string
   address: string
   phone: string
+  email?: string
   emergencyName: string
   emergencyRelation: string
   emergencyPhone: string
   // 健康状態
   heartDisease: boolean
+  hypertension?: boolean
   respiratoryDisease: boolean
   earDisease: boolean
   epilepsy: boolean
@@ -45,6 +52,7 @@ export interface QuestionnaireData {
   alcoholLastNight: boolean
   alcoholToday: boolean
   condition: 'good' | 'normal' | 'bad'
+  conditionDetail?: string
   // フライト予定
   flightWithin48h: boolean
   // 経験・スキル

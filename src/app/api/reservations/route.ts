@@ -19,7 +19,8 @@ export async function POST(req: NextRequest) {
     const reservation = {
       ...body,
       id: String(body.id ?? `R-${randomUUID()}`),
-      questionnaireToken: String(body.questionnaireToken ?? randomBytes(32).toString('hex')),
+      // 問診URL用トークンはクライアント入力を受け付けず、必ずサーバーで生成する。
+      questionnaireToken: randomBytes(32).toString('hex'),
     }
     await store.addReservation(reservation)
     return NextResponse.json({ ok: true, id: reservation.id, questionnaireToken: reservation.questionnaireToken })

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { randomUUID } from 'crypto'
+import { randomBytes, randomUUID } from 'crypto'
 import { store } from '@/lib/dataStore'
 import type { Customer, QuestionnaireData } from '@/types'
 import { validateQuestionnaireInput } from '@/lib/questionnaireValidation'
@@ -45,17 +45,23 @@ export async function POST(req: NextRequest) {
       if (!reservation) return NextResponse.json({ error: '予約が見つかりません' }, { status: 404 })
 
       const existing = (await store.getQuestionnaires()).find((item) => item.reservationId === reservation.id)
-      if (existing) return NextResponse.json({ ok: true, questionnaireId: existing.id, alreadySubmitted: true })
+      if (existing) return NextResponse.json({ ok: true, questionnaireId: existing.id, qrToken: existing.qrToken, qrExpiresAt: existing.qrExpiresAt, alreadySubmitted: true })
 
       const validation = validateQuestionnaireInput(payload)
       if (!validation.ok) return NextResponse.json({ error: '入力内容を確認してください', fields: validation.errors }, { status: 400 })
 
       const questionnaireId = `Q-${randomUUID()}`
+      const qrIssuedAt = new Date().toISOString()
+      const qrExpiresAt = new Date(new Date(`${reservation.date}T00:00:00+09:00`).getTime() + 24 * 60 * 60 * 1000).toISOString()
       const qData: QuestionnaireData = {
         ...validation.data,
         id: questionnaireId,
         reservationId: reservation.id,
         submittedAt: new Date().toISOString(),
+        qrToken: randomBytes(32).toString('hex'),
+        qrIssuedAt,
+        qrExpiresAt,
+        qrUsed: false,
       }
       await store.addQuestionnaire(qData)
       await store.updateReservation(reservation.id, { questionnaireId })
@@ -78,7 +84,7 @@ export async function POST(req: NextRequest) {
         await store.updateCustomer(existingCustomer.id, { visitCount: existingCustomer.visitCount + 1, lastVisit: today })
       }
 
-      return NextResponse.json({ ok: true, questionnaireId })
+      return NextResponse.json({ ok: true, questionnaireId, qrToken: qData.qrToken, qrExpiresAt })
     })
   } catch (err) {
     console.error('[POST /api/public/questionnaires]', err)
