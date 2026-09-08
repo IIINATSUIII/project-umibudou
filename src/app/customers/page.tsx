@@ -1,7 +1,7 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { Suspense, useEffect, useMemo, useState } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import Navigation from '@/components/Navigation'
 import { useAuth } from '@/lib/authContext'
@@ -26,20 +26,44 @@ import type { Customer } from '@/types'
 /** 一度に表示する件数。残りは「さらに表示」で追加する */
 const PAGE_SIZE = 50
 
+/** 検索条件をURLに書き戻すまでの待ち時間(ms)。入力のたびに遷移させないため */
+const URL_SYNC_DELAY = 250
+
+const DEFAULT_SORT: CustomerSort = 'lastVisitDesc'
+
 const SELECT_CLASS =
   'border border-gray-300 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-ocean-500'
 
+function LoadingScreen() {
+  return <div className="min-h-screen flex items-center justify-center text-gray-400 text-sm">読み込み中…</div>
+}
+
+// useSearchParams を使う都合上、Suspense 境界の内側に本体を置く
 export default function CustomersPage() {
+  return (
+    <Suspense fallback={<LoadingScreen />}>
+      <CustomersView />
+    </Suspense>
+  )
+}
+
+function CustomersView() {
   const user = useAuth()
   const router = useRouter()
+  const searchParams = useSearchParams()
   const [customers, setCustomers] = useState<Customer[]>([])
   const [loading, setLoading] = useState(true)
 
-  // 検索条件（詳細設計 §3-5-8「氏名・最終来店日・Cカード種別等」）
-  const [search, setSearch] = useState('')
-  const [cCard, setCCard] = useState<string>(C_CARD_FILTER_ALL)
-  const [lastVisitRange, setLastVisitRange] = useState<LastVisitRange>('all')
-  const [sort, setSort] = useState<CustomerSort>('lastVisitDesc')
+  // 検索条件（詳細設計 §3-5-8「氏名・最終来店日・Cカード種別等」）。
+  // 初期値はURLから復元する。顧客詳細(SC-08)から戻ったときに条件が消えないようにするため
+  const [search, setSearch] = useState(() => searchParams.get('q') ?? '')
+  const [cCard, setCCard] = useState(() => searchParams.get('ccard') ?? C_CARD_FILTER_ALL)
+  const [lastVisitRange, setLastVisitRange] = useState<LastVisitRange>(
+    () => pickFromUrl(searchParams.get('range'), LAST_VISIT_RANGES, 'all')
+  )
+  const [sort, setSort] = useState<CustomerSort>(
+    () => pickFromUrl(searchParams.get('sort'), CUSTOMER_SORTS, DEFAULT_SORT)
+  )
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE)
 
   useEffect(() => {
@@ -51,8 +75,31 @@ export default function CustomersPage() {
   // 条件を変えたら先頭から見せ直す
   useEffect(() => { setVisibleCount(PAGE_SIZE) }, [search, cCard, lastVisitRange, sort])
 
+  // 現在の検索条件をURLへ反映する。初期値と同じ項目は付けずURLを短く保つ
+  useEffect(() => {
+    const params = new URLSearchParams()
+    if (search.trim()) params.set('q', search)
+    if (cCard !== C_CARD_FILTER_ALL) params.set('ccard', cCard)
+    if (lastVisitRange !== 'all') params.set('range', lastVisitRange)
+    if (sort !== DEFAULT_SORT) params.set('sort', sort)
+    const qs = params.toString()
+
+    // 入力のたびに遷移するとキー入力が重くなるので少し待つ。
+    // replace なので「戻る」の履歴は汚さない
+    const timer = setTimeout(() => {
+      router.replace(qs ? `/customers?${qs}` : '/customers', { scroll: false })
+    }, URL_SYNC_DELAY)
+    return () => clearTimeout(timer)
+  }, [search, cCard, lastVisitRange, sort, router])
+
   // Cカード種別の選択肢は実データから生成する（既存値が自由記述のため）
   const cCardOptions = useMemo(() => cCardFilterOptions(customers), [customers])
+
+  // URLで指定された種別が実データに無い場合（古いURL等）は「すべて」に戻す
+  useEffect(() => {
+    if (loading || cCard === C_CARD_FILTER_ALL || cCard === C_CARD_FILTER_NONE) return
+    if (!cCardOptions.includes(cCard)) setCCard(C_CARD_FILTER_ALL)
+  }, [loading, cCard, cCardOptions])
 
   const filtered = useMemo(() => {
     const today = new Date()
@@ -73,7 +120,7 @@ export default function CustomersPage() {
     setLastVisitRange('all')
   }
 
-  if (loading) return <div className="min-h-screen flex items-center justify-center text-gray-400 text-sm">読み込み中…</div>
+  if (loading) return <LoadingScreen />
 
   const visible = filtered.slice(0, visibleCount)
   const remaining = filtered.length - visible.length
@@ -194,4 +241,13 @@ export default function CustomersPage() {
       </main>
     </div>
   )
+}
+
+/** URLの値が想定の選択肢に含まれていればそれを、無ければ既定値を返す */
+function pickFromUrl<T extends string>(
+  value: string | null,
+  allowed: readonly T[],
+  fallback: T
+): T {
+  return allowed.includes(value as T) ? (value as T) : fallback
 }
