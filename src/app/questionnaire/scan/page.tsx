@@ -24,7 +24,7 @@ function ScanContent() {
   const user = useAuth()
   const router = useRouter()
   const searchParams = useSearchParams()
-  const [qId, setQId] = useState(searchParams.get('id') ?? '')
+  const [qId, setQId] = useState(searchParams.get('token') ?? searchParams.get('id') ?? '')
   const [result, setResult] = useState<QuestionnaireData | null>(null)
   const [notFound, setNotFound] = useState(false)
   const [allQs, setAllQs] = useState<QuestionnaireData[]>([])
@@ -34,7 +34,7 @@ function ScanContent() {
     if (!user) { router.push('/login'); return }
     fetchQuestionnaires().then((data) => {
       setAllQs(data)
-      const id = searchParams.get('id')
+      const id = searchParams.get('token') ?? searchParams.get('id')
       if (id) lookup(id, data)
     })
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -43,9 +43,11 @@ function ScanContent() {
   function lookup(id: string, qs: QuestionnaireData[] = allQs) {
     setNotFound(false)
     setResult(null)
-    const found = qs.find((q) => q.id === id)
-    if (found) setResult(found)
-    else setNotFound(true)
+    const found = qs.find((q) => q.id === id || q.qrToken === id)
+    if (!found) { setNotFound(true); return }
+    if (found.qrExpiresAt && new Date(found.qrExpiresAt).getTime() <= Date.now()) { setNotFound(true); return }
+    if (found.qrUsed) { setNotFound(true); return }
+    setResult(found)
   }
 
   function handleSearch(e: React.FormEvent) {
@@ -62,10 +64,10 @@ function ScanContent() {
         <h1 className="text-xl font-bold text-gray-800">📷 QRコード読取・問診確認</h1>
 
         <form onSubmit={handleSearch} className="bg-white rounded-xl border border-gray-200 p-4">
-          <p className="text-xs text-gray-500 mb-2">問診票IDを入力してください（QRコードをスキャン後に自動入力）</p>
+          <p className="text-xs text-gray-500 mb-2">QRトークンまたは問診票IDを入力してください</p>
           <div className="flex gap-2">
             <input value={qId} onChange={(e) => setQId(e.target.value)}
-              placeholder="Q1234567890"
+              placeholder="QRトークンまたはQ-ID"
               className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ocean-500 font-mono" />
             <button type="submit"
               className="bg-ocean-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-ocean-700 transition-colors">

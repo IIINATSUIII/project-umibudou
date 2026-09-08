@@ -1,5 +1,6 @@
 export interface Reservation {
   id: string
+  questionnaireToken?: string
   date: string        // YYYY-MM-DD
   time: string        // HH:MM
   course: string

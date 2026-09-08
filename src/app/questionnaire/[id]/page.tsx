@@ -30,13 +30,15 @@ export default function QuestionnairePage() {
   const [qrToken, setQrToken] = useState('')
   const [qrIssuedAt, setQrIssuedAt] = useState('')
   const [qrExpiresAt, setQrExpiresAt] = useState('')
+  const [reservationDate, setReservationDate] = useState('')
+  const [course, setCourse] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
 
   useEffect(() => {
     let active = true
-    fetch(`/api/public/questionnaires?reservationId=${encodeURIComponent(id)}`)
+    fetch(`/api/public/questionnaires?accessToken=${encodeURIComponent(id)}`)
       .then(async (res) => {
         const data = await res.json()
         if (!active) return
@@ -47,6 +49,8 @@ export default function QuestionnairePage() {
           setQrToken(data.qrToken)
           setQrIssuedAt(data.qrIssuedAt)
           setQrExpiresAt(data.qrExpiresAt)
+          setReservationDate(data.reservationDate ?? '')
+          setCourse(data.course ?? '')
           setForm((current) => ({ ...current, lastName: data.lastName ?? '', firstName: data.firstName ?? '', lastNameKana: data.lastNameKana ?? '', firstNameKana: data.firstNameKana ?? '' }))
           setStep('done')
         }
@@ -77,7 +81,7 @@ export default function QuestionnairePage() {
     const res = await fetch('/api/public/questionnaires', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ reservationId: id, ...form }),
+      body: JSON.stringify({ accessToken: id, ...form }),
     })
     setSubmitting(false)
 
@@ -91,6 +95,8 @@ export default function QuestionnairePage() {
     setQrToken(data.qrToken)
     setQrIssuedAt(data.qrIssuedAt)
     setQrExpiresAt(data.qrExpiresAt)
+    setReservationDate(data.reservationDate ?? '')
+    setCourse(data.course ?? '')
     setStep('done')
     window.scrollTo(0, 0)
   }
@@ -328,6 +334,7 @@ export default function QuestionnairePage() {
             </div>
             <div className="space-y-2 text-sm text-gray-600">
               <p>有効期限：{qrExpiresAt ? new Date(qrExpiresAt).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' }) : '-'}</p>
+              <p>利用日：{reservationDate || '-'} ／ コース：{course || '-'}</p>
               <button type="button" onClick={downloadQr} className="border border-ocean-600 text-ocean-700 px-4 py-2 rounded-lg font-medium">QR画像を保存</button>
               <p className="text-xs text-gray-400">保存できない場合は、この画面をスクリーンショットして保管してください。</p>
             </div>

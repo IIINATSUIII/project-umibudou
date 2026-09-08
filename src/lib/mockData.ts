@@ -7,6 +7,7 @@ const tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0, 10)
 export const MOCK_RESERVATIONS: Reservation[] = [
   {
     id: 'R001',
+    questionnaireToken: 'qtok-r001-2f5e9a8c7d1b4e6f',
     date: today,
     time: '09:00',
     course: '体験ダイビング',
@@ -20,6 +21,7 @@ export const MOCK_RESERVATIONS: Reservation[] = [
   },
   {
     id: 'R002',
+    questionnaireToken: 'qtok-r002-7a1c4d9e2f6b8a0c',
     date: today,
     time: '13:00',
     course: 'ファンダイビング（2本）',
@@ -32,6 +34,7 @@ export const MOCK_RESERVATIONS: Reservation[] = [
   },
   {
     id: 'R003',
+    questionnaireToken: 'qtok-r003-3b8e1d6f4a9c2e7d',
     date: today,
     time: '09:30',
     course: '体験ダイビング',
@@ -43,6 +46,7 @@ export const MOCK_RESERVATIONS: Reservation[] = [
   },
   {
     id: 'R004',
+    questionnaireToken: 'qtok-r004-5c9a2f7e1d4b8a6c',
     date: tomorrow,
     time: '09:00',
     course: 'ナイトダイビング',
