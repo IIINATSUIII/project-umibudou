@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { store } from '@/lib/dataStore'
 import type { QuestionnaireData, Customer } from '@/types'
-import { randomBytes, randomUUID } from 'crypto'
+import { randomUUID } from 'crypto'
+import { createQrToken, isQrExpired, isValidDate, qrExpiryFor } from '@/lib/questionnaireQr'
 
 let questionnaireWriteLock = Promise.resolve()
 
@@ -11,16 +12,6 @@ async function withQuestionnaireWriteLock<T>(work: () => Promise<T>): Promise<T>
   questionnaireWriteLock = new Promise<void>((resolve) => { release = resolve })
   await previous
   try { return await work() } finally { release() }
-}
-
-function isValidDate(value: string): boolean {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
-  const date = new Date(`${value}T00:00:00+09:00`)
-  return !Number.isNaN(date.getTime()) && date.toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' }) === value
-}
-
-function qrExpiryFor(date: string): Date {
-  return new Date(new Date(`${date}T00:00:00+09:00`).getTime() + 24 * 60 * 60 * 1000)
 }
 
 /** GET /api/public/questionnaires?accessToken=... — 提出済みQRの再表示情報 */
@@ -35,7 +26,7 @@ export async function GET(req: NextRequest) {
     const questionnaires = await store.getQuestionnaires()
     const questionnaire = questionnaires.find((item) => item.reservationId === reservation.id)
     if (!questionnaire) return NextResponse.json({ submitted: false }, { headers: { 'Cache-Control': 'no-store' } })
-    if (!questionnaire.qrExpiresAt || new Date(questionnaire.qrExpiresAt).getTime() <= Date.now()) {
+    if (isQrExpired(questionnaire.qrExpiresAt)) {
       return NextResponse.json({ error: 'MSG-18：ページが見つかりません。URLをご確認ください。', code: 'EXPIRED' }, { status: 404, headers: { 'Cache-Control': 'no-store' } })
     }
 
@@ -81,7 +72,7 @@ export async function POST(req: NextRequest) {
 
       const existingQuestionnaire = (await store.getQuestionnaires()).find((item) => item.reservationId === reservation.id)
       if (existingQuestionnaire) {
-        if (!existingQuestionnaire.qrExpiresAt || new Date(existingQuestionnaire.qrExpiresAt).getTime() <= Date.now()) {
+        if (isQrExpired(existingQuestionnaire.qrExpiresAt)) {
           return NextResponse.json({ error: 'MSG-18：ページが見つかりません。URLをご確認ください。' }, { status: 404 })
         }
         return NextResponse.json({
@@ -107,7 +98,7 @@ export async function POST(req: NextRequest) {
         id: questionnaireId,
         reservationId: reservation.id,
         submittedAt: qrIssuedAt.toISOString(),
-        qrToken: randomBytes(32).toString('hex'),
+        qrToken: createQrToken(),
         qrIssuedAt: qrIssuedAt.toISOString(),
         qrExpiresAt: qrExpiryFor(reservation.date).toISOString(),
         qrUsed: false,
