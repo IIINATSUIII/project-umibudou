@@ -29,7 +29,8 @@ const SHEET = {
 
 // ─── ヘッダー行（スプレッドシート初期化用） ─────────────────────
 export const HEADERS = {
-  RESERVATIONS:   ['id','date','time','course','guestName','guestCount','phone','channel','status','questionnaireId','notes'],
+  // 既存シートの列位置を壊さないよう、追加列は末尾に置く。
+  RESERVATIONS:   ['id','date','time','course','guestName','guestCount','phone','channel','status','questionnaireId','notes','questionnaireToken'],
   QUESTIONNAIRES: [
     'id','reservationId','submittedAt',
     'lastName','firstName','lastNameKana','firstNameKana',
@@ -41,6 +42,8 @@ export const HEADERS = {
     'flightWithin48h',
     'hasCCard','cCardType','cCardOrg','lastDiveDate','totalDives',
     'agreeRisk','agreeMedical','agreePhoto',
+    'postalCode','email','hypertension','conditionDetail',
+    'qrToken','qrIssuedAt','qrExpiresAt','qrUsed',
   ],
   CUSTOMERS: [
     'id','lastName','firstName','lastNameKana','firstNameKana',

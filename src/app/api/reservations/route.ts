@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { store } from '@/lib/dataStore'
+import { randomBytes, randomUUID } from 'crypto'
 
 /** GET /api/reservations — 予約一覧取得 */
 export async function GET() {
@@ -15,8 +16,14 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
-    await store.addReservation(body)
-    return NextResponse.json({ ok: true })
+    const reservation = {
+      ...body,
+      id: String(body.id ?? `R-${randomUUID()}`),
+      // 問診URL用トークンはクライアント入力を受け付けず、必ずサーバーで生成する。
+      questionnaireToken: randomBytes(32).toString('hex'),
+    }
+    await store.addReservation(reservation)
+    return NextResponse.json({ ok: true, id: reservation.id, questionnaireToken: reservation.questionnaireToken })
   } catch (err) {
     console.error('[POST /api/reservations]', err)
     return NextResponse.json({ error: 'Failed to add reservation' }, { status: 500 })

@@ -43,7 +43,7 @@ function ScanContent() {
   function lookup(id: string, qs: QuestionnaireData[] = allQs) {
     setNotFound(false)
     setResult(null)
-    const found = qs.find((q) => q.id === id)
+    const found = qs.find((q) => q.id === id || q.qrToken === id)
     if (found) setResult(found)
     else setNotFound(true)
   }
@@ -62,7 +62,7 @@ function ScanContent() {
         <h1 className="text-xl font-bold text-gray-800">📷 QRコード読取・問診確認</h1>
 
         <form onSubmit={handleSearch} className="bg-white rounded-xl border border-gray-200 p-4">
-          <p className="text-xs text-gray-500 mb-2">問診票IDを入力してください（QRコードをスキャン後に自動入力）</p>
+          <p className="text-xs text-gray-500 mb-2">問診票QRコードを読み取るか、問診票IDを入力してください</p>
           <div className="flex gap-2">
             <input value={qId} onChange={(e) => setQId(e.target.value)}
               placeholder="Q1234567890"

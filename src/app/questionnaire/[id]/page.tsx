@@ -11,13 +11,13 @@ const STEP_LABELS = ['はじめに', '基本情報', '健康状態', '当日体�
 
 const BLANK: Omit<QuestionnaireData, 'id' | 'reservationId' | 'submittedAt'> = {
   lastName: '', firstName: '', lastNameKana: '', firstNameKana: '',
-  birthDate: '', gender: 'male', address: '', phone: '',
+  birthDate: '', gender: 'male', postalCode: '', address: '', phone: '', email: '',
   emergencyName: '', emergencyRelation: '', emergencyPhone: '',
-  heartDisease: false, respiratoryDisease: false, earDisease: false,
+  heartDisease: false, hypertension: false, respiratoryDisease: false, earDisease: false,
   epilepsy: false, diabetes: false, pregnant: false, panicDisorder: false,
   medication: false, medicationName: '', latexAllergy: false,
   sleepHours: 7, alcoholLastNight: false, alcoholToday: false, condition: 'good',
-  flightWithin48h: false,
+  flightWithin48h: false, conditionDetail: '',
   hasCCard: false, cCardType: '', cCardOrg: '', lastDiveDate: '', totalDives: 0,
   agreeRisk: false, agreeMedical: false, agreePhoto: false,
 }
@@ -28,6 +28,7 @@ export default function QuestionnairePage() {
   const [form, setForm] = useState(BLANK)
   const [qId, setQId] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [submitError, setSubmitError] = useState('')
 
   function set<K extends keyof typeof form>(key: K, value: typeof form[K]) {
     setForm((f) => ({ ...f, [key]: value }))
@@ -45,24 +46,33 @@ export default function QuestionnairePage() {
 
   async function handleSubmit() {
     setSubmitting(true)
+    setSubmitError('')
 
-    // 予約への紐付け・顧客台帳への反映はサーバー側（公開API）で行う
-    const res = await fetch('/api/public/questionnaires', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ reservationId: id, ...form }),
-    })
-    setSubmitting(false)
+    try {
+      // 予約への紐付け・顧客台帳への反映はサーバー側（公開API）で行う
+      const res = await fetch('/api/public/questionnaires', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accessToken: id, ...form }),
+      })
+    const data = await res.json().catch(() => ({}))
 
-    if (!res.ok) {
-      alert('送信に失敗しました。時間をおいて再度お試しください。')
-      return
+      if (!res.ok) {
+        const fieldErrors = data.fields && typeof data.fields === 'object'
+          ? Object.values(data.fields as Record<string, unknown>).filter((value): value is string => typeof value === 'string')
+          : []
+        setSubmitError(fieldErrors[0] ?? data.error ?? '送信に失敗しました。時間をおいて再度お試しください。')
+        return
+      }
+
+      setQId(data.qrToken ?? data.questionnaireId)
+      setStep('done')
+      window.scrollTo(0, 0)
+    } catch {
+      setSubmitError('通信に失敗しました。時間をおいて再度お試しください。')
+    } finally {
+      setSubmitting(false)
     }
-
-    const data = await res.json()
-    setQId(data.questionnaireId)
-    setStep('done')
-    window.scrollTo(0, 0)
   }
 
   const stepIdx = STEPS.indexOf(step)
@@ -124,8 +134,10 @@ export default function QuestionnairePage() {
                 ))}
               </div>
             </F>
+            <F label="郵便番号"><input value={form.postalCode} onChange={(e) => set('postalCode', e.target.value)} placeholder="100-0001" className={inp} /></F>
             <F label="住所 *"><input value={form.address} onChange={(e) => set('address', e.target.value)} placeholder="東京都渋谷区" required className={inp} /></F>
             <F label="電話番号 *"><input type="tel" value={form.phone} onChange={(e) => set('phone', e.target.value)} placeholder="090-0000-0000" required className={inp} /></F>
+            <F label="メールアドレス *"><input type="email" value={form.email} onChange={(e) => set('email', e.target.value)} placeholder="example@example.com" required className={inp} /></F>
             <div className="border-t border-gray-100 pt-4">
               <p className="text-xs font-medium text-gray-700 mb-2">緊急連絡先</p>
               <div className="space-y-3">
@@ -145,7 +157,8 @@ export default function QuestionnairePage() {
             <h2 className="font-bold text-gray-800">② 健康状態</h2>
             <p className="text-xs text-gray-500">該当するものにチェックしてください</p>
             {[
-              ['heartDisease', '心臓・循環器系疾患（心臓病・不整脈・高血圧）'],
+              ['heartDisease', '心臓・循環器系疾患（心臓病・不整脈）'],
+              ['hypertension', '高血圧'],
               ['respiratoryDisease', '呼吸器系疾患（喘息・肺疾患）'],
               ['earDisease', '耳・副鼻腔の疾患（中耳炎・副鼻腔炎）'],
               ['epilepsy', 'てんかん・失神の既往'],
@@ -203,6 +216,9 @@ export default function QuestionnairePage() {
                 ))}
               </div>
             </F>
+            {form.condition === 'bad' && (
+              <F label="体調詳細 *"><textarea value={form.conditionDetail} onChange={(e) => set('conditionDetail', e.target.value)} className={inp} rows={3} /></F>
+            )}
             <label className="flex items-start gap-3 cursor-pointer">
               <input type="checkbox" checked={form.flightWithin48h} onChange={(e) => set('flightWithin48h', e.target.checked)} className="w-4 h-4 mt-0.5 accent-ocean-600" />
               <span className="text-sm text-gray-700">
@@ -237,10 +253,10 @@ export default function QuestionnairePage() {
                     </select>
                   </F>
                 </div>
-                <F label="最後にダイビングした時期"><input type="month" value={form.lastDiveDate} onChange={(e) => set('lastDiveDate', e.target.value)} className={inp} /></F>
                 <F label="総ダイビング本数"><input type="number" min={0} value={form.totalDives || ''} onChange={(e) => set('totalDives', Number(e.target.value))} placeholder="0" className={inp} /></F>
               </div>
             )}
+            <F label="最後にダイビングした時期 *"><input type="month" value={form.lastDiveDate} onChange={(e) => set('lastDiveDate', e.target.value)} required className={inp} /></F>
             <Nav onPrev={prev} onNext={next} canNext />
           </div>
         )}
@@ -251,7 +267,7 @@ export default function QuestionnairePage() {
             {[
               ['agreeRisk', 'ダイビングにはリスクが伴うことを理解し、自己責任で参加することに同意します。'],
               ['agreeMedical', '緊急時に必要な医療処置を受けることに同意します。'],
-              ['agreePhoto', '当日の写真・動画をSNS等に使用することを許可します。（任意）'],
+              ['agreePhoto', '当日の写真・動画をSNS等に使用することを許可します。'],
             ].map(([key, label]) => (
               <label key={key} className="flex items-start gap-3 cursor-pointer">
                 <input type="checkbox" checked={form[key as keyof typeof form] as boolean}
@@ -267,6 +283,11 @@ export default function QuestionnairePage() {
                 {submitting ? '送信中…' : '提出する ✓'}
               </button>
             </div>
+            {submitError && (
+              <p role="alert" className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg p-3">
+                {submitError}
+              </p>
+            )}
           </div>
         )}
 
@@ -280,7 +301,7 @@ export default function QuestionnairePage() {
             <div className="flex justify-center">
               <QRCodeSVG value={qId} size={200} />
             </div>
-            <p className="text-xs text-gray-400">QRコード ID: {qId}</p>
+            <p className="text-xs text-gray-400">QRコードトークン: {qId}</p>
             <div className="bg-ocean-50 rounded-xl p-4 text-left">
               <p className="text-sm font-medium text-ocean-800 mb-1">提出者</p>
               <p className="text-lg font-bold text-gray-800">{form.lastName} {form.firstName}</p>
