@@ -10,6 +10,8 @@ export interface Reservation {
   status: 'confirmed' | 'pending' | 'cancelled'
   questionnaireId?: string
   notes?: string
+  questionnaireToken?: string
+  questionnaireExpiresAt?: string
 }
 
 export interface QuestionnaireData {

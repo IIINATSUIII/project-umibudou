@@ -50,7 +50,7 @@ export default function QuestionnairePage() {
     const res = await fetch('/api/public/questionnaires', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ reservationId: id, ...form }),
+      body: JSON.stringify({ token: id, ...form }),
     })
     setSubmitting(false)
 
