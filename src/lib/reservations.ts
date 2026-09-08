@@ -64,6 +64,14 @@ export async function createReservation(input: NewReservationInput): Promise<Res
   return reservation
 }
 
+/** 後勝ち検知: 読み込み時点のupdatedAtと現在値が食い違っていればtrue（詳細設計書2-5-2, MSG-20） */
+export function hasUpdateConflict(
+  current: Pick<Reservation, 'updatedAt'> | undefined,
+  expectedUpdatedAt: string
+): boolean {
+  return !!current && current.updatedAt !== expectedUpdatedAt
+}
+
 /** 予約更新。最終更新日時を自動更新し、courseId/staffId 変更時は表示用の名称も転記し直す。 */
 export async function patchReservation(id: string, delta: Partial<Reservation>): Promise<void> {
   const patch: Partial<Reservation> = { ...delta, updatedAt: new Date().toISOString() }

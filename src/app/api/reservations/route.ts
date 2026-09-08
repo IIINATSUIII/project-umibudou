@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { store } from '@/lib/dataStore'
-import { createReservation, patchReservation, type NewReservationInput } from '@/lib/reservations'
+import { createReservation, patchReservation, hasUpdateConflict, type NewReservationInput } from '@/lib/reservations'
 import { CONFIRMED_STATUS_ID } from '@/lib/masters'
 import { validateReservationInput } from '@/lib/reservationValidation'
 import { withRetry, RateLimitedError } from '@/lib/withRetry'
@@ -70,7 +70,7 @@ export async function PATCH(req: NextRequest) {
     if (expectedUpdatedAt) {
       const all = await withRetry(() => store.getReservations())
       const current = all.find((r) => r.id === id)
-      if (current && current.updatedAt !== expectedUpdatedAt) {
+      if (hasUpdateConflict(current, expectedUpdatedAt)) {
         return NextResponse.json({ error: MSG_20, conflict: true }, { status: 409 })
       }
     }
