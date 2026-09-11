@@ -1,17 +1,43 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Navigation from '@/components/Navigation'
 import { useAuth } from '@/lib/authContext'
-import { fetchCustomers, patchCustomer } from '@/lib/api'
+import { fetchCustomers, fetchQuestionnaires, fetchReservations, patchCustomer } from '@/lib/api'
 import { MSG } from '@/lib/messages'
 import {
   C_CARD_TYPES,
   validateCustomerUpdate,
   type CustomerFieldErrors,
 } from '@/lib/customerValidation'
-import type { Customer } from '@/types'
+import type { Customer, QuestionnaireData, Reservation } from '@/types'
+
+const STATUS_LABELS: Record<Reservation['status'], string> = {
+  confirmed: '確定', pending: '仮押さえ', cancelled: 'キャンセル',
+}
+
+interface DiveHistoryItem {
+  reservationId: string
+  date: string
+  course: string
+  status: Reservation['status']
+}
+
+/** 問診票のcustomerIdで紐付いた予約を、この顧客の過去ダイブ履歴として抽出する */
+function buildDiveHistory(
+  customerId: string,
+  questionnaires: QuestionnaireData[],
+  reservations: Reservation[]
+): DiveHistoryItem[] {
+  const reservationIds = new Set(
+    questionnaires.filter((q) => q.customerId === customerId).map((q) => q.reservationId)
+  )
+  return reservations
+    .filter((r) => reservationIds.has(r.id))
+    .map((r) => ({ reservationId: r.id, date: r.date, course: r.course, status: r.status }))
+    .sort((a, b) => b.date.localeCompare(a.date))
+}
 
 /** 編集フォームの入力値（数値もいったん文字列で保持する） */
 interface ProfileForm {
@@ -92,6 +118,8 @@ export default function CustomerDetailPage() {
   const user = useAuth()
   const router = useRouter()
   const [customer, setCustomer] = useState<Customer | null>(null)
+  const [questionnaires, setQuestionnaires] = useState<QuestionnaireData[]>([])
+  const [reservations, setReservations] = useState<Reservation[]>([])
 
   // 編集状態
   const [editingProfile, setEditingProfile] = useState(false)
@@ -121,7 +149,14 @@ export default function CustomerDetailPage() {
       if (!c) { router.push('/customers'); return }
       applyCustomer(c)
     })
+    fetchQuestionnaires().then(setQuestionnaires)
+    fetchReservations().then(setReservations)
   }, [id, user, router, applyCustomer])
+
+  const diveHistory = useMemo(
+    () => customer ? buildDiveHistory(customer.id, questionnaires, reservations) : [],
+    [customer, questionnaires, reservations]
+  )
 
   useEffect(() => {
     if (!toast) return
@@ -372,6 +407,23 @@ export default function CustomerDetailPage() {
             </div>
           ) : (
             <p className="text-sm text-gray-500">Cカードなし</p>
+          )}
+        </div>
+
+        <div className="bg-white rounded-xl border border-gray-200 p-4">
+          <p className="text-sm font-semibold text-gray-700 mb-2">📆 過去のダイブ履歴</p>
+          {diveHistory.length === 0 ? (
+            <p className="text-sm text-gray-400">過去のダイブ履歴はありません</p>
+          ) : (
+            <div className="divide-y divide-gray-100">
+              {diveHistory.map((h) => (
+                <div key={h.reservationId} className="flex items-center justify-between py-2 text-sm">
+                  <span className="text-gray-500 font-mono">{h.date}</span>
+                  <span className="text-gray-700 flex-1 px-3 truncate">{h.course}</span>
+                  <span className="text-xs text-gray-400">{STATUS_LABELS[h.status]}</span>
+                </div>
+              ))}
+            </div>
           )}
         </div>
 
