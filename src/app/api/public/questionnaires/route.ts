@@ -9,7 +9,17 @@ import type { QuestionnaireData, Customer } from '@/types'
  */
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json()
+    let body
+    try {
+      body = await req.json()
+    } catch {
+      return NextResponse.json({ error: '不正なJSONです' }, { status: 400 })
+    }
+    if (!body || typeof body !== 'object' || Array.isArray(body) ||
+        body.agreeRisk !== true || body.agreeMedical !== true ||
+        typeof body.agreePhoto !== 'boolean') {
+      return NextResponse.json({ error: '必須の同意事項と写真・動画の使用可否を確認してください' }, { status: 400 })
+    }
     const reservationId = String(body.reservationId ?? '')
 
     // 実在する予約に対する提出のみ受け付ける

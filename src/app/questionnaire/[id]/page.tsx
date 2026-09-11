@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useParams } from 'next/navigation'
 import { QRCodeSVG } from 'qrcode.react'
 import type { QuestionnaireData } from '@/types'
@@ -9,7 +9,9 @@ type Step = 'intro' | 'basic' | 'health' | 'today' | 'experience' | 'agree' | 'd
 const STEPS: Step[] = ['intro', 'basic', 'health', 'today', 'experience', 'agree', 'done']
 const STEP_LABELS = ['はじめに', '基本情報', '健康状態', '当日体調', '経験・スキル', '同意事項', '完了']
 
-const BLANK: Omit<QuestionnaireData, 'id' | 'reservationId' | 'submittedAt'> = {
+type QuestionnaireForm = Omit<QuestionnaireData, 'id' | 'reservationId' | 'submittedAt' | 'agreePhoto'> & { agreePhoto: boolean | null }
+
+const BLANK: QuestionnaireForm = {
   lastName: '', firstName: '', lastNameKana: '', firstNameKana: '',
   birthDate: '', gender: 'male', address: '', phone: '',
   emergencyName: '', emergencyRelation: '', emergencyPhone: '',
@@ -19,7 +21,7 @@ const BLANK: Omit<QuestionnaireData, 'id' | 'reservationId' | 'submittedAt'> = {
   sleepHours: 7, alcoholLastNight: false, alcoholToday: false, condition: 'good',
   flightWithin48h: false,
   hasCCard: false, cCardType: '', cCardOrg: '', lastDiveDate: '', totalDives: 0,
-  agreeRisk: false, agreeMedical: false, agreePhoto: false,
+  agreeRisk: false, agreeMedical: false, agreePhoto: null,
 }
 
 export default function QuestionnairePage() {
@@ -28,6 +30,9 @@ export default function QuestionnairePage() {
   const [form, setForm] = useState(BLANK)
   const [qId, setQId] = useState('')
   const [submitting, setSubmitting] = useState(false)
+
+  const [submitError, setSubmitError] = useState('')
+  const submissionLock = useRef(false)
 
   function set<K extends keyof typeof form>(key: K, value: typeof form[K]) {
     setForm((f) => ({ ...f, [key]: value }))
@@ -44,25 +49,41 @@ export default function QuestionnairePage() {
   }
 
   async function handleSubmit() {
-    setSubmitting(true)
-
-    // 予約への紐付け・顧客台帳への反映はサーバー側（公開API）で行う
-    const res = await fetch('/api/public/questionnaires', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ reservationId: id, ...form }),
-    })
-    setSubmitting(false)
-
-    if (!res.ok) {
-      alert('送信に失敗しました。時間をおいて再度お試しください。')
+    if (submissionLock.current) return
+    setSubmitError('')
+    if (!form.agreeRisk || !form.agreeMedical || typeof form.agreePhoto !== 'boolean') {
+      setSubmitError('必須の同意事項と写真・動画の使用可否を確認してください。')
       return
     }
-
-    const data = await res.json()
-    setQId(data.questionnaireId)
-    setStep('done')
-    window.scrollTo(0, 0)
+    submissionLock.current = true
+    setSubmitting(true)
+    try {
+      const res = await fetch('/api/public/questionnaires', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reservationId: id, ...form }),
+      })
+      if (!res.ok) {
+        setSubmitError(res.status === 404
+          ? '予約が見つかりません。予約URLを確認するか、スタッフにお問い合わせください。'
+          : res.status === 400
+            ? '入力内容に不備があります。同意事項と入力内容を確認してください。'
+            : '送信結果を確認できませんでした。入力内容は保持されています。時間をおいて再度お試しください。')
+        return
+      }
+      const data = await res.json()
+      if (data?.ok !== true || typeof data.questionnaireId !== 'string' || !data.questionnaireId.trim()) {
+        throw new Error('Invalid submission response')
+      }
+      setQId(data.questionnaireId)
+      setStep('done')
+      window.scrollTo(0, 0)
+    } catch {
+      setSubmitError('送信結果を確認できませんでした。入力内容は保持されています。通信環境を確認して再度お試しください。')
+    } finally {
+      submissionLock.current = false
+      setSubmitting(false)
+    }
   }
 
   const stepIdx = STEPS.indexOf(step)
@@ -174,7 +195,7 @@ export default function QuestionnairePage() {
 
         {step === 'today' && (
           <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-5">
-            <h2 className="font-bold text-gray-800">③ 当日体調・フライト予定</h2>
+            <h2 className="font-bold text-gray-800">③ 当日体調・④ フライト予定</h2>
             <F label="昨夜の睡眠時間">
               <div className="flex items-center gap-3">
                 <input type="range" min={1} max={12} value={form.sleepHours}
@@ -216,7 +237,7 @@ export default function QuestionnairePage() {
 
         {step === 'experience' && (
           <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-4">
-            <h2 className="font-bold text-gray-800">④ 経験・スキル</h2>
+            <h2 className="font-bold text-gray-800">⑤ 経験・スキル</h2>
             <label className="flex items-center gap-3 cursor-pointer">
               <input type="checkbox" checked={form.hasCCard} onChange={(e) => set('hasCCard', e.target.checked)} className="w-4 h-4 accent-ocean-600" />
               <span className="text-sm text-gray-700">Cカード（ダイビングライセンス）を持っている</span>
@@ -247,26 +268,45 @@ export default function QuestionnairePage() {
 
         {step === 'agree' && (
           <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-4">
-            <h2 className="font-bold text-gray-800">⑤ 同意事項</h2>
-            {[
-              ['agreeRisk', 'ダイビングにはリスクが伴うことを理解し、自己責任で参加することに同意します。'],
-              ['agreeMedical', '緊急時に必要な医療処置を受けることに同意します。'],
-              ['agreePhoto', '当日の写真・動画をSNS等に使用することを許可します。（任意）'],
-            ].map(([key, label]) => (
-              <label key={key} className="flex items-start gap-3 cursor-pointer">
-                <input type="checkbox" checked={form[key as keyof typeof form] as boolean}
-                  onChange={(e) => set(key as keyof typeof form, e.target.checked as never)}
-                  className="w-4 h-4 mt-0.5 accent-ocean-600" />
-                <span className="text-sm text-gray-700">{label}</span>
-              </label>
-            ))}
-            <div className="flex gap-3 pt-4">
-              <button onClick={prev} className="flex-1 border border-gray-300 text-gray-700 py-3 rounded-xl text-sm hover:bg-gray-50">← 戻る</button>
-              <button onClick={handleSubmit} disabled={!form.agreeRisk || !form.agreeMedical || submitting}
-                className="flex-1 bg-ocean-600 text-white py-3 rounded-xl font-medium text-sm hover:bg-ocean-700 disabled:opacity-40 transition-colors">
-                {submitting ? '送信中…' : '提出する ✓'}
-              </button>
-            </div>
+            <h2 className="font-bold text-gray-800">⑥ 同意事項</h2>
+            <fieldset disabled={submitting} className="space-y-4" aria-busy={submitting}>
+              <legend className="sr-only">参加に関する同意</legend>
+              {([
+                ['agreeRisk', 'ダイビングにはリスクが伴うことを理解し、自己責任で参加することに同意します。'],
+                ['agreeMedical', '緊急時に必要な医療処置を受けることに同意します。'],
+              ] as const).map(([key, label]) => (
+                <label key={key} className="flex items-start gap-3 cursor-pointer py-2">
+                  <input type="checkbox" required checked={form[key]}
+                    onChange={(e) => set(key, e.target.checked)}
+                    className="w-5 h-5 mt-0.5 accent-ocean-600" />
+                  <span className="text-sm text-gray-700">{label}<span className="text-red-600">（必須）</span></span>
+                </label>
+              ))}
+              <fieldset>
+                <legend className="text-sm text-gray-700">写真・動画のSNS等への使用<span className="text-red-600">（選択必須）</span></legend>
+                <p className="text-xs text-gray-500 mt-1">使用を許可しない場合も提出できます。</p>
+                <div className="flex gap-6 mt-2">
+                  {([true, false] as const).map((value) => (
+                    <label key={String(value)} className="flex items-center gap-2 py-2 cursor-pointer">
+                      <input type="radio" name="agreePhoto" required checked={form.agreePhoto === value}
+                        onChange={() => set('agreePhoto', value)} className="w-5 h-5 accent-ocean-600" />
+                      <span className="text-sm">{value ? '可（許可する）' : '不可（許可しない）'}</span>
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
+              {(!form.agreeRisk || !form.agreeMedical || form.agreePhoto === null) && (
+                <p className="text-sm text-gray-600">必須の2項目に同意し、写真・動画の使用可否を選択してください。</p>
+              )}
+              <div className="flex gap-3 pt-4">
+                <button onClick={prev} className="flex-1 border border-gray-300 text-gray-700 py-3 rounded-xl text-sm hover:bg-gray-50">← 戻る</button>
+                <button onClick={handleSubmit} disabled={!form.agreeRisk || !form.agreeMedical || form.agreePhoto === null || submitting}
+                  className="flex-1 bg-ocean-600 text-white py-3 rounded-xl font-medium text-sm hover:bg-ocean-700 disabled:opacity-40 transition-colors">
+                  {submitting ? '送信中…' : 'QRコードを発行する'}
+                </button>
+              </div>
+            </fieldset>
+            {submitError && <p role="alert" className="text-sm text-red-700 bg-red-50 rounded-lg p-3">{submitError}</p>}
           </div>
         )}
 

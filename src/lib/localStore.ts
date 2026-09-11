@@ -20,7 +20,9 @@ async function readStore<T>(name: string, seed: T[]): Promise<T[]> {
   const file = path.join(DATA_DIR, `${name}.json`)
   try {
     return JSON.parse(await fs.readFile(file, 'utf8')) as T[]
-  } catch {
+  } catch (error) {
+    // 破損・権限エラーで既存の同意記録を上書きしない。
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
     // ファイルがまだ無い → モックデータで初期化
     await writeStore(name, seed)
     return seed
