@@ -59,6 +59,10 @@ export const MOCK_RESERVATIONS: Reservation[] = [
 export const MOCK_QUESTIONNAIRES: QuestionnaireData[] = [
   {
     id: 'Q001',
+    postalCode: '150-0001',
+    email: 'hanako@example.com',
+    hypertension: false,
+    medicalCertificate: false,
     reservationId: 'R001',
     submittedAt: new Date().toISOString(),
     lastName: '田中',
