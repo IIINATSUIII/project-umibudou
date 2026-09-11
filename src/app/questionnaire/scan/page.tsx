@@ -9,6 +9,7 @@ import type { QuestionnaireData } from '@/types'
 
 const HEALTH_FLAGS: [keyof QuestionnaireData, string][] = [
   ['heartDisease', '心臓・循環器系疾患'],
+  ['hypertension', '高血圧'],
   ['respiratoryDisease', '呼吸器系疾患'],
   ['earDisease', '耳・副鼻腔の疾患'],
   ['epilepsy', 'てんかん・失神'],
@@ -102,7 +103,9 @@ function ScanContent() {
               </div>
               <div className="p-4 grid grid-cols-2 gap-3">
                 <I label="生年月日" value={result.birthDate} />
-                <I label="性別" value={result.gender === 'male' ? '男性' : result.gender === 'female' ? '女性' : 'その他'} />
+                <I label="性別" value={result.gender === 'male' ? '男性' : result.gender === 'female' ? '女性' : result.gender === 'other' ? 'その他' : '未回答'} />
+                <I label="高血圧" value={result.hypertension === true ? 'あり' : result.hypertension === false ? 'なし' : '未回答'} />
+                <I label="潜水許可書（自己申告）" value={result.medicalCertificate === true ? '持参あり' : result.medicalCertificate === false ? '持参なし' : '未回答'} />
                 <I label="電話番号" value={result.phone} />
                 <I label="体調" value={result.condition === 'good' ? '😊 良い' : result.condition === 'normal' ? '😐 普通' : '😔 悪い'} />
                 <I label="睡眠時間" value={`${result.sleepHours}時間`} />

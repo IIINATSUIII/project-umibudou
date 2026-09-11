@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { store } from '@/lib/dataStore'
 import type { QuestionnaireData, Customer } from '@/types'
+import { BASIC_FIELDS, validateQuestionnaire } from '@/lib/questionnaireValidation'
 
 /**
  * POST /api/public/questionnaires — 問診票提出（ログイン不要）
@@ -9,7 +10,18 @@ import type { QuestionnaireData, Customer } from '@/types'
  */
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json()
+    const body = await req.json().catch(() => null)
+    const errors = validateQuestionnaire(body)
+    if (Object.keys(errors).length) {
+      return NextResponse.json({ error: '入力内容を確認してください。', errors }, { status: 400 })
+    }
+    if (body.agreeRisk !== true || body.agreeMedical !== true) {
+      return NextResponse.json({ error: '同意事項に同意してください。' }, { status: 400 })
+    }
+    for (const key of BASIC_FIELDS) {
+      if (typeof body[key] === 'string') body[key] = body[key].trim()
+    }
+    body.medicationName = body.medication ? body.medicationName.trim() : ''
     const reservationId = String(body.reservationId ?? '')
 
     // 実在する予約に対する提出のみ受け付ける
@@ -47,7 +59,7 @@ export async function POST(req: NextRequest) {
         lastNameKana: qData.lastNameKana,
         firstNameKana: qData.firstNameKana,
         phone: qData.phone,
-        email: '',
+        email: qData.email ?? '',
         lastVisit: today,
         visitCount: 1,
         hasCCard: qData.hasCCard,
@@ -55,6 +67,7 @@ export async function POST(req: NextRequest) {
         totalDives: qData.totalDives,
         healthNotes: [
           qData.heartDisease       && '心臓疾患',
+          qData.hypertension       && '高血圧',
           qData.respiratoryDisease && '呼吸器疾患',
           qData.earDisease         && '耳の疾患',
           qData.epilepsy           && 'てんかん',

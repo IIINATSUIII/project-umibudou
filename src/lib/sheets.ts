@@ -41,6 +41,8 @@ export const HEADERS = {
     'flightWithin48h',
     'hasCCard','cCardType','cCardOrg','lastDiveDate','totalDives',
     'agreeRisk','agreeMedical','agreePhoto',
+    // 既存データの列位置を維持するため、追加項目は必ず末尾へ。
+    'postalCode','email','hypertension','medicalCertificate',
   ],
   CUSTOMERS: [
     'id','lastName','firstName','lastNameKana','firstNameKana',
@@ -56,6 +58,10 @@ function rowToObj<T>(headers: string[], row: string[]): T {
   const obj: Record<string, unknown> = {}
   headers.forEach((h, i) => {
     const val = row[i] ?? ''
+    if (val === '' && (h === 'hypertension' || h === 'medicalCertificate')) {
+      obj[h] = undefined
+      return
+    }
     // boolean 変換
     if (val === 'TRUE' || val === 'true') obj[h] = true
     else if (val === 'FALSE' || val === 'false') obj[h] = false

@@ -22,7 +22,12 @@ export interface QuestionnaireData {
   lastNameKana: string
   firstNameKana: string
   birthDate: string
-  gender: 'male' | 'female' | 'other'
+  gender: 'male' | 'female' | 'other' | 'unanswered'
+  // 旧データでは未取得。欠落を「なし」と解釈しない。
+  postalCode?: string
+  email?: string
+  hypertension?: boolean
+  medicalCertificate?: boolean
   address: string
   phone: string
   emergencyName: string
