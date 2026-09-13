@@ -7,6 +7,8 @@ import { useAuth } from '@/lib/authContext'
 import { fetchCustomers, patchCustomer } from '@/lib/api'
 import type { Customer } from '@/types'
 
+const GUIDE_NOTE_SAVED_MESSAGE = '保存しました。'
+
 export default function CustomerDetailPage() {
   const { id } = useParams<{ id: string }>()
   const user = useAuth()
@@ -15,6 +17,8 @@ export default function CustomerDetailPage() {
   const [editing, setEditing] = useState(false)
   const [guideNote, setGuideNote] = useState('')
   const [saving, setSaving] = useState(false)
+  const [saveMessage, setSaveMessage] = useState('')
+  const [saveError, setSaveError] = useState('')
 
   useEffect(() => {
     if (user === undefined) return
@@ -30,10 +34,18 @@ export default function CustomerDetailPage() {
   async function handleSaveNote() {
     if (!customer) return
     setSaving(true)
-    await patchCustomer(customer.id, { guideNotes: guideNote })
-    setCustomer((c) => c ? { ...c, guideNotes: guideNote } : c)
-    setSaving(false)
-    setEditing(false)
+    setSaveMessage('')
+    setSaveError('')
+    try {
+      await patchCustomer(customer.id, { guideNotes: guideNote })
+      setCustomer((c) => c ? { ...c, guideNotes: guideNote } : c)
+      setEditing(false)
+      setSaveMessage(GUIDE_NOTE_SAVED_MESSAGE)
+    } catch {
+      setSaveError('ガイドメモの保存に失敗しました。時間をおいて再試行してください。')
+    } finally {
+      setSaving(false)
+    }
   }
 
   if (!customer) return <div className="min-h-screen flex items-center justify-center text-gray-400 text-sm">読み込み中…</div>
@@ -110,9 +122,11 @@ export default function CustomerDetailPage() {
           <div className="flex items-center justify-between">
             <p className="text-sm font-semibold text-gray-700">📝 ガイドメモ</p>
             {!editing && (
-              <button onClick={() => setEditing(true)} className="text-xs text-ocean-600 hover:text-ocean-700 font-medium">編集</button>
+              <button onClick={() => { setSaveMessage(''); setSaveError(''); setEditing(true) }} className="text-xs text-ocean-600 hover:text-ocean-700 font-medium">編集</button>
             )}
           </div>
+          {saveMessage && <p role="status" className="text-sm text-green-700 bg-green-50 border border-green-200 rounded-lg px-3 py-2">{saveMessage}</p>}
+          {saveError && <p role="alert" className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{saveError}</p>}
           {editing ? (
             <>
               <textarea value={guideNote} onChange={(e) => setGuideNote(e.target.value)}
