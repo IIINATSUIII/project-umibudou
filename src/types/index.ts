@@ -87,6 +87,8 @@ export interface Customer {
   /** 生年月日（YYYY-MM-DD）。年齢は本項目から算出する */
   birthDate?: string
   gender?: 'male' | 'female' | 'other'
+  /** 郵便番号（000-0000形式） */
+  postalCode?: string
   address?: string
   emergencyName?: string
   emergencyRelation?: string
@@ -95,6 +97,8 @@ export interface Customer {
   cCardOrg?: string
   /** 最終ダイブ日（問診票の「最後にダイビングした時期」） */
   lastDiveDate?: string
+  /** DM同意フラグ（true: 同意済、false: 未同意） */
+  dmConsent?: boolean
 }
 
 export interface WeatherDay {

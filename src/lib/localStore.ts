@@ -88,6 +88,23 @@ export async function getCustomers(): Promise<Customer[]> {
   return readStore<Customer>('customers', MOCK_CUSTOMERS)
 }
 
+/** 顧客を氏名・電話・メール・顧客IDの部分一致で検索する。 */
+export async function searchCustomers(query: string): Promise<Customer[]> {
+  const normalizedQuery = query.trim().toLocaleLowerCase()
+  if (!normalizedQuery) return getCustomers()
+
+  const customers = await getCustomers()
+  return customers.filter((customer) => [
+    customer.id,
+    customer.lastName,
+    customer.firstName,
+    customer.lastNameKana,
+    customer.firstNameKana,
+    customer.phone,
+    customer.email,
+  ].some((value) => value.toLocaleLowerCase().includes(normalizedQuery)))
+}
+
 export async function addCustomer(data: Customer): Promise<void> {
   const all = await getCustomers()
   all.push(data)

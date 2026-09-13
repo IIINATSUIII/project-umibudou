@@ -3,10 +3,11 @@ import { store } from '@/lib/dataStore'
 import { MSG } from '@/lib/messages'
 import { pickEditableFields, validateCustomerUpdate } from '@/lib/customerValidation'
 
-/** GET /api/customers — 顧客一覧取得 */
-export async function GET() {
+/** GET /api/customers — 顧客一覧取得・氏名/連絡先検索 */
+export async function GET(req: NextRequest) {
   try {
-    return NextResponse.json(await store.getCustomers())
+    const query = new URL(req.url).searchParams.get('q')?.trim() ?? ''
+    return NextResponse.json(query ? await store.searchCustomers(query) : await store.getCustomers())
   } catch (err) {
     console.error('[GET /api/customers]', err)
     return NextResponse.json({ error: 'Failed to fetch customers' }, { status: 500 })

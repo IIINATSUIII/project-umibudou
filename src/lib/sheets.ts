@@ -52,6 +52,8 @@ export const HEADERS = {
     // 顧客自動登録で書き込む列（詳細設計書 5-3-1 No.2・8〜20）。既存シートの列ズレを避けるため末尾に足す
     'createdAt','birthDate','gender','address',
     'emergencyName','emergencyRelation','emergencyPhone','cCardOrg','lastDiveDate',
+    // Issue #21の設計書列。既存データの列位置を壊さないため末尾に追加
+    'postalCode','dmConsent',
   ],
 }
 
@@ -177,6 +179,23 @@ export async function updateQuestionnaire(
 export async function getCustomers(): Promise<Customer[]> {
   const rows = await getRows(SHEET.CUSTOMERS, HEADERS.CUSTOMERS)
   return rows.map((r) => rowToObj<Customer>(HEADERS.CUSTOMERS, r))
+}
+
+/** 顧客を氏名・電話・メール・顧客IDの部分一致で検索する。 */
+export async function searchCustomers(query: string): Promise<Customer[]> {
+  const normalizedQuery = query.trim().toLocaleLowerCase()
+  if (!normalizedQuery) return getCustomers()
+
+  const customers = await getCustomers()
+  return customers.filter((customer) => [
+    customer.id,
+    customer.lastName,
+    customer.firstName,
+    customer.lastNameKana,
+    customer.firstNameKana,
+    customer.phone,
+    customer.email,
+  ].some((value) => value.toLocaleLowerCase().includes(normalizedQuery)))
 }
 
 export async function addCustomer(data: Customer): Promise<void> {
