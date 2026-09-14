@@ -40,7 +40,9 @@ export interface QuestionnaireData {
   medicationName: string
   latexAllergy: boolean
   // 当日体調
-  sleepHours: number
+  sleepHours: number | null
+  sleepCategory?: string
+  conditionDetails?: string
   alcoholLastNight: boolean
   alcoholToday: boolean
   condition: 'good' | 'normal' | 'bad'
@@ -51,7 +53,8 @@ export interface QuestionnaireData {
   cCardType: string
   cCardOrg: string
   lastDiveDate: string
-  totalDives: number
+  lastDivePeriod?: string
+  totalDives: number | null
   // 同意
   agreeRisk: boolean
   agreeMedical: boolean
@@ -70,7 +73,7 @@ export interface Customer {
   visitCount: number
   hasCCard: boolean
   cCardType: string
-  totalDives: number
+  totalDives: number | null
   healthNotes: string
   guideNotes: string
 }

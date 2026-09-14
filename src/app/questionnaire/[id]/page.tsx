@@ -3,13 +3,14 @@
 import { useRef, useState } from 'react'
 import { useParams } from 'next/navigation'
 import { QRCodeSVG } from 'qrcode.react'
+import { SLEEP_OPTIONS, CARD_OPTIONS, ORG_OPTIONS, DIVE_OPTIONS, TODAY_FIELDS, validateQuestionnaireExperience, type FieldErrors } from '@/lib/questionnaireValidation'
 import type { QuestionnaireData } from '@/types'
 
 type Step = 'intro' | 'basic' | 'health' | 'today' | 'experience' | 'agree' | 'done'
 const STEPS: Step[] = ['intro', 'basic', 'health', 'today', 'experience', 'agree', 'done']
 const STEP_LABELS = ['はじめに', '基本情報', '健康状態', '当日体調', '経験・スキル', '同意事項', '完了']
 
-type QuestionnaireForm = Omit<QuestionnaireData, 'id' | 'reservationId' | 'submittedAt' | 'agreePhoto'> & { agreePhoto: boolean | null }
+type QuestionnaireForm = Omit<QuestionnaireData, 'id' | 'reservationId' | 'submittedAt' | 'agreePhoto' | 'alcoholLastNight' | 'alcoholToday' | 'flightWithin48h' | 'condition' | 'totalDives'> & { agreePhoto: boolean | null; alcoholLastNight: boolean | null; alcoholToday: boolean | null; flightWithin48h: boolean | null; condition: '' | 'good' | 'normal' | 'bad'; totalDives: string }
 
 const BLANK: QuestionnaireForm = {
   lastName: '', firstName: '', lastNameKana: '', firstNameKana: '',
@@ -18,9 +19,9 @@ const BLANK: QuestionnaireForm = {
   heartDisease: false, respiratoryDisease: false, earDisease: false,
   epilepsy: false, diabetes: false, pregnant: false, panicDisorder: false,
   medication: false, medicationName: '', latexAllergy: false,
-  sleepHours: 7, alcoholLastNight: false, alcoholToday: false, condition: 'good',
-  flightWithin48h: false,
-  hasCCard: false, cCardType: '', cCardOrg: '', lastDiveDate: '', totalDives: 0,
+  sleepHours: null, sleepCategory: '', conditionDetails: '', alcoholLastNight: null, alcoholToday: null, condition: '',
+  flightWithin48h: null,
+  hasCCard: false, cCardType: '', cCardOrg: '', lastDiveDate: '', lastDivePeriod: '', totalDives: '',
   agreeRisk: false, agreeMedical: false, agreePhoto: null,
 }
 
@@ -28,6 +29,8 @@ export default function QuestionnairePage() {
   const { id } = useParams<{ id: string }>()
   const [step, setStep] = useState<Step>('intro')
   const [form, setForm] = useState(BLANK)
+  const [errors, setErrors] = useState<FieldErrors>({})
+  const payload = { ...form, totalDives: form.totalDives === '' ? null : (/^[0-9]+$/.test(form.totalDives) ? Number(form.totalDives) : NaN) }
   const [qId, setQId] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
@@ -39,6 +42,12 @@ export default function QuestionnairePage() {
   }
 
   function next() {
+    if (step === 'today' || step === 'experience') {
+      const all = validateQuestionnaireExperience(payload)
+      const fields = Object.fromEntries(Object.entries(all).filter(([key]) => step === 'today' ? (TODAY_FIELDS as readonly string[]).includes(key) : !(TODAY_FIELDS as readonly string[]).includes(key)))
+      setErrors(fields)
+      if (Object.keys(fields).length) return
+    }
     const idx = STEPS.indexOf(step)
     setStep(STEPS[idx + 1])
     window.scrollTo(0, 0)
@@ -51,6 +60,13 @@ export default function QuestionnairePage() {
   async function handleSubmit() {
     if (submissionLock.current) return
     setSubmitError('')
+    const fieldErrors = validateQuestionnaireExperience(payload)
+    if (Object.keys(fieldErrors).length) {
+      setErrors(fieldErrors)
+      setStep(TODAY_FIELDS.some(key => fieldErrors[key]) ? 'today' : 'experience')
+      window.scrollTo(0, 0)
+      return
+    }
     if (!form.agreeRisk || !form.agreeMedical || typeof form.agreePhoto !== 'boolean') {
       setSubmitError('必須の同意事項と写真・動画の使用可否を確認してください。')
       return
@@ -61,9 +77,18 @@ export default function QuestionnairePage() {
       const res = await fetch('/api/public/questionnaires', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reservationId: id, ...form }),
+        body: JSON.stringify({ reservationId: id, ...payload }),
       })
       if (!res.ok) {
+        if (res.status === 400) {
+          const errorData = await res.json()
+          if (errorData.fieldErrors && typeof errorData.fieldErrors === 'object') {
+            setErrors(errorData.fieldErrors)
+            setStep(TODAY_FIELDS.some(key => errorData.fieldErrors[key]) ? 'today' : 'experience')
+            window.scrollTo(0, 0)
+            return
+          }
+        }
         setSubmitError(res.status === 404
           ? '予約が見つかりません。予約URLを確認するか、スタッフにお問い合わせください。'
           : res.status === 400
@@ -195,42 +220,20 @@ export default function QuestionnairePage() {
 
         {step === 'today' && (
           <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-5">
-            <h2 className="font-bold text-gray-800">③ 当日体調・④ フライト予定</h2>
-            <F label="昨夜の睡眠時間">
-              <div className="flex items-center gap-3">
-                <input type="range" min={1} max={12} value={form.sleepHours}
-                  onChange={(e) => set('sleepHours', Number(e.target.value))} className="flex-1 accent-ocean-600" />
-                <span className="text-sm font-semibold w-16">{form.sleepHours}時間</span>
-              </div>
-            </F>
-            <div className="space-y-3">
-              {[
-                ['alcoholLastNight', '昨夜、飲酒した'] as const,
-                ['alcoholToday', '今日すでに飲酒した'] as const,
-              ].map(([key, label]) => (
-                <label key={key} className="flex items-center gap-3 cursor-pointer">
-                  <input type="checkbox" checked={form[key]} onChange={(e) => set(key, e.target.checked)} className="w-4 h-4 accent-ocean-600" />
-                  <span className="text-sm text-gray-700">{label}</span>
-                </label>
-              ))}
-            </div>
-            <F label="今日の体調">
-              <div className="flex gap-3">
-                {(['good','normal','bad'] as const).map((c) => (
-                  <button key={c} type="button" onClick={() => set('condition', c)}
-                    className={`flex-1 py-2 rounded-lg text-sm border transition-colors ${form.condition === c ? 'bg-ocean-600 text-white border-ocean-600' : 'border-gray-300 text-gray-600 hover:bg-gray-50'}`}>
-                    {c === 'good' ? '😊 良い' : c === 'normal' ? '😐 普通' : '😔 悪い'}
-                  </button>
-                ))}
-              </div>
-            </F>
-            <label className="flex items-start gap-3 cursor-pointer">
-              <input type="checkbox" checked={form.flightWithin48h} onChange={(e) => set('flightWithin48h', e.target.checked)} className="w-4 h-4 mt-0.5 accent-ocean-600" />
-              <span className="text-sm text-gray-700">
-                ダイビング終了後48時間以内に飛行機に乗る予定がある
-                <span className="block text-xs text-red-600 mt-0.5">※ 減圧症リスクのためガイドに確認が必要です</span>
-              </span>
-            </label>
+            <h2 className="font-bold text-gray-800">③ 当日体調</h2>
+            <Choice name="sleepCategory" label="前夜の睡眠時間（必須）" value={form.sleepCategory ?? ''} options={SLEEP_OPTIONS} error={errors.sleepCategory} onChange={value => set('sleepCategory', value)} />
+            {(['alcoholLastNight', 'alcoholToday'] as const).map(key => (
+              <YesNo key={key} name={key} label={key === 'alcoholLastNight' ? '前夜の飲酒（必須）' : '当日の飲酒（必須）'} value={form[key]} error={errors[key]} onChange={value => set(key, value)} />
+            ))}
+            <Choice name="condition" label="当日の体調（必須）" value={form.condition} options={['good', 'normal', 'bad']} labels={['良い', '普通', '悪い']} error={errors.condition} onChange={value => set('condition', value as QuestionnaireForm['condition'])} />
+            {form.condition === 'bad' && <div>
+              <label htmlFor="conditionDetails" className="block text-sm mb-1">体調の詳細（必須）</label>
+              <textarea id="conditionDetails" value={form.conditionDetails} maxLength={1000} aria-invalid={!!errors.conditionDetails} aria-describedby="conditionDetails-error" onChange={e => set('conditionDetails', e.target.value)} className={inp} />
+              <FieldError name="conditionDetails" error={errors.conditionDetails} />
+            </div>}
+            <h2 className="font-bold text-gray-800 border-t pt-4">④ フライト予定</h2>
+            <YesNo name="flightWithin48h" label="ダイビング終了後48時間以内の飛行機搭乗予定（必須）" value={form.flightWithin48h} error={errors.flightWithin48h} onChange={value => set('flightWithin48h', value)} />
+            {form.flightWithin48h && <p role="status" className="text-sm text-red-700">減圧症リスク確認のため、ガイドに搭乗予定をお伝えください。</p>}
             <Nav onPrev={prev} onNext={next} canNext />
           </div>
         )}
@@ -238,30 +241,14 @@ export default function QuestionnairePage() {
         {step === 'experience' && (
           <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-4">
             <h2 className="font-bold text-gray-800">⑤ 経験・スキル</h2>
-            <label className="flex items-center gap-3 cursor-pointer">
-              <input type="checkbox" checked={form.hasCCard} onChange={(e) => set('hasCCard', e.target.checked)} className="w-4 h-4 accent-ocean-600" />
-              <span className="text-sm text-gray-700">Cカード（ダイビングライセンス）を持っている</span>
-            </label>
-            {form.hasCCard && (
-              <div className="space-y-3 pl-7">
-                <div className="grid grid-cols-2 gap-3">
-                  <F label="カード種別">
-                    <select value={form.cCardType} onChange={(e) => set('cCardType', e.target.value)} className={inp}>
-                      <option value="">選択</option>
-                      {['OW','AOW','Rescue','Divemaster','Instructor'].map((t) => <option key={t}>{t}</option>)}
-                    </select>
-                  </F>
-                  <F label="認定団体">
-                    <select value={form.cCardOrg} onChange={(e) => set('cCardOrg', e.target.value)} className={inp}>
-                      <option value="">選択</option>
-                      {['PADI','NAUI','SSI','BSAC','その他'].map((o) => <option key={o}>{o}</option>)}
-                    </select>
-                  </F>
-                </div>
-                <F label="最後にダイビングした時期"><input type="month" value={form.lastDiveDate} onChange={(e) => set('lastDiveDate', e.target.value)} className={inp} /></F>
-                <F label="総ダイビング本数"><input type="number" min={0} value={form.totalDives || ''} onChange={(e) => set('totalDives', Number(e.target.value))} placeholder="0" className={inp} /></F>
-              </div>
-            )}
+            <Choice name="cCardType" label="Cカードの有無・種別（必須）" value={form.cCardType} options={CARD_OPTIONS} error={errors.cCardType} onChange={value => setForm(f => ({ ...f, cCardType: value, hasCCard: value !== '' && value !== '未取得', cCardOrg: value === '未取得' || value === '' ? '' : f.cCardOrg }))} />
+            {form.hasCCard && <Choice name="cCardOrg" label="認定団体（任意）" value={form.cCardOrg} options={ORG_OPTIONS} error={errors.cCardOrg} onChange={value => set('cCardOrg', value)} />}
+            <Choice name="lastDivePeriod" label="最後にダイビングした時期（必須）" value={form.lastDivePeriod ?? ''} options={DIVE_OPTIONS} error={errors.lastDivePeriod} onChange={value => set('lastDivePeriod', value)} />
+            <div>
+              <label htmlFor="totalDives" className="block text-sm mb-1">総ダイビング本数（任意）</label>
+              <input id="totalDives" type="text" inputMode="numeric" value={form.totalDives} onChange={e => set('totalDives', e.target.value)} aria-invalid={!!errors.totalDives} aria-describedby="totalDives-error" placeholder="例：0" className={inp} />
+              <FieldError name="totalDives" error={errors.totalDives} />
+            </div>
             <Nav onPrev={prev} onNext={next} canNext />
           </div>
         )}
@@ -347,4 +334,27 @@ function Nav({ onPrev, onNext, canNext }: { onPrev: () => void; onNext: () => vo
       </button>
     </div>
   )
+}
+
+function FieldError({ name, error }: { name: string; error?: string }) {
+  return <p id={name + '-error'} role={error ? 'alert' : undefined} className="text-sm text-red-700 mt-1">{error}</p>
+}
+function Choice({ name, label, value, options, labels, error, onChange }: { name: string; label: string; value: string; options: readonly string[]; labels?: readonly string[]; error?: string; onChange: (value: string) => void }) {
+  return <div>
+    <label htmlFor={name} className="block text-sm mb-1">{label}</label>
+    <select id={name} value={value} onChange={e => onChange(e.target.value)} aria-invalid={!!error} aria-describedby={name + '-error'} className={inp}>
+      <option value="">選択してください</option>
+      {options.map((option, i) => <option key={option} value={option}>{labels?.[i] ?? option}</option>)}
+    </select>
+    <FieldError name={name} error={error} />
+  </div>
+}
+function YesNo({ name, label, value, error, onChange }: { name: string; label: string; value: boolean | null; error?: string; onChange: (value: boolean) => void }) {
+  return <fieldset aria-describedby={name + '-error'} aria-invalid={!!error}>
+    <legend className="text-sm">{label}</legend>
+    <div className="flex gap-6">{[true, false].map(answer => <label key={String(answer)} className="flex items-center gap-2 py-3">
+      <input type="radio" name={name} checked={value === answer} onChange={() => onChange(answer)} className="w-5 h-5 accent-ocean-600" />{answer ? 'あり' : 'なし'}
+    </label>)}</div>
+    <FieldError name={name} error={error} />
+  </fieldset>
 }

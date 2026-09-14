@@ -41,6 +41,7 @@ export const HEADERS = {
     'flightWithin48h',
     'hasCCard','cCardType','cCardOrg','lastDiveDate','totalDives',
     'agreeRisk','agreeMedical','agreePhoto',
+    'sleepCategory','conditionDetails','lastDivePeriod',
   ],
   CUSTOMERS: [
     'id','lastName','firstName','lastNameKana','firstNameKana',
@@ -61,7 +62,7 @@ function rowToObj<T>(headers: string[], row: string[]): T {
     else if (val === 'FALSE' || val === 'false') obj[h] = false
     // number 変換
     else if (h === 'guestCount' || h === 'sleepHours' || h === 'totalDives' || h === 'visitCount') {
-      obj[h] = val === '' ? 0 : Number(val)
+      obj[h] = val === '' ? (h === 'sleepHours' || h === 'totalDives' ? null : 0) : Number(val)
     }
     else obj[h] = val
   })

@@ -105,7 +105,8 @@ function ScanContent() {
                 <I label="性別" value={result.gender === 'male' ? '男性' : result.gender === 'female' ? '女性' : 'その他'} />
                 <I label="電話番号" value={result.phone} />
                 <I label="体調" value={result.condition === 'good' ? '😊 良い' : result.condition === 'normal' ? '😐 普通' : '😔 悪い'} />
-                <I label="睡眠時間" value={`${result.sleepHours}時間`} />
+                <I label="睡眠時間" value={result.sleepCategory || (result.sleepHours == null ? '未記録' : `${result.sleepHours}時間`)} />
+                <I label="体調詳細" value={result.conditionDetails || '特記なし'} />
                 <I label="提出日時" value={new Date(result.submittedAt).toLocaleString('ja-JP')} />
               </div>
             </div>
@@ -121,12 +122,12 @@ function ScanContent() {
               {result.hasCCard ? (
                 <div className="space-y-1 text-sm">
                   <p>Cカード：{result.cCardType}（{result.cCardOrg}）</p>
-                  <p>総本数：{result.totalDives} 本</p>
-                  {result.lastDiveDate && <p>前回：{result.lastDiveDate}</p>}
                 </div>
               ) : (
-                <p className="text-sm text-gray-500">Cカードなし（体験ダイビング）</p>
+                <p className="text-sm text-gray-500">Cカード未取得</p>
               )}
+              <p className="text-sm">総本数：{result.totalDives == null ? '未記録' : `${result.totalDives} 本`}</p>
+              <p className="text-sm">前回：{result.lastDivePeriod || result.lastDiveDate || '未記録'}</p>
             </div>
 
             <div className="bg-white rounded-xl border border-gray-200 p-4">

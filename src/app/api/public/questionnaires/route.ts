@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { validateQuestionnaireExperience, normalizeQuestionnaireExperience } from '@/lib/questionnaireValidation'
 import { store } from '@/lib/dataStore'
 import type { QuestionnaireData, Customer } from '@/types'
 
@@ -20,6 +21,9 @@ export async function POST(req: NextRequest) {
         typeof body.agreePhoto !== 'boolean') {
       return NextResponse.json({ error: '必須の同意事項と写真・動画の使用可否を確認してください' }, { status: 400 })
     }
+    const fieldErrors = validateQuestionnaireExperience(body)
+    if (Object.keys(fieldErrors).length) return NextResponse.json({ error: '入力内容を確認してください', fieldErrors }, { status: 400 })
+    body = normalizeQuestionnaireExperience(body)
     const reservationId = String(body.reservationId ?? '')
 
     // 実在する予約に対する提出のみ受け付ける

@@ -61,7 +61,7 @@ export default function CustomerDetailPage() {
             {[
               { label: '来店回数', value: `${customer.visitCount}回` },
               { label: '最終来店', value: customer.lastVisit },
-              { label: '総本数', value: customer.totalDives ? `${customer.totalDives}本` : '未記録' },
+              { label: '総本数', value: customer.totalDives == null ? '未記録' : `${customer.totalDives}本` },
             ].map((s) => (
               <div key={s.label} className="bg-white/10 rounded-lg p-2.5 text-center">
                 <p className="text-xs text-white/60">{s.label}</p>
@@ -92,7 +92,7 @@ export default function CustomerDetailPage() {
               <span className="bg-teal-50 text-teal-700 border border-teal-200 text-sm px-3 py-1 rounded-lg font-medium">
                 {customer.cCardType}
               </span>
-              <span className="text-sm text-gray-500">総本数 {customer.totalDives}本</span>
+              <span className="text-sm text-gray-500">総本数 {customer.totalDives == null ? '未記録' : `${customer.totalDives}本`}</span>
             </div>
           ) : (
             <p className="text-sm text-gray-500">Cカードなし</p>
