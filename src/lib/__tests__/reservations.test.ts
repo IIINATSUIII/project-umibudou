@@ -1,16 +1,20 @@
 import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest'
 import type { Reservation } from '@/types'
 
-const { getReservations } = vi.hoisted(() => ({ getReservations: vi.fn() }))
+const { getReservations, updateReservation } = vi.hoisted(() => ({
+  getReservations: vi.fn(),
+  updateReservation: vi.fn(),
+}))
 vi.mock('@/lib/dataStore', () => ({
-  store: { getReservations, addReservation: vi.fn(), updateReservation: vi.fn() },
+  store: { getReservations, addReservation: vi.fn(), updateReservation },
 }))
 
 let generateReservationId: typeof import('../reservations').generateReservationId
 let hasUpdateConflict: typeof import('../reservations').hasUpdateConflict
+let patchReservation: typeof import('../reservations').patchReservation
 
 beforeAll(async () => {
-  ({ generateReservationId, hasUpdateConflict } = await import('../reservations'))
+  ({ generateReservationId, hasUpdateConflict, patchReservation } = await import('../reservations'))
 })
 
 function fakeReservation(id: string): Reservation {
@@ -48,5 +52,20 @@ describe('hasUpdateConflict', () => {
   it('updatedAtが食い違っていればtrue（後勝ち検知、MSG-20対象）', () => {
     const current = { updatedAt: '2026-09-10T09:00:00.000Z' }
     expect(hasUpdateConflict(current, '2026-09-10T00:00:00.000Z')).toBe(true)
+  })
+})
+
+describe('patchReservation', () => {
+  beforeEach(() => updateReservation.mockReset())
+
+  it('書き込んだ最終更新日時を返し、ストアにも同じ値を渡す（画面が次の更新で使うため）', async () => {
+    const returned = await patchReservation('R-20260910-001', { status: 'STS-03' })
+
+    expect(updateReservation).toHaveBeenCalledTimes(1)
+    const [id, patch] = updateReservation.mock.calls[0]
+    expect(id).toBe('R-20260910-001')
+    expect(patch.status).toBe('STS-03')
+    expect(returned).toBe(patch.updatedAt)
+    expect(Number.isNaN(Date.parse(returned))).toBe(false)
   })
 })
