@@ -43,8 +43,10 @@ export async function fetchWeather(): Promise<WeatherDay[]> {
     const waves: string[] = weatherSeries.areas[0].waves?.slice(0, 3) ?? ['－', '－', '－']
 
     // 気温（timeSeries[2]、那覇＝天気の「本島中南部」に対応するアメダス地点）
-    // 天気は3日分・timeDefinesが日付単位なのに対し、気温は当日/翌日の最高・最低が
-    // 1日2件ずつ（=最大2日分）しか配信されないため、明後日分は取得できないことがある
+    // timeDefinesは観測の時系列ではなく予報要素（その日の最高／最低）の発表時刻なので、
+    // 日付でグルーピングしても「同じ要素が重複しているだけ」で実際には最低気温が
+    // 提供されていない場合がある（その場合は最高と同値になる）。
+    // そのためmin===maxの時は最低気温が取れていないとみなし「－」にする。
     const tempSeries = timeSeries[2]
     const tempsByDate = new Map<string, number[]>()
     if (tempSeries) {
@@ -60,16 +62,50 @@ export async function fetchWeather(): Promise<WeatherDay[]> {
       })
     }
 
+    // 週間予報（json[1]）には明示的なtempsMin/tempsMaxがあり、短期予報より素性が明確。
+    // 短期予報が2日分しか配信しない明後日分も、週間予報側にあればここで補える。
+    const weeklyTempSeries = json[1]?.timeSeries?.[1]
+    const weeklyByDate = new Map<string, { min?: number; max?: number }>()
+    if (weeklyTempSeries) {
+      const weeklyDates: string[] = weeklyTempSeries.timeDefines
+      const weeklyArea = weeklyTempSeries.areas[0]
+      weeklyDates.forEach((dt: string, i: number) => {
+        // "今日"分はtempsMin/tempsMaxが空文字になっており、Number('')は0になってしまう
+        // （NaNにならない）ため、空文字は変換前に未提供として弾く
+        const minRaw = weeklyArea.tempsMin?.[i]
+        const maxRaw = weeklyArea.tempsMax?.[i]
+        const min = minRaw ? Number(minRaw) : NaN
+        const max = maxRaw ? Number(maxRaw) : NaN
+        weeklyByDate.set(dt.slice(0, 10), {
+          min: Number.isNaN(min) ? undefined : min,
+          max: Number.isNaN(max) ? undefined : max,
+        })
+      })
+    }
+
     return dates.map((dt, i) => {
       const date = dt.slice(0, 10)
       const dayTemps = tempsByDate.get(date)
+      const weekly = weeklyByDate.get(date)
+
+      let tempHigh = '－'
+      let tempLow = '－'
+      if (dayTemps && dayTemps.length > 0) {
+        const max = Math.max(...dayTemps)
+        const min = Math.min(...dayTemps)
+        tempHigh = `${max}`
+        tempLow = max !== min ? `${min}` : '－'
+      }
+      if (weekly?.max !== undefined) tempHigh = `${weekly.max}`
+      if (weekly?.min !== undefined) tempLow = `${weekly.min}`
+
       return {
         date,
         weather: weathers[i] ?? '不明',
         wind: winds[i] ?? '－',
         wave: waves[i] ?? '－',
-        tempHigh: dayTemps ? `${Math.max(...dayTemps)}` : '－',
-        tempLow: dayTemps ? `${Math.min(...dayTemps)}` : '－',
+        tempHigh,
+        tempLow,
         icon: getIcon(weathers[i] ?? ''),
       }
     })
