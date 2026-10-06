@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import Navigation from '@/components/Navigation'
@@ -34,35 +34,57 @@ export default function DashboardPage() {
   const [reservations, setReservations] = useState<Reservation[]>([])
   const [questionnaires, setQuestionnaires] = useState<QuestionnaireData[]>([])
   const [loading, setLoading] = useState(true)
+  /** 更新競合（MSG-20）などをスタッフに知らせるメッセージ */
+  const [notice, setNotice] = useState('')
 
   const today    = new Date().toISOString().slice(0, 10)
   const tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0, 10)
 
+  const load = useCallback(() => Promise.all([fetchReservations(), fetchQuestionnaires()]).then(([res, qs]) => {
+    setReservations(res)
+    setQuestionnaires(qs)
+    setLoading(false)
+  }), [])
+
   useEffect(() => {
     if (user === undefined) return
     if (!user) { router.push('/login'); return }
-    const load = () => Promise.all([fetchReservations(), fetchQuestionnaires()]).then(([res, qs]) => {
-      setReservations(res)
-      setQuestionnaires(qs)
-      setLoading(false)
-    })
     load()
     // 客側フォームからの申し込みを自動反映（10秒ごと＋ウィンドウ復帰時）
     const iv = setInterval(load, 10000)
     window.addEventListener('focus', load)
     return () => { clearInterval(iv); window.removeEventListener('focus', load) }
-  }, [user, router])
+  }, [user, router, load])
+
+  useEffect(() => {
+    if (!notice) return
+    const t = setTimeout(() => setNotice(''), 8000)
+    return () => clearTimeout(t)
+  }, [notice])
 
   function questionnaireIdFor(reservationId: string): string | undefined {
     return questionnaires.find((q) => q.reservationId === reservationId)?.id
   }
 
-  async function handleConfirm(id: string) {
-    await patchReservation(id, { status: CONFIRMED_STATUS_ID })
-    setReservations((prev) =>
-      prev.map((r) => r.id === id ? { ...r, status: CONFIRMED_STATUS_ID } : r)
-    )
+  /**
+   * ステータス更新。読み込み時点の updatedAt を渡し、他スタッフが先に更新していた場合（MSG-20）は
+   * 上書きせずメッセージを出して最新を再取得する。
+   */
+  async function updateStatus(id: string, status: string) {
+    const target = reservations.find((r) => r.id === id)
+    const res = await patchReservation(id, { status }, target?.updatedAt)
+    if (res.status === 'ok') {
+      setNotice('')
+      setReservations((prev) =>
+        prev.map((r) => r.id === id ? { ...r, status, updatedAt: res.updatedAt } : r)
+      )
+      return
+    }
+    setNotice(res.message)
+    await load()
   }
+
+  const handleConfirm = (id: string) => updateStatus(id, CONFIRMED_STATUS_ID)
 
   const byTimeSlot = (a: Reservation, b: Reservation) => TIME_SLOT_ORDER[a.timeSlot] - TIME_SLOT_ORDER[b.timeSlot]
   const todayRes    = reservations.filter((r) => r.diveDate === today).sort(byTimeSlot)
@@ -80,6 +102,12 @@ export default function DashboardPage() {
     <div className="min-h-screen">
       <Navigation />
       <main className="max-w-5xl mx-auto px-4 py-6 pb-20 md:pb-6 space-y-6">
+
+        {notice && (
+          <div role="alert" className="bg-amber-50 border border-amber-300 text-amber-800 text-sm rounded-xl px-4 py-3">
+            ⚠️ {notice}
+          </div>
+        )}
 
         {pendingRes.length > 0 && (
           <div className="bg-yellow-50 border border-yellow-300 rounded-xl overflow-hidden">

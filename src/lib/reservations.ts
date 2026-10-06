@@ -64,10 +64,14 @@ export async function createReservation(input: NewReservationInput): Promise<Res
   return reservation
 }
 
-/** 予約更新。最終更新日時を自動更新し、courseId/staffId 変更時は表示用の名称も転記し直す。 */
-export async function patchReservation(id: string, delta: Partial<Reservation>): Promise<void> {
+/**
+ * 予約更新。最終更新日時を自動更新し、courseId/staffId 変更時は表示用の名称も転記し直す。
+ * 書き込んだ最終更新日時を返す（画面が次の更新で expectedUpdatedAt に使う）。
+ */
+export async function patchReservation(id: string, delta: Partial<Reservation>): Promise<string> {
   const patch: Partial<Reservation> = { ...delta, updatedAt: new Date().toISOString() }
   if (delta.courseId) patch.courseName = getCourseName(delta.courseId)
   if (delta.staffId) patch.staffName = getStaffName(delta.staffId)
   await store.updateReservation(id, patch)
+  return patch.updatedAt as string
 }

@@ -39,13 +39,31 @@ export async function createReservation(data: NewReservationForm): Promise<{ id:
   return res.json()
 }
 
-export async function patchReservation(id: string, delta: Partial<Reservation>): Promise<void> {
+/** 予約更新の結果。更新競合（MSG-20）を画面で出し分けるために型で返す。 */
+export type PatchReservationResult =
+  | { status: 'ok'; updatedAt: string }
+  /** 他スタッフが先に更新していた（409）。呼び出し側は最新を再取得して確認を促す */
+  | { status: 'conflict'; message: string }
+  | { status: 'error'; message: string }
+
+/**
+ * @param expectedUpdatedAt 画面が読み込んだ時点の最終更新日時。渡すと更新競合を検知する
+ */
+export async function patchReservation(
+  id: string,
+  delta: Partial<Reservation>,
+  expectedUpdatedAt?: string
+): Promise<PatchReservationResult> {
   const res = await fetch('/api/reservations', {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ id, ...delta }),
+    body: JSON.stringify({ id, ...delta, expectedUpdatedAt }),
   })
-  if (!res.ok) throw new Error('Failed to update reservation')
+  const body = await res.json().catch(() => ({}))
+
+  if (res.ok) return { status: 'ok', updatedAt: body.updatedAt ?? '' }
+  if (res.status === 409) return { status: 'conflict', message: body.error ?? '' }
+  return { status: 'error', message: body.error ?? '更新に失敗しました。' }
 }
 
 // ─── 問診票 ───────────────────────────────────────────────────
