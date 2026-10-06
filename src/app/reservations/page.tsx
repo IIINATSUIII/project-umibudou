@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import Navigation from '@/components/Navigation'
 import { useAuth } from '@/lib/authContext'
-import { fetchReservations, patchReservation } from '@/lib/api'
+import { fetchReservations, issueQuestionnaireUrl, patchReservation } from '@/lib/api'
 import type { Reservation } from '@/types'
 
 const CHANNEL_LABELS: Record<string, string> = {
@@ -56,6 +56,14 @@ export default function ReservationsPage() {
     setReservations((prev) =>
       prev.map((r) => r.id === id ? { ...r, status: 'confirmed' } : r)
     )
+  }
+
+  async function handleOpenQuestionnaire(id: string) {
+    try {
+      window.open(await issueQuestionnaireUrl(id), '_blank', 'noopener,noreferrer')
+    } catch {
+      alert('問診票URLを発行できませんでした。予約日・状態をご確認ください。')
+    }
   }
 
   function handleCsvImport(e: React.ChangeEvent<HTMLInputElement>) {
@@ -132,10 +140,10 @@ export default function ReservationsPage() {
                           📋 問診確認
                         </Link>
                       ) : (
-                        <Link href={`/questionnaire/${r.id}`}
+                        <button onClick={() => handleOpenQuestionnaire(r.id)}
                           className="text-xs bg-orange-50 text-orange-700 border border-orange-200 px-2 py-1 rounded text-center hover:bg-orange-100">
                           📝 問診URL
-                        </Link>
+                        </button>
                       )}
                       {r.status === 'pending' && (
                         <button onClick={() => handleConfirm(r.id)}
@@ -160,3 +168,4 @@ export default function ReservationsPage() {
     </div>
   )
 }
+

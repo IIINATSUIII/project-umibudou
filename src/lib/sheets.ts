@@ -34,7 +34,8 @@ function quoteSheetName(sheetName: string): string {
 
 // ─── ヘッダー行（スプレッドシート初期化用） ─────────────────────
 export const HEADERS = {
-  RESERVATIONS:   ['id','date','time','course','guestName','guestCount','phone','channel','status','questionnaireId','notes'],
+  // 既存行との列位置互換を保つため、問診入力URL用の列は末尾に追加する。
+  RESERVATIONS:   ['id','date','time','course','guestName','guestCount','phone','channel','status','questionnaireId','notes','questionnaireToken','questionnaireExpiresAt'],
   QUESTIONNAIRES: [
     'id','reservationId','submittedAt',
     'lastName','firstName','lastNameKana','firstNameKana',
@@ -241,3 +242,4 @@ export async function initializeSheets(): Promise<void> {
     })
   }
 }
+

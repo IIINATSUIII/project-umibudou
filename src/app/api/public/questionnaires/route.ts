@@ -3,6 +3,7 @@ import { randomBytes } from 'crypto'
 import { store } from '@/lib/dataStore'
 import type { QuestionnaireData, QuestionnaireFormData, Customer } from '@/types'
 import { nextCustomerId } from '@/lib/questionnaireUtils'
+import { findReservationByQuestionnaireToken, getQuestionnaireExpiry } from '@/lib/questionnaireToken'
 
 function stringValue(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
@@ -35,17 +36,6 @@ function successResponse(questionnaire: QuestionnaireData): NextResponse {
   })
 }
 
-function qrExpiryForDiveDate(diveDate: string): string {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(diveDate)) throw new Error('Invalid reservation date')
-  const utcDate = new Date(`${diveDate}T00:00:00.000Z`)
-  if (Number.isNaN(utcDate.getTime()) || utcDate.toISOString().slice(0, 10) !== diveDate) {
-    throw new Error('Invalid reservation date')
-  }
-  const expiry = new Date(`${diveDate}T00:00:00+09:00`)
-  expiry.setUTCDate(expiry.getUTCDate() + 1)
-  return expiry.toISOString()
-}
-
 /**
  * POST /api/public/questionnaires — 問診票提出（ログイン不要）
  * 提出に伴う「予約への紐付け」「顧客台帳への反映」はすべてサーバー側で行う。
@@ -71,14 +61,15 @@ async function handlePost(req: NextRequest): Promise<NextResponse> {
       return NextResponse.json({ error: '入力内容を確認してください' }, { status: 400 })
     }
     const values = body as Record<string, unknown>
-    const reservationId = stringValue(values.reservationId)
+    const accessToken = stringValue(values.accessToken)
 
-    // 実在する予約に対する提出のみ受け付ける
+    // URL用トークンで、有効期限内かつキャンセルされていない予約だけを特定する。
     const reservations = await store.getReservations()
-    const reservation = reservations.find((r) => r.id === reservationId)
+    const reservation = findReservationByQuestionnaireToken(reservations, accessToken)
     if (!reservation) {
       return NextResponse.json({ error: '予約が見つかりません' }, { status: 404 })
     }
+    const reservationId = reservation.id
 
     const gender = values.gender
     const condition = values.condition
@@ -195,7 +186,7 @@ async function handlePost(req: NextRequest): Promise<NextResponse> {
       submittedAt,
       consentAt: submittedAt,
       qrToken: randomBytes(16).toString('base64url'),
-      qrExpiresAt: qrExpiryForDiveDate(reservation.date),
+      qrExpiresAt: getQuestionnaireExpiry(reservation.date),
       qrUsed: false,
       doctorDivingPermit: '',
       staffReviewStatus: '未確認',
@@ -285,3 +276,4 @@ async function handlePost(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'Failed to save questionnaire' }, { status: 500 })
   }
 }
+

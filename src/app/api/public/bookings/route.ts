@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { store } from '@/lib/dataStore'
 import type { Reservation } from '@/types'
+import { generateUniqueQuestionnaireToken, getQuestionnaireExpiry } from '@/lib/questionnaireToken'
 
 /**
  * POST /api/public/bookings — 客側予約申し込み（ログイン不要）
@@ -30,6 +31,9 @@ export async function POST(req: NextRequest) {
     if (!Number.isInteger(guestCount) || guestCount < 1 || guestCount > 20)
       return NextResponse.json({ error: '人数は1〜20名で指定してください' }, { status: 400 })
 
+    const reservations = await store.getReservations()
+    const questionnaireToken = generateUniqueQuestionnaireToken(reservations)
+    const questionnaireExpiresAt = getQuestionnaireExpiry(date)
     const reservation: Reservation = {
       id: `R${Date.now()}`,
       date,
@@ -41,10 +45,17 @@ export async function POST(req: NextRequest) {
       channel: 'hp',
       status: 'pending', // スタッフ承認制：確定は店側画面で行う
       notes,
+      questionnaireToken,
+      questionnaireExpiresAt,
     }
     await store.addReservation(reservation)
-    // 完了画面でQR生成・予約番号表示に使うため id を返す
-    return NextResponse.json({ ok: true, id: reservation.id })
+    return NextResponse.json({
+      ok: true,
+      id: reservation.id,
+      questionnaireToken,
+      questionnaireExpiresAt,
+      questionnaireUrl: new URL(`/questionnaire/${questionnaireToken}`, req.nextUrl.origin).toString(),
+    })
   } catch (err) {
     console.error('[POST /api/public/bookings]', err)
     return NextResponse.json({ error: 'Failed to create booking' }, { status: 500 })

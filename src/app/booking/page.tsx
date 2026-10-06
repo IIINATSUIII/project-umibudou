@@ -25,6 +25,7 @@ export default function BookingPage() {
   const [sending, setSending] = useState(false)
   const [done, setDone] = useState(false)
   const [resId, setResId] = useState('')
+  const [questionnaireUrl, setQuestionnaireUrl] = useState('')
   const [error, setError] = useState('')
 
   function set<K extends keyof typeof form>(key: K, value: typeof form[K]) {
@@ -44,6 +45,7 @@ export default function BookingPage() {
     if (res.ok) {
       const data = await res.json()
       setResId(data.id)
+      setQuestionnaireUrl(data.questionnaireUrl)
       setDone(true)
       window.scrollTo(0, 0)
     } else {
@@ -63,7 +65,6 @@ export default function BookingPage() {
 
   if (done) {
     // QRには問診票入力ページのURLを埋め込む（当日スタッフが読み取る／事前入力にも使える）
-    const qrUrl = `${window.location.origin}/questionnaire/${resId}`
     return (
       <div className="min-h-screen bg-gradient-to-b from-ocean-700 to-ocean-500 flex items-center justify-center p-4">
         <div className="w-full max-w-md bg-white rounded-2xl shadow-xl p-8 text-center">
@@ -78,7 +79,7 @@ export default function BookingPage() {
             <p className="text-xs text-gray-500 mb-1">予約番号</p>
             <p className="font-mono font-bold text-gray-800 mb-4">{resId}</p>
             <div className="flex justify-center">
-              <QRCodeCanvas id="booking-qr" value={qrUrl} size={180} includeMargin />
+              <QRCodeCanvas id="booking-qr" value={questionnaireUrl} size={180} includeMargin />
             </div>
             <div className="text-left text-sm text-gray-700 mt-4 space-y-1">
               <p>📅 {form.date} {form.time}</p>

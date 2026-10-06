@@ -53,7 +53,7 @@ export default function QuestionnairePage() {
       const res = await fetch('/api/public/questionnaires', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reservationId: id, ...form }),
+        body: JSON.stringify({ accessToken: id, ...form }),
       })
 
       if (!res.ok) {
@@ -330,3 +330,4 @@ function Nav({ onPrev, onNext, canNext }: { onPrev: () => void; onNext: () => vo
     </div>
   )
 }
+

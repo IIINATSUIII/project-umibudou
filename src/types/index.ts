@@ -10,6 +10,9 @@ export interface Reservation {
   status: 'confirmed' | 'pending' | 'cancelled'
   questionnaireId?: string
   notes?: string
+  /** 問診入力URL専用。受付時に表示する QuestionnaireData.qrToken とは別物。 */
+  questionnaireToken?: string
+  questionnaireExpiresAt?: string
 }
 
 export interface QuestionnaireData {
@@ -132,3 +135,4 @@ export interface WeatherDay {
   wave: string
   icon: string
 }
+

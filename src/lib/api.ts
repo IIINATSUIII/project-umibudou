@@ -31,6 +31,15 @@ export async function patchReservation(id: string, delta: Partial<Reservation>):
   if (!res.ok) throw new Error('Failed to update reservation')
 }
 
+export async function issueQuestionnaireUrl(id: string): Promise<string> {
+  const res = await fetch(`/api/reservations/${encodeURIComponent(id)}/questionnaire-url`, {
+    method: 'POST',
+  })
+  if (!res.ok) throw new Error('Failed to issue questionnaire URL')
+  const data: { url: string } = await res.json()
+  return data.url
+}
+
 // ─── 問診票 ───────────────────────────────────────────────────
 
 export async function fetchQuestionnaires(query: string): Promise<QuestionnaireSummary[]> {
@@ -46,7 +55,7 @@ export async function fetchQuestionnaireById(id: string): Promise<QuestionnaireD
   return res.json()
 }
 
-export async function submitQuestionnaire(data: QuestionnaireFormData & { reservationId: string }): Promise<void> {
+export async function submitQuestionnaire(data: QuestionnaireFormData & { accessToken: string }): Promise<void> {
   const res = await fetch('/api/questionnaires', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -80,3 +89,4 @@ export async function patchCustomer(id: string, delta: Partial<Customer>): Promi
   })
   if (!res.ok) throw new Error('Failed to update customer')
 }
+

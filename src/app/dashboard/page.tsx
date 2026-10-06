@@ -7,7 +7,7 @@ import Navigation from '@/components/Navigation'
 import WeatherWidget from '@/components/WeatherWidget'
 import WindyWidget from '@/components/WindyWidget'
 import { useAuth } from '@/lib/authContext'
-import { fetchReservations, patchReservation } from '@/lib/api'
+import { fetchReservations, issueQuestionnaireUrl, patchReservation } from '@/lib/api'
 import type { Reservation } from '@/types'
 
 const CHANNEL_LABELS: Record<string, string> = {
@@ -50,6 +50,14 @@ export default function DashboardPage() {
     setReservations((prev) =>
       prev.map((r) => r.id === id ? { ...r, status: 'confirmed' } : r)
     )
+  }
+
+  async function handleOpenQuestionnaire(id: string) {
+    try {
+      window.location.assign(await issueQuestionnaireUrl(id))
+    } catch {
+      alert('問診票URLを発行できませんでした。予約日・状態をご確認ください。')
+    }
   }
 
   const todayRes    = reservations.filter((r) => r.date === today)
@@ -147,10 +155,10 @@ export default function DashboardPage() {
                         📋 問診確認
                       </Link>
                     ) : (
-                      <Link href={`/questionnaire/${r.id}`}
+                      <button onClick={() => handleOpenQuestionnaire(r.id)}
                         className="text-xs bg-orange-50 text-orange-700 border border-orange-200 px-2 py-0.5 rounded hover:bg-orange-100">
                         📝 問診未提出
-                      </Link>
+                      </button>
                     )}
                   </div>
                 </div>
@@ -192,3 +200,4 @@ function LoadingScreen() {
     </div>
   )
 }
+
