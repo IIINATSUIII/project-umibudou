@@ -5,6 +5,7 @@
 
 import { google } from 'googleapis'
 import type { Reservation, QuestionnaireData, Customer } from '@/types'
+import { matchesQuestionnaire, nextQuestionnaireId } from './questionnaireUtils'
 
 // ─── 認証・クライアント初期化 ─────────────────────────────────
 function getSheetsClient() {
@@ -27,6 +28,10 @@ const SHEET = {
   CUSTOMERS:      '顧客台帳',
 } as const
 
+function quoteSheetName(sheetName: string): string {
+  return `'${sheetName.replace(/'/g, "''")}'`
+}
+
 // ─── ヘッダー行（スプレッドシート初期化用） ─────────────────────
 export const HEADERS = {
   RESERVATIONS:   ['id','date','time','course','guestName','guestCount','phone','channel','status','questionnaireId','notes'],
@@ -41,11 +46,19 @@ export const HEADERS = {
     'flightWithin48h',
     'hasCCard','cCardType','cCardOrg','lastDiveDate','totalDives',
     'agreeRisk','agreeMedical','agreePhoto',
+    // 既存データの列位置を維持するため、設計書の追加項目は末尾に追加する。
+    'customerId','postalCode','email','highBloodPressure','conditionDetails',
+    'consentAt','qrToken','qrExpiresAt','qrUsed','doctorDivingPermit',
+    'staffReviewStatus','staffReviewNotes',
   ],
   CUSTOMERS: [
     'id','lastName','firstName','lastNameKana','firstNameKana',
     'phone','email','lastVisit','visitCount',
     'hasCCard','cCardType','totalDives','healthNotes','guideNotes',
+    // 既存列の位置を保ちながら顧客自動登録に必要な設計項目を追加する。
+    'registeredAt','updatedAt','birthDate','gender','postalCode','address',
+    'emergencyName','emergencyRelation','emergencyPhone','cCardOrg','lastDiveDate','dmConsent',
+    'countedQuestionnaireIds',
   ],
 }
 
@@ -59,6 +72,7 @@ function rowToObj<T>(headers: string[], row: string[]): T {
     // boolean 変換
     if (val === 'TRUE' || val === 'true') obj[h] = true
     else if (val === 'FALSE' || val === 'false') obj[h] = false
+    else if (val === '' && ['highBloodPressure', 'qrUsed'].includes(h)) obj[h] = false
     // number 変換
     else if (h === 'guestCount' || h === 'sleepHours' || h === 'totalDives' || h === 'visitCount') {
       obj[h] = val === '' ? 0 : Number(val)
@@ -82,7 +96,20 @@ async function getRows(sheetName: string, headers: string[]): Promise<string[][]
   const sheets = getSheetsClient()
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: SPREADSHEET_ID,
-    range: `${sheetName}!A2:AZ`,
+    range: `${quoteSheetName(sheetName)}!A2:AZ`,
+  })
+  return (res.data.values ?? []) as string[][]
+}
+
+/** 指定シートをヘッダー行込みで取得する（外部取込用） */
+export async function getSheetValues(
+  sheetName: string,
+  spreadsheetId: string = SPREADSHEET_ID
+): Promise<string[][]> {
+  const sheets = getSheetsClient()
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId,
+    range: `${quoteSheetName(sheetName)}!A:AZ`,
   })
   return (res.data.values ?? []) as string[][]
 }
@@ -144,11 +171,35 @@ export async function getQuestionnaires(): Promise<QuestionnaireData[]> {
   return rows.map((r) => rowToObj<QuestionnaireData>(HEADERS.QUESTIONNAIRES, r))
 }
 
-export async function addQuestionnaire(data: QuestionnaireData): Promise<void> {
-  await appendRow(
-    SHEET.QUESTIONNAIRES,
-    objToRow(HEADERS.QUESTIONNAIRES, data as unknown as Record<string, unknown>)
-  )
+let questionnaireWriteQueue: Promise<void> = Promise.resolve()
+
+export async function addQuestionnaire(
+  data: Omit<QuestionnaireData, 'id'>
+): Promise<QuestionnaireData> {
+  let saved: QuestionnaireData | undefined
+  const write = async () => {
+    const all = await getQuestionnaires()
+    saved = { ...data, id: nextQuestionnaireId(all) }
+    await appendRow(
+      SHEET.QUESTIONNAIRES,
+      objToRow(HEADERS.QUESTIONNAIRES, saved as unknown as Record<string, unknown>)
+    )
+  }
+  const pending = questionnaireWriteQueue.then(write, write)
+  questionnaireWriteQueue = pending.then(() => undefined, () => undefined)
+  await pending
+  if (!saved) throw new Error('Failed to create questionnaire')
+  return saved
+}
+
+export async function searchQuestionnaires(query: string): Promise<QuestionnaireData[]> {
+  const all = await getQuestionnaires()
+  return all.filter((questionnaire) => matchesQuestionnaire(questionnaire, query))
+}
+
+export async function getQuestionnaireById(id: string): Promise<QuestionnaireData | undefined> {
+  const all = await getQuestionnaires()
+  return all.find((questionnaire) => questionnaire.id === id)
 }
 
 // ─── 顧客台帳 ─────────────────────────────────────────────────
@@ -171,8 +222,8 @@ export async function updateCustomer(id: string, data: Partial<Customer>): Promi
 
 // ─── スプレッドシート初期化（初回セットアップ用） ────────────────
 /**
- * 各シートのヘッダー行を書き込む。
- * 初回セットアップ時に一度だけ実行（/api/setup エンドポイント経由）。
+ * 各シートのヘッダー行を書き込む。既存データ行は変更せず、末尾に追加した列も反映する。
+ * 初回セットアップ時またはスキーマ更新後に実行（/api/setup エンドポイント経由）。
  */
 export async function initializeSheets(): Promise<void> {
   const sheets = getSheetsClient()

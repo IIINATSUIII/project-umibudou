@@ -3,7 +3,7 @@
  * サーバーの API ルートを fetch し、Google Sheets のデータを操作する。
  */
 
-import type { Reservation, QuestionnaireData, Customer } from '@/types'
+import type { Reservation, QuestionnaireData, QuestionnaireFormData, QuestionnaireSummary, Customer } from '@/types'
 
 // ─── 予約 ─────────────────────────────────────────────────────
 
@@ -33,13 +33,20 @@ export async function patchReservation(id: string, delta: Partial<Reservation>):
 
 // ─── 問診票 ───────────────────────────────────────────────────
 
-export async function fetchQuestionnaires(): Promise<QuestionnaireData[]> {
-  const res = await fetch('/api/questionnaires')
+export async function fetchQuestionnaires(query: string): Promise<QuestionnaireSummary[]> {
+  const res = await fetch(`/api/questionnaires?q=${encodeURIComponent(query)}`)
+  if (res.status === 410) throw new Error('QR_EXPIRED')
   if (!res.ok) throw new Error('Failed to fetch questionnaires')
   return res.json()
 }
 
-export async function submitQuestionnaire(data: QuestionnaireData): Promise<void> {
+export async function fetchQuestionnaireById(id: string): Promise<QuestionnaireData> {
+  const res = await fetch(`/api/questionnaires?id=${encodeURIComponent(id)}`)
+  if (!res.ok) throw new Error('Failed to fetch questionnaire')
+  return res.json()
+}
+
+export async function submitQuestionnaire(data: QuestionnaireFormData & { reservationId: string }): Promise<void> {
   const res = await fetch('/api/questionnaires', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

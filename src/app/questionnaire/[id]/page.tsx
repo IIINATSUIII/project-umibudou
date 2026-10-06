@@ -3,20 +3,20 @@
 import { useState } from 'react'
 import { useParams } from 'next/navigation'
 import { QRCodeSVG } from 'qrcode.react'
-import type { QuestionnaireData } from '@/types'
+import type { QuestionnaireFormData } from '@/types'
 
 type Step = 'intro' | 'basic' | 'health' | 'today' | 'experience' | 'agree' | 'done'
 const STEPS: Step[] = ['intro', 'basic', 'health', 'today', 'experience', 'agree', 'done']
 const STEP_LABELS = ['はじめに', '基本情報', '健康状態', '当日体調', '経験・スキル', '同意事項', '完了']
 
-const BLANK: Omit<QuestionnaireData, 'id' | 'reservationId' | 'submittedAt'> = {
+const BLANK: QuestionnaireFormData = {
   lastName: '', firstName: '', lastNameKana: '', firstNameKana: '',
-  birthDate: '', gender: 'male', address: '', phone: '',
+  birthDate: '', gender: 'male', postalCode: '', address: '', phone: '', email: '',
   emergencyName: '', emergencyRelation: '', emergencyPhone: '',
-  heartDisease: false, respiratoryDisease: false, earDisease: false,
+  heartDisease: false, highBloodPressure: false, respiratoryDisease: false, earDisease: false,
   epilepsy: false, diabetes: false, pregnant: false, panicDisorder: false,
   medication: false, medicationName: '', latexAllergy: false,
-  sleepHours: 7, alcoholLastNight: false, alcoholToday: false, condition: 'good',
+  sleepHours: 7, alcoholLastNight: false, alcoholToday: false, condition: 'good', conditionDetails: '',
   flightWithin48h: false,
   hasCCard: false, cCardType: '', cCardOrg: '', lastDiveDate: '', totalDives: 0,
   agreeRisk: false, agreeMedical: false, agreePhoto: false,
@@ -27,6 +27,8 @@ export default function QuestionnairePage() {
   const [step, setStep] = useState<Step>('intro')
   const [form, setForm] = useState(BLANK)
   const [qId, setQId] = useState('')
+  const [qrToken, setQrToken] = useState('')
+  const [qrExpiresAt, setQrExpiresAt] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
   function set<K extends keyof typeof form>(key: K, value: typeof form[K]) {
@@ -47,22 +49,29 @@ export default function QuestionnairePage() {
     setSubmitting(true)
 
     // 予約への紐付け・顧客台帳への反映はサーバー側（公開API）で行う
-    const res = await fetch('/api/public/questionnaires', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ reservationId: id, ...form }),
-    })
-    setSubmitting(false)
+    try {
+      const res = await fetch('/api/public/questionnaires', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reservationId: id, ...form }),
+      })
 
-    if (!res.ok) {
-      alert('送信に失敗しました。時間をおいて再度お試しください。')
-      return
+      if (!res.ok) {
+        alert('送信に失敗しました。時間をおいて再度お試しください。')
+        return
+      }
+
+      const data = await res.json()
+      setQId(data.questionnaireId)
+      setQrToken(data.qrToken)
+      setQrExpiresAt(data.qrExpiresAt)
+      setStep('done')
+      window.scrollTo(0, 0)
+    } catch {
+      alert('通信に失敗しました。時間をおいて再度お試しください。')
+    } finally {
+      setSubmitting(false)
     }
-
-    const data = await res.json()
-    setQId(data.questionnaireId)
-    setStep('done')
-    window.scrollTo(0, 0)
   }
 
   const stepIdx = STEPS.indexOf(step)
@@ -124,6 +133,10 @@ export default function QuestionnairePage() {
                 ))}
               </div>
             </F>
+            <div className="grid grid-cols-2 gap-3">
+              <F label="郵便番号"><input value={form.postalCode ?? ''} onChange={(e) => set('postalCode', e.target.value)} placeholder="900-0000" className={inp} /></F>
+              <F label="メールアドレス *"><input type="email" value={form.email ?? ''} onChange={(e) => set('email', e.target.value)} placeholder="example@email.com" required className={inp} /></F>
+            </div>
             <F label="住所 *"><input value={form.address} onChange={(e) => set('address', e.target.value)} placeholder="東京都渋谷区" required className={inp} /></F>
             <F label="電話番号 *"><input type="tel" value={form.phone} onChange={(e) => set('phone', e.target.value)} placeholder="090-0000-0000" required className={inp} /></F>
             <div className="border-t border-gray-100 pt-4">
@@ -131,12 +144,16 @@ export default function QuestionnairePage() {
               <div className="space-y-3">
                 <F label="氏名 *"><input value={form.emergencyName} onChange={(e) => set('emergencyName', e.target.value)} placeholder="田中 太郎" required className={inp} /></F>
                 <div className="grid grid-cols-2 gap-3">
-                  <F label="続柄"><input value={form.emergencyRelation} onChange={(e) => set('emergencyRelation', e.target.value)} placeholder="配偶者" className={inp} /></F>
+                  <F label="続柄 *"><input value={form.emergencyRelation} onChange={(e) => set('emergencyRelation', e.target.value)} placeholder="配偶者" required className={inp} /></F>
                   <F label="電話番号 *"><input type="tel" value={form.emergencyPhone} onChange={(e) => set('emergencyPhone', e.target.value)} placeholder="090-0000-0001" required className={inp} /></F>
                 </div>
               </div>
             </div>
-            <Nav onPrev={prev} onNext={next} canNext={!!form.lastName && !!form.firstName && !!form.birthDate} />
+            <Nav onPrev={prev} onNext={next} canNext={
+              !!form.lastName && !!form.firstName && !!form.lastNameKana && !!form.firstNameKana &&
+              !!form.birthDate && !!form.email && !!form.address && !!form.phone &&
+              !!form.emergencyName && !!form.emergencyRelation && !!form.emergencyPhone
+            } />
           </div>
         )}
 
@@ -145,7 +162,8 @@ export default function QuestionnairePage() {
             <h2 className="font-bold text-gray-800">② 健康状態</h2>
             <p className="text-xs text-gray-500">該当するものにチェックしてください</p>
             {[
-              ['heartDisease', '心臓・循環器系疾患（心臓病・不整脈・高血圧）'],
+              ['heartDisease', '心臓・循環器系疾患（心臓病・不整脈）'],
+              ['highBloodPressure', '高血圧'],
               ['respiratoryDisease', '呼吸器系疾患（喘息・肺疾患）'],
               ['earDisease', '耳・副鼻腔の疾患（中耳炎・副鼻腔炎）'],
               ['epilepsy', 'てんかん・失神の既往'],
@@ -166,9 +184,9 @@ export default function QuestionnairePage() {
               <span className="text-sm text-gray-700">現在服薬中</span>
             </label>
             {form.medication && (
-              <F label="薬剤名"><input value={form.medicationName} onChange={(e) => set('medicationName', e.target.value)} placeholder="薬の名前" className={inp} /></F>
+              <F label="薬剤名 *"><input value={form.medicationName} onChange={(e) => set('medicationName', e.target.value)} placeholder="薬の名前" required className={inp} /></F>
             )}
-            <Nav onPrev={prev} onNext={next} canNext />
+            <Nav onPrev={prev} onNext={next} canNext={!form.medication || !!form.medicationName} />
           </div>
         )}
 
@@ -203,6 +221,9 @@ export default function QuestionnairePage() {
                 ))}
               </div>
             </F>
+            {form.condition === 'bad' && (
+              <F label="体調の詳細 *"><textarea value={form.conditionDetails ?? ''} onChange={(e) => set('conditionDetails', e.target.value)} required rows={3} className={inp} /></F>
+            )}
             <label className="flex items-start gap-3 cursor-pointer">
               <input type="checkbox" checked={form.flightWithin48h} onChange={(e) => set('flightWithin48h', e.target.checked)} className="w-4 h-4 mt-0.5 accent-ocean-600" />
               <span className="text-sm text-gray-700">
@@ -210,7 +231,7 @@ export default function QuestionnairePage() {
                 <span className="block text-xs text-red-600 mt-0.5">※ 減圧症リスクのためガイドに確認が必要です</span>
               </span>
             </label>
-            <Nav onPrev={prev} onNext={next} canNext />
+            <Nav onPrev={prev} onNext={next} canNext={form.condition !== 'bad' || !!form.conditionDetails} />
           </div>
         )}
 
@@ -224,8 +245,8 @@ export default function QuestionnairePage() {
             {form.hasCCard && (
               <div className="space-y-3 pl-7">
                 <div className="grid grid-cols-2 gap-3">
-                  <F label="カード種別">
-                    <select value={form.cCardType} onChange={(e) => set('cCardType', e.target.value)} className={inp}>
+                  <F label="カード種別 *">
+                    <select value={form.cCardType} onChange={(e) => set('cCardType', e.target.value)} required className={inp}>
                       <option value="">選択</option>
                       {['OW','AOW','Rescue','Divemaster','Instructor'].map((t) => <option key={t}>{t}</option>)}
                     </select>
@@ -278,9 +299,10 @@ export default function QuestionnairePage() {
               <p className="text-sm text-gray-500">受付でこの画面を見せてください</p>
             </div>
             <div className="flex justify-center">
-              <QRCodeSVG value={qId} size={200} />
+              <QRCodeSVG value={qrToken} size={200} />
             </div>
-            <p className="text-xs text-gray-400">QRコード ID: {qId}</p>
+            <p className="text-xs text-gray-400">問診票ID: {qId}</p>
+            {qrExpiresAt && <p className="text-xs text-gray-500">QR有効期限: {new Date(qrExpiresAt).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })}</p>}
             <div className="bg-ocean-50 rounded-xl p-4 text-left">
               <p className="text-sm font-medium text-ocean-800 mb-1">提出者</p>
               <p className="text-lg font-bold text-gray-800">{form.lastName} {form.firstName}</p>

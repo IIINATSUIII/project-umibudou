@@ -1,9 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { store } from '@/lib/dataStore'
+import { importGoogleFormBookings } from '@/lib/googleFormImport'
 
 /** GET /api/reservations — 予約一覧取得 */
 export async function GET() {
   try {
+    // Google Forms回答シートを先に同期し、一覧取得時に新着予約を自動反映する。
+    const result = await importGoogleFormBookings()
+    if (result.errors.length > 0) {
+      console.warn('[GET /api/reservations] Googleフォーム取込:', result.errors)
+    }
     return NextResponse.json(await store.getReservations())
   } catch (err) {
     console.error('[GET /api/reservations]', err)

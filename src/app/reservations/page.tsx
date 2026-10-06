@@ -9,7 +9,7 @@ import { fetchReservations, patchReservation } from '@/lib/api'
 import type { Reservation } from '@/types'
 
 const CHANNEL_LABELS: Record<string, string> = {
-  hp: 'HP', email: 'メール', phone: '電話', ota: 'OTA', sns: 'SNS',
+  hp: 'HP', email: 'メール', phone: '電話', ota: 'OTA', sns: 'SNS', google_form: 'Googleフォーム',
 }
 const STATUS_STYLES: Record<string, string> = {
   confirmed: 'bg-green-100 text-green-700',
