@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import Navigation from '@/components/Navigation'
 import { useAuth } from '@/lib/authContext'
 import { fetchRoster } from '@/lib/api'
+import { toSafeCsvCell } from '@/lib/csv'
 import type { RosterEntry } from '@/types'
 
 function toCsv(rows: RosterEntry[]): string {
@@ -12,7 +13,6 @@ function toCsv(rows: RosterEntry[]): string {
     '氏名', '氏名（カナ）', '生年月日', '年齢', '性別', '住所', '電話番号',
     '緊急連絡先', '緊急連絡先電話番号', 'ダイブ日', 'コース', '担当スタッフ', '受付日時', '受付方法',
   ]
-  const escape = (v: string) => `"${v.replace(/"/g, '""')}"`
   const lines = rows.map((r) => [
     r.name,
     r.nameKana,
@@ -28,9 +28,9 @@ function toCsv(rows: RosterEntry[]): string {
     r.staffName,
     new Date(r.checkedInAt).toLocaleString('ja-JP'),
     r.checkInMethod,
-  ].map(escape).join(','))
+  ].map(toSafeCsvCell).join(','))
   // 先頭にBOMを付けてExcelでの文字化けを防ぐ
-  return '﻿' + [headers.map(escape).join(','), ...lines].join('\r\n')
+  return '﻿' + [headers.map(toSafeCsvCell).join(','), ...lines].join('\r\n')
 }
 
 export default function RosterPage() {
