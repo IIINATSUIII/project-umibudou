@@ -3,6 +3,9 @@
  * Google Forms API や GAS は使わず、同じスプレッドシートの回答タブを読む。
  */
 
+import { normalizeReservation } from './storeSchema'
+import { generateQuestionnaireToken,getQuestionnaireExpiry } from './questionnaireToken'
+import { withStoreWriteLock } from './storeLock'
 import { createHash } from 'crypto'
 import { USE_SHEETS, store } from './dataStore'
 import { getSheetValues } from './sheets'
@@ -212,7 +215,7 @@ async function importGoogleFormBookingsOnce(): Promise<GoogleFormImportResult> {
       continue
     }
 
-    const reservation: Reservation = {
+    const reservation: Reservation = normalizeReservation({
       id,
       date: date as string,
       time: time as string,
@@ -223,7 +226,9 @@ async function importGoogleFormBookingsOnce(): Promise<GoogleFormImportResult> {
       channel: 'google_form',
       status: 'pending',
       notes: cell(row, columns.notes).slice(0, 500),
-    }
+      createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),
+      questionnaireToken:generateQuestionnaireToken(),questionnaireTokenExpiresAt:getQuestionnaireExpiry(date as string),
+    })
     try {
       await store.addReservation(reservation)
     } catch (err) {
@@ -241,8 +246,9 @@ async function importGoogleFormBookingsOnce(): Promise<GoogleFormImportResult> {
 
 /** 同一プロセス内の同時リクエストによる二重取込を防ぐ */
 export function importGoogleFormBookings(): Promise<GoogleFormImportResult> {
+  if (!process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || !process.env.GOOGLE_PRIVATE_KEY || !process.env.GOOGLE_SPREADSHEET_ID) return importGoogleFormBookingsOnce()
   if (!importInFlight) {
-    importInFlight = importGoogleFormBookingsOnce().finally(() => {
+    importInFlight = withStoreWriteLock(()=>importGoogleFormBookingsOnce()).finally(() => {
       importInFlight = null
     })
   }

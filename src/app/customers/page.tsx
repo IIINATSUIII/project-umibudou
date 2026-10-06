@@ -6,6 +6,7 @@ import Link from 'next/link'
 import Navigation from '@/components/Navigation'
 import { useAuth } from '@/lib/authContext'
 import { fetchCustomers } from '@/lib/api'
+import { matchesCustomer } from '@/lib/customerSearch'
 import type { Customer } from '@/types'
 
 export default function CustomersPage() {
@@ -27,12 +28,7 @@ export default function CustomersPage() {
 
   const filtered = customers.filter((c) => {
     if (search) {
-      const q = search.toLowerCase()
-      const matches =
-        `${c.lastName}${c.firstName}`.includes(q) ||
-        `${c.lastNameKana}${c.firstNameKana}`.toLowerCase().includes(q) ||
-        c.phone.includes(q)
-      if (!matches) return false
+      if (!matchesCustomer(c,search)) return false
     }
     if (lastVisitFilter && c.lastVisit !== lastVisitFilter) return false
     if (cCardFilter && (c.cCardType || '未取得') !== cCardFilter) return false
@@ -60,7 +56,7 @@ export default function CustomersPage() {
 
         <div className="space-y-2">
           <input value={search} onChange={(e) => setSearch(e.target.value)}
-            placeholder="🔍 氏名・かな・電話番号で検索"
+            placeholder="🔍 氏名・かな・電話番号・メールで検索"
             className="w-full border border-gray-300 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-ocean-500 bg-white" />
           <div className="flex flex-wrap items-center gap-2">
             <label className="text-xs text-gray-500">最終来店日</label>
