@@ -43,5 +43,8 @@ jobs:
       - name: Check types
         run: npm run typecheck
 
+      - name: Run regression tests
+        run: npm test
+
       - name: Create production build
         run: npm run build

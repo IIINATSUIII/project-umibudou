@@ -1,15 +1,53 @@
+/**
+ * 予約一覧（Reservations シート）
+ * 列定義は docs/03_基本設計書_DB設計編.md §3-2 に準拠。
+ */
 export interface Reservation {
-  id: string
-  date: string        // YYYY-MM-DD
-  time: string        // HH:MM
-  course: string
-  guestName: string
-  guestCount: number
-  phone: string
-  channel: 'hp' | 'email' | 'phone' | 'ota' | 'sns' | 'google_form'
-  status: 'confirmed' | 'pending' | 'cancelled'
+  id: string                  // 予約ID: "R-" + YYYYMMDD + 連番3桁
+  createdAt: string           // 登録日時（ISO datetime）
+  updatedAt: string           // 最終更新日時（排他制御の後勝ち検知に使用）
+  customerId?: string         // 顧客ID（顧客台帳を参照。問診送信後に紐づく）
+  guestName: string           // 代表者氏名
+  guestPhone: string          // 代表者電話番号
+  guestEmail: string          // 代表者メールアドレス
+  diveDate: string            // ダイブ日 YYYY-MM-DD
+  timeSlot: 'morning' | 'afternoon' | 'full' | 'unspecified' // 時間帯
+  courseId: string            // コースID（コースマスタを参照）
+  courseName: string          // コース名（表示用。コースマスタから転記）
+  guestCount: number          // 参加人数
+  status: string              // 予約ステータス（ステータスマスタのIDを参照）
+  staffId?: string            // 担当スタッフID（スタッフマスタを参照）
+  staffName?: string          // 担当スタッフ名（表示用。スタッフマスタから転記）
+  channel: 'hp' | 'email' | 'phone' | 'ota' | 'sns' | 'google_form' // 予約取込元
+  questionnaireToken?: string          // 問診票URL用トークン
+  questionnaireTokenExpiresAt?: string // 問診票URL有効期限（ダイブ日翌日0時まで）
+  questionnaireCompleted: boolean      // 問診完了フラグ
   questionnaireId?: string
-  notes?: string
+  legacyTime?: string
+  legacyChannel?: string
+  divePoint?: string          // ダイブポイント
+  staffNote?: string          // スタッフメモ／キャンセル理由
+}
+
+/** コースマスタ（Courses シート） */
+export interface Course {
+  id: string    // コースID: "CRS-" + 連番3桁
+  name: string
+  type: string
+}
+
+/** スタッフマスタ（Staff シート） */
+export interface Staff {
+  id: string    // スタッフID: "STF-" + 連番3桁
+  name: string
+  isAdmin: boolean
+}
+
+/** ステータスマスタ（Status シート） */
+export interface StatusDef {
+  id: string    // ステータスID: "STS-" + 連番2桁
+  name: string
+  color: string // 条件付き書式の表示色（#RRGGBB）
 }
 
 export interface QuestionnaireData {
@@ -24,7 +62,7 @@ export interface QuestionnaireData {
   lastNameKana: string
   firstNameKana: string
   birthDate: string
-  gender: 'male' | 'female' | 'other'
+  gender: 'male' | 'female' | 'other' | 'unanswered'
   postalCode?: string
   address: string
   phone: string
@@ -35,6 +73,8 @@ export interface QuestionnaireData {
   // 健康状態
   heartDisease: boolean
   highBloodPressure?: boolean
+  hypertension?: boolean
+  medicalCertificate?: boolean
   respiratoryDisease: boolean
   earDisease: boolean
   epilepsy: boolean
@@ -45,7 +85,8 @@ export interface QuestionnaireData {
   medicationName: string
   latexAllergy: boolean
   // 当日体調
-  sleepHours: number
+  sleepHours: number | null
+  sleepCategory?: string
   alcoholLastNight: boolean
   alcoholToday: boolean
   condition: 'good' | 'normal' | 'bad'
@@ -57,7 +98,8 @@ export interface QuestionnaireData {
   cCardType: string
   cCardOrg: string
   lastDiveDate: string
-  totalDives: number
+  lastDivePeriod?: string
+  totalDives: number | null
   // 同意
   agreeRisk: boolean
   agreeMedical: boolean
@@ -69,6 +111,11 @@ export interface QuestionnaireData {
   doctorDivingPermit?: string
   staffReviewStatus?: string
   staffReviewNotes?: string
+  doctorClearance?: '持参あり' | 'なし' | ''
+  staffCheckStatus?: '未確認' | '要対応' | '確認済'
+  staffCheckNote?: string
+  qrIssuedAt?: string
+  submissionState?: 'pending' | 'complete'
 }
 
 /** 検索候補に表示し、健康情報を含めない一覧用データ */
@@ -92,6 +139,11 @@ export type QuestionnaireFormData = Omit<
   | 'doctorDivingPermit'
   | 'staffReviewStatus'
   | 'staffReviewNotes'
+  | 'doctorClearance'
+  | 'staffCheckStatus'
+  | 'staffCheckNote'
+  | 'qrIssuedAt'
+  | 'submissionState'
 >
 
 export interface Customer {
@@ -106,10 +158,11 @@ export interface Customer {
   visitCount: number
   hasCCard: boolean
   cCardType: string
-  totalDives: number
+  totalDives: number | null
   healthNotes: string
   guideNotes: string
   registeredAt?: string
+  createdAt?: string
   updatedAt?: string
   /** 問診票の再送で来店回数を重複加算しないための処理済みID一覧 */
   countedQuestionnaireIds?: string
@@ -122,7 +175,8 @@ export interface Customer {
   emergencyPhone?: string
   cCardOrg?: string
   lastDiveDate?: string
-  dmConsent?: string
+  lastDivePeriod?: string
+  dmConsent?: string | boolean
 }
 
 export interface WeatherDay {
@@ -131,4 +185,27 @@ export interface WeatherDay {
   wind: string
   wave: string
   icon: string
+  tempHigh?: string
+  tempLow?: string
+}
+
+export interface RosterEntry {
+  id: string
+  diveDate: string
+  reservationId: string
+  questionnaireId: string
+  customerId: string
+  name: string
+  nameKana: string
+  birthDate: string
+  age: number
+  gender: string
+  address: string
+  phone: string
+  emergencyContact: string
+  emergencyPhone: string
+  course: string
+  staffName: string
+  checkedInAt: string
+  checkInMethod: 'QR読取' | '手動照合'
 }
