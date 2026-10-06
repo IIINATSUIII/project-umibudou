@@ -3,12 +3,13 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
 import { QRCodeSVG } from 'qrcode.react'
-import type { QuestionnaireData } from '@/types'
+import type { QuestionnaireFormData } from '@/types'
 
-import { BASIC_FIELDS, HEALTH_FIELDS, calculateAge, todayInJapan, validateQuestionnaire, type FieldErrors } from '@/lib/questionnaireValidation'
+import { SLEEP_OPTIONS, CARD_OPTIONS, ORG_OPTIONS, DIVE_OPTIONS, TODAY_FIELDS, EXPERIENCE_FIELDS, BASIC_FIELDS, HEALTH_FIELDS, calculateAge, todayInJapan, validateQuestionnaire, type FieldErrors } from '@/lib/questionnaireValidation'
 
 type HealthKey = typeof HEALTH_FIELDS[number][0] | 'medication' | 'medicalCertificate'
-type FormData = Omit<QuestionnaireData, 'id' | 'reservationId' | 'submittedAt' | HealthKey> & Record<HealthKey, boolean | null>
+type NullableAnswer = HealthKey | 'alcoholLastNight' | 'alcoholToday' | 'flightWithin48h' | 'agreePhoto'
+type FormData = Omit<QuestionnaireFormData, NullableAnswer | 'condition'> & Record<NullableAnswer, boolean | null> & { condition: QuestionnaireFormData['condition'] | '' }
 
 type Step = 'intro' | 'basic' | 'health' | 'today' | 'experience' | 'agree' | 'done'
 const STEPS: Step[] = ['intro', 'basic', 'health', 'today', 'experience', 'agree', 'done']
@@ -16,15 +17,15 @@ const STEP_LABELS = ['はじめに', '基本情報', '健康状態', '当日体�
 
 const BLANK: FormData = {
   lastName: '', firstName: '', lastNameKana: '', firstNameKana: '',
-  birthDate: '', gender: 'unanswered', postalCode: '', email: '', address: '', phone: '', hypertension: null, medicalCertificate: null,
+  birthDate: '', gender: 'unanswered', postalCode: '', email: '', address: '', phone: '', highBloodPressure: null, medicalCertificate: null,
   emergencyName: '', emergencyRelation: '', emergencyPhone: '',
   heartDisease: null, respiratoryDisease: null, earDisease: null,
   epilepsy: null, diabetes: null, pregnant: null, panicDisorder: null,
   medication: null, medicationName: '', latexAllergy: null,
-  sleepHours: 7, alcoholLastNight: false, alcoholToday: false, condition: 'good',
-  flightWithin48h: false,
-  hasCCard: false, cCardType: '', cCardOrg: '', lastDiveDate: '', totalDives: 0,
-  agreeRisk: false, agreeMedical: false, agreePhoto: false,
+  sleepHours: null, sleepCategory: '', conditionDetails: '', lastDivePeriod: '', alcoholLastNight: null, alcoholToday: null, condition: '',
+  flightWithin48h: null,
+  hasCCard: false, cCardType: '', cCardOrg: '', lastDiveDate: '', totalDives: null,
+  agreeRisk: false, agreeMedical: false, agreePhoto: null,
 }
 
 export default function QuestionnairePage() {
@@ -32,6 +33,23 @@ export default function QuestionnairePage() {
   const [step, setStep] = useState<Step>('intro')
   const [form, setForm] = useState(BLANK)
   const [qId, setQId] = useState('')
+  const [qrToken, setQrToken] = useState('')
+  const [urlState, setUrlState] = useState('確認中…')
+  useEffect(() => {
+    let active = true
+    fetch('/api/public/questionnaires?accessToken=' + encodeURIComponent(id), { cache: 'no-store' })
+      .then(async (response) => {
+        const data = await response.json()
+        if (!response.ok) throw new Error(data.error || '問診URLを確認できませんでした')
+        if (!active) return
+        setUrlState('')
+        if (data.submitted) {
+          setQId(data.questionnaireId); setQrToken(data.qrToken); setStep('done')
+          setForm((f) => ({ ...f, lastName: data.lastName, firstName: data.firstName, lastNameKana: data.lastNameKana, firstNameKana: data.firstNameKana }))
+        }
+      }).catch((error) => { if (active) setUrlState(error.message) })
+    return () => { active = false }
+  }, [id])
   const [submitting, setSubmitting] = useState(false)
 
   const [errors, setErrors] = useState<FieldErrors>({})
@@ -45,12 +63,20 @@ export default function QuestionnairePage() {
     setFocusField('')
   }, [focusField, step])
 
-  function check(section: 'basic' | 'health' | 'all') {
+  function errorStep(key: string): Step {
+    if (BASIC_FIELDS.some((field) => field === key)) return 'basic'
+    if (TODAY_FIELDS.some((field) => field === key)) return 'today'
+    if (EXPERIENCE_FIELDS.some((field) => field === key)) return 'experience'
+    if (key.startsWith('agree')) return 'agree'
+    return 'health'
+  }
+
+  function check(section: 'basic' | 'health' | 'today' | 'experience' | 'agree' | 'all') {
     const found = validateQuestionnaire(form, section)
     setErrors(found)
     const first = Object.keys(found)[0]
     if (!first) return true
-    setStep(BASIC_FIELDS.some((key) => key === first) ? 'basic' : 'health')
+    setStep(errorStep(first))
     setFocusField(first)
     return false
   }
@@ -60,7 +86,7 @@ export default function QuestionnairePage() {
   }
 
   function next() {
-    if ((step === 'basic' || step === 'health') && !check(step)) return
+    if ((step === 'basic' || step === 'health' || step === 'today' || step === 'experience') && !check(step)) return
     const idx = STEPS.indexOf(step)
     setStep(STEPS[idx + 1])
     window.scrollTo(0, 0)
@@ -77,7 +103,7 @@ export default function QuestionnairePage() {
     try {
       const res = await fetch('/api/public/questionnaires', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reservationId: id, ...form }),
+        body: JSON.stringify({ accessToken: id, ...form }),
       })
       const data = await res.json()
       if (!res.ok) {
@@ -85,13 +111,14 @@ export default function QuestionnairePage() {
           setErrors(data.errors)
           const first = Object.keys(data.errors)[0]
           if (first) {
-            setStep(BASIC_FIELDS.some((key) => key === first) ? 'basic' : 'health')
+            setStep(errorStep(first))
             setFocusField(first)
           }
         }
         throw new Error(data.error || '送信に失敗しました。時間をおいて再度お試しください。')
       }
       setQId(data.questionnaireId)
+      setQrToken(data.qrToken)
       setStep('done')
       window.scrollTo(0, 0)
     } catch (error) {
@@ -103,6 +130,8 @@ export default function QuestionnairePage() {
 
   const stepIdx = STEPS.indexOf(step)
   const progress = Math.round((stepIdx / (STEPS.length - 1)) * 100)
+
+  if (urlState) return <main className="p-6" role="status">{urlState}</main>
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -177,86 +206,30 @@ export default function QuestionnairePage() {
             <Nav onPrev={prev} onNext={next} canNext />
           </div>
         )}
-        {step === 'today' && (
-          <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-5">
-            <h2 className="font-bold text-gray-800">③ 当日体調・フライト予定</h2>
-            <F label="昨夜の睡眠時間">
-              <div className="flex items-center gap-3">
-                <input type="range" min={1} max={12} value={form.sleepHours}
-                  onChange={(e) => set('sleepHours', Number(e.target.value))} className="flex-1 accent-ocean-600" />
-                <span className="text-sm font-semibold w-16">{form.sleepHours}時間</span>
-              </div>
-            </F>
-            <div className="space-y-3">
-              {[
-                ['alcoholLastNight', '昨夜、飲酒した'] as const,
-                ['alcoholToday', '今日すでに飲酒した'] as const,
-              ].map(([key, label]) => (
-                <label key={key} className="flex items-center gap-3 cursor-pointer">
-                  <input type="checkbox" checked={form[key]} onChange={(e) => set(key, e.target.checked)} className="w-4 h-4 accent-ocean-600" />
-                  <span className="text-sm text-gray-700">{label}</span>
-                </label>
-              ))}
-            </div>
-            <F label="今日の体調">
-              <div className="flex gap-3">
-                {(['good','normal','bad'] as const).map((c) => (
-                  <button key={c} type="button" onClick={() => set('condition', c)}
-                    className={`flex-1 py-2 rounded-lg text-sm border transition-colors ${form.condition === c ? 'bg-ocean-600 text-white border-ocean-600' : 'border-gray-300 text-gray-600 hover:bg-gray-50'}`}>
-                    {c === 'good' ? '😊 良い' : c === 'normal' ? '😐 普通' : '😔 悪い'}
-                  </button>
-                ))}
-              </div>
-            </F>
-            <label className="flex items-start gap-3 cursor-pointer">
-              <input type="checkbox" checked={form.flightWithin48h} onChange={(e) => set('flightWithin48h', e.target.checked)} className="w-4 h-4 mt-0.5 accent-ocean-600" />
-              <span className="text-sm text-gray-700">
-                ダイビング終了後48時間以内に飛行機に乗る予定がある
-                <span className="block text-xs text-red-600 mt-0.5">※ 減圧症リスクのためガイドに確認が必要です</span>
-              </span>
-            </label>
-            <Nav onPrev={prev} onNext={next} canNext />
-          </div>
-        )}
-
-        {step === 'experience' && (
-          <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-4">
-            <h2 className="font-bold text-gray-800">④ 経験・スキル</h2>
-            <label className="flex items-center gap-3 cursor-pointer">
-              <input type="checkbox" checked={form.hasCCard} onChange={(e) => set('hasCCard', e.target.checked)} className="w-4 h-4 accent-ocean-600" />
-              <span className="text-sm text-gray-700">Cカード（ダイビングライセンス）を持っている</span>
-            </label>
-            {form.hasCCard && (
-              <div className="space-y-3 pl-7">
-                <div className="grid grid-cols-2 gap-3">
-                  <F label="カード種別">
-                    <select value={form.cCardType} onChange={(e) => set('cCardType', e.target.value)} className={inp}>
-                      <option value="">選択</option>
-                      {['OW','AOW','Rescue','Divemaster','Instructor'].map((t) => <option key={t}>{t}</option>)}
-                    </select>
-                  </F>
-                  <F label="認定団体">
-                    <select value={form.cCardOrg} onChange={(e) => set('cCardOrg', e.target.value)} className={inp}>
-                      <option value="">選択</option>
-                      {['PADI','NAUI','SSI','BSAC','その他'].map((o) => <option key={o}>{o}</option>)}
-                    </select>
-                  </F>
-                </div>
-                <F label="最後にダイビングした時期"><input type="month" value={form.lastDiveDate} onChange={(e) => set('lastDiveDate', e.target.value)} className={inp} /></F>
-                <F label="総ダイビング本数"><input type="number" min={0} value={form.totalDives || ''} onChange={(e) => set('totalDives', Number(e.target.value))} placeholder="0" className={inp} /></F>
-              </div>
-            )}
-            <Nav onPrev={prev} onNext={next} canNext />
-          </div>
-        )}
-
+        {step === 'today' && <div className="bg-white p-6 rounded-xl space-y-4">
+          <h2 className="font-bold">③ 当日体調・フライト予定</h2>
+          <F id="sleepCategory" label="昨夜の睡眠時間 *" error={errors.sleepCategory}><select id="sleepCategory" aria-invalid={!!errors.sleepCategory} aria-describedby={errors.sleepCategory ? 'sleepCategory-error' : undefined} className={inp} value={form.sleepCategory ?? ''} onChange={(e) => set('sleepCategory', e.target.value)}><option value="">選択してください</option>{SLEEP_OPTIONS.map((v) => <option key={v} value={v}>{v}</option>)}</select></F>
+          <Answer id="alcoholLastNight" label="昨夜の飲酒" value={form.alcoholLastNight} error={errors.alcoholLastNight} onChange={(v) => set('alcoholLastNight', v)} />
+          <Answer id="alcoholToday" label="当日の飲酒" value={form.alcoholToday} error={errors.alcoholToday} onChange={(v) => set('alcoholToday', v)} />
+          <F id="condition" label="今日の体調 *" error={errors.condition}><select id="condition" value={form.condition} className={inp} onChange={(e) => set('condition', e.target.value as FormData['condition'])}><option value="">選択してください</option><option value="good">良い</option><option value="normal">普通</option><option value="bad">悪い</option></select></F>
+          {form.condition === 'bad' && <F id="conditionDetails" label="体調の詳細 *" error={errors.conditionDetails}><textarea id="conditionDetails" maxLength={500} className={inp} value={form.conditionDetails ?? ''} onChange={(e) => set('conditionDetails', e.target.value)} /></F>}
+          <Answer id="flightWithin48h" label="48時間以内の飛行機搭乗予定" value={form.flightWithin48h} error={errors.flightWithin48h} onChange={(v) => set('flightWithin48h', v)} />
+          <Nav onPrev={prev} onNext={next} canNext />
+        </div>}
+        {step === 'experience' && <div className="bg-white p-6 rounded-xl space-y-4">
+          <h2 className="font-bold">④ 経験・スキル</h2>
+          <F id="cCardType" label="Cカードの有無・種別 *" error={errors.cCardType}><select id="cCardType" className={inp} value={form.cCardType} onChange={(e) => { set('cCardType', e.target.value); set('hasCCard', e.target.value !== '未取得' && e.target.value !== ''); if(e.target.value === '未取得') set('cCardOrg', '') }}><option value="">選択してください</option>{CARD_OPTIONS.map((v) => <option key={v}>{v}</option>)}</select></F>
+          {form.hasCCard && <F id="cCardOrg" label="認定団体（任意）" error={errors.cCardOrg}><select id="cCardOrg" className={inp} value={form.cCardOrg} onChange={(e) => set('cCardOrg', e.target.value)}><option value="">未回答</option>{ORG_OPTIONS.map((v) => <option key={v}>{v}</option>)}</select></F>}
+          <F id="lastDivePeriod" label="最後のダイビング *" error={errors.lastDivePeriod}><select id="lastDivePeriod" aria-invalid={!!errors.lastDivePeriod} aria-describedby={errors.lastDivePeriod ? 'lastDivePeriod-error' : undefined} className={inp} value={form.lastDivePeriod ?? ''} onChange={(e) => set('lastDivePeriod', e.target.value)}><option value="">選択してください</option>{DIVE_OPTIONS.map((v) => <option key={v} value={v}>{v}</option>)}</select></F>
+          <F id="totalDives" label="総本数（任意）" error={errors.totalDives}><input id="totalDives" className={inp} type="number" min={0} step={1} value={form.totalDives ?? ''} onChange={(e) => set('totalDives', e.target.value === '' ? null : Number(e.target.value))} /></F>
+          <Nav onPrev={prev} onNext={next} canNext />
+        </div>}
         {step === 'agree' && (
           <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-4">
             <h2 className="font-bold text-gray-800">⑤ 同意事項</h2>
             {[
               ['agreeRisk', 'ダイビングにはリスクが伴うことを理解し、自己責任で参加することに同意します。'],
               ['agreeMedical', '緊急時に必要な医療処置を受けることに同意します。'],
-              ['agreePhoto', '当日の写真・動画をSNS等に使用することを許可します。（任意）'],
             ].map(([key, label]) => (
               <label key={key} className="flex items-start gap-3 cursor-pointer">
                 <input type="checkbox" checked={form[key as keyof typeof form] as boolean}
@@ -265,9 +238,12 @@ export default function QuestionnairePage() {
                 <span className="text-sm text-gray-700">{label}</span>
               </label>
             ))}
+            <Answer id="agreePhoto" label="写真・動画の使用許可" value={form.agreePhoto} error={errors.agreePhoto} onChange={(v) => set('agreePhoto', v)} />
+            {errors.agreeRisk && <p id="agreeRisk" tabIndex={-1} className="text-red-600">{errors.agreeRisk}</p>}
+            {errors.agreeMedical && <p id="agreeMedical" tabIndex={-1} className="text-red-600">{errors.agreeMedical}</p>}
             <div className="flex gap-3 pt-4">
               <button onClick={prev} className="flex-1 border border-gray-300 text-gray-700 py-3 rounded-xl text-sm hover:bg-gray-50">← 戻る</button>
-              <button onClick={handleSubmit} disabled={!form.agreeRisk || !form.agreeMedical || submitting}
+              <button onClick={handleSubmit} disabled={submitting}
                 className="flex-1 bg-ocean-600 text-white py-3 rounded-xl font-medium text-sm hover:bg-ocean-700 disabled:opacity-40 transition-colors">
                 {submitting ? '送信中…' : '提出する ✓'}
               </button>
@@ -283,7 +259,7 @@ export default function QuestionnairePage() {
               <p className="text-sm text-gray-500">受付でこの画面を見せてください</p>
             </div>
             <div className="flex justify-center">
-              <QRCodeSVG value={qId} size={200} />
+              <QRCodeSVG value={qrToken} size={200} />
             </div>
             <p className="text-xs text-gray-400">QRコード ID: {qId}</p>
             <div className="bg-ocean-50 rounded-xl p-4 text-left">

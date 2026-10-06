@@ -9,7 +9,7 @@ import { fetchReservations, patchReservation } from '@/lib/api'
 import type { Reservation } from '@/types'
 
 const CHANNEL_LABELS: Record<string, string> = {
-  hp: 'HP', email: 'メール', phone: '電話', ota: 'OTA', sns: 'SNS',
+  hp: 'HP', email: 'メール', phone: '電話', ota: 'OTA', sns: 'SNS', google_form: 'Googleフォーム',
 }
 const STATUS_STYLES: Record<string, string> = {
   confirmed: 'bg-green-100 text-green-700',
@@ -26,6 +26,9 @@ export default function ReservationsPage() {
   const [reservations, setReservations] = useState<Reservation[]>([])
   // 空文字 = 全件表示。日付を選ぶとその日のみ表示
   const [dateFilter, setDateFilter] = useState('')
+  const [issuedUrl, setIssuedUrl] = useState('')
+  const [urlError, setUrlError] = useState('')
+  const [issuing, setIssuing] = useState(false)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -42,6 +45,17 @@ export default function ReservationsPage() {
   const filtered = reservations
     .filter((r) => !dateFilter || r.date === dateFilter)
     .sort((a, b) => a.date.localeCompare(b.date) || a.time.localeCompare(b.time))
+
+  async function issueUrl(id: string) {
+    setIssuing(true); setUrlError(''); setIssuedUrl('')
+    try {
+      const response = await fetch('/api/reservations/' + encodeURIComponent(id) + '/questionnaire-url', { method: 'POST' })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.error || '発行に失敗しました')
+      setIssuedUrl(data.url)
+    } catch (error) { setUrlError(error instanceof Error ? error.message : '発行に失敗しました') }
+    finally { setIssuing(false) }
+  }
 
   async function handleCancel(id: string) {
     if (!confirm('この予約をキャンセルしますか？')) return
@@ -72,6 +86,8 @@ export default function ReservationsPage() {
       <Navigation />
       <main className="max-w-5xl mx-auto px-4 py-6 pb-20 md:pb-6 space-y-4">
 
+        {urlError && <p role="alert" className="text-red-700">{urlError}</p>}
+        {issuedUrl && <div className="bg-white p-4 rounded border"><p>問診URLを発行しました。再発行すると以前のURLは無効になります。</p><a className="text-ocean-700 break-all" href={issuedUrl}>{issuedUrl}</a></div>}
         <div className="flex flex-wrap items-center gap-3">
           <h1 className="text-xl font-bold text-gray-800 flex-1">📅 予約管理</h1>
           <input
@@ -132,10 +148,10 @@ export default function ReservationsPage() {
                           📋 問診確認
                         </Link>
                       ) : (
-                        <Link href={`/questionnaire/${r.id}`}
+                        <button disabled={issuing || r.status === 'cancelled'} onClick={() => void issueUrl(r.id)}
                           className="text-xs bg-orange-50 text-orange-700 border border-orange-200 px-2 py-1 rounded text-center hover:bg-orange-100">
                           📝 問診URL
-                        </Link>
+                        </button>
                       )}
                       {r.status === 'pending' && (
                         <button onClick={() => handleConfirm(r.id)}

@@ -91,14 +91,22 @@ GOOGLE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\
 GOOGLE_SPREADSHEET_ID=1ABC...  # スプレッドシート URL に含まれる ID
 ```
 
-### スプレッドシートの初期化（初回のみ）
+### スプレッドシートの初期化・ヘッダー更新
 
 ```
 http://localhost:3000/api/setup
 ```
 
-にアクセスすると「予約」「問診票」「顧客台帳」シートにヘッダー行を書き込みます。  
-**本番環境では実行後に `src/app/api/setup/route.ts` を削除してください。**
+にアクセスすると「予約」「問診票」「顧客台帳」シートのヘッダー行を書き込みます。初回セットアップ時と、スキーマ更新で列を追加した後に実行してください。この処理はヘッダー行だけを更新し、データ行は変更しません。  
+**本番環境では実行後に `src/app/api/setup/route.ts` を削除するか、アクセスを制限してください。**
+
+### Google Forms予約の自動取込（任意）
+
+Google Formの回答先を、`GOOGLE_SPREADSHEET_ID` で指定した同じスプレッドシートに設定し、回答タブ名を `.env.local` の `GOOGLE_FORM_RESPONSES_SHEET` に指定します（既定値は `フォームの回答 1`）。回答先を別ファイルにする場合は、フォーム回答ファイルのIDを `GOOGLE_FORM_SPREADSHEET_ID` に指定してください。
+
+スタッフがダッシュボードまたは予約一覧を開くと、回答タブの新しい行を自動的に読み取り、`予約` シートへ `pending（仮押さえ）` として追加します。回答行から作った固定IDで重複取込を防ぎ、スタッフが「確定する」を押すと `confirmed（確定）` に更新されます。フォームの見出しが標準名（希望日・希望時間・コース・お名前・人数・電話番号・備考）と異なる場合は、`GOOGLE_FORM_HEADER_MAP` に対応関係をJSONで指定してください。
+
+この方式はスタッフ画面の予約一覧取得時に同期するため、サーバー側の常駐ジョブやGASは不要ですが、スタッフ画面を開いていない間は次回の一覧取得時に取り込まれます。
 
 ---
 
@@ -117,6 +125,20 @@ Vercel ダッシュボード → Settings → Environment Variables で以下を
 | `GOOGLE_SERVICE_ACCOUNT_EMAIL` | サービスアカウントのメール |
 | `GOOGLE_PRIVATE_KEY` | `"-----BEGIN PRIVATE KEY-----\n..."` |
 | `GOOGLE_SPREADSHEET_ID` | スプレッドシート ID |
+
+### GitHub Actions による自動チェック
+
+`.github/workflows/ci.yml` により、`main` 向けのPull Requestと`main`へのpushで、次の処理を自動実行します。
+
+1. `.nvmrc` に記載したNode.jsのセットアップ
+2. `npm ci` による依存関係のインストール
+3. `npm run lint` によるLint
+4. `npm run typecheck` による型チェック
+5. `npm run build` による本番ビルド確認
+
+GitHubリポジトリの **Settings → Branches** で、`main`へのマージ条件にActionsのジョブ **Lint, typecheck, and build** を必須チェックとして追加すると、チェックに失敗した変更のマージを防止できます。
+
+Vercelを利用する場合は、VercelプロジェクトのGitHub連携を有効にすると、`main`へのマージ後の本番デプロイも自動化できます。Vercelの環境変数はActionsに置かず、Vercel側で管理してください。
 
 ---
 
@@ -173,3 +195,7 @@ POST /api/auth { email, password }
   → middleware.ts が Cookie を検証
   → 無効なら /login にリダイレクト
 ```
+
+### 問診データの統合・移行
+
+問診シートの切替には環境変数 GOOGLE_QUESTIONNAIRE_SHEET（既定: 問診票）を使用します。既存シートのヘッダーだけを上書きせず、[移行手順](docs/08_問診票追加項目の移行.md)に従って新しいシートへ移行してください。入力URLは予約管理画面の「問診URL」から発行します。旧予約IDのURLは使用できません。

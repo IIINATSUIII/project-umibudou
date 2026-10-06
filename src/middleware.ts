@@ -14,6 +14,7 @@ const PUBLIC_PATHS = [
 function isPublic(pathname: string): boolean {
   if (PUBLIC_PATHS.some((p) => pathname.startsWith(p))) return true
   // ダイバー向け問診票入力画面はログイン不要（/questionnaire/[id] のみ）
+  if (pathname === '/questionnaire/scan' || pathname === '/questionnaire/scan/') return false
   if (/^\/questionnaire\/[^/]+\/?$/.test(pathname)) return true
   return false
 }

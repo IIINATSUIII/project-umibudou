@@ -13,6 +13,8 @@ export default function CustomersPage() {
   const router = useRouter()
   const [customers, setCustomers] = useState<Customer[]>([])
   const [search, setSearch] = useState('')
+  const [lastVisitFilter, setLastVisitFilter] = useState('')
+  const [cCardFilter, setCCardFilter] = useState('')
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -21,15 +23,29 @@ export default function CustomersPage() {
     fetchCustomers().then((data) => { setCustomers(data); setLoading(false) })
   }, [user, router])
 
+  const cCardOptions = Array.from(new Set(customers.map((c) => c.cCardType || '未取得'))).sort()
+
   const filtered = customers.filter((c) => {
-    if (!search) return true
-    const q = search.toLowerCase()
-    return (
-      `${c.lastName}${c.firstName}`.includes(q) ||
-      `${c.lastNameKana}${c.firstNameKana}`.toLowerCase().includes(q) ||
-      c.phone.includes(q)
-    )
+    if (search) {
+      const q = search.toLowerCase()
+      const matches =
+        `${c.lastName}${c.firstName}`.includes(q) ||
+        `${c.lastNameKana}${c.firstNameKana}`.toLowerCase().includes(q) ||
+        c.phone.includes(q)
+      if (!matches) return false
+    }
+    if (lastVisitFilter && c.lastVisit !== lastVisitFilter) return false
+    if (cCardFilter && (c.cCardType || '未取得') !== cCardFilter) return false
+    return true
   })
+
+  const hasFilter = !!(search || lastVisitFilter || cCardFilter)
+
+  function clearFilters() {
+    setSearch('')
+    setLastVisitFilter('')
+    setCCardFilter('')
+  }
 
   if (loading) return <div className="min-h-screen flex items-center justify-center text-gray-400 text-sm">読み込み中…</div>
 
@@ -42,12 +58,42 @@ export default function CustomersPage() {
           <span className="text-sm text-gray-500">{customers.length}名登録</span>
         </div>
 
-        <input value={search} onChange={(e) => setSearch(e.target.value)}
-          placeholder="🔍 氏名・かな・電話番号で検索"
-          className="w-full border border-gray-300 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-ocean-500 bg-white" />
+        <div className="space-y-2">
+          <input value={search} onChange={(e) => setSearch(e.target.value)}
+            placeholder="🔍 氏名・かな・電話番号で検索"
+            className="w-full border border-gray-300 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-ocean-500 bg-white" />
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="text-xs text-gray-500">最終来店日</label>
+            <input
+              type="date"
+              value={lastVisitFilter}
+              onChange={(e) => setLastVisitFilter(e.target.value)}
+              className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ocean-500 bg-white"
+            />
+            <label className="text-xs text-gray-500 ml-2">Cカード種別</label>
+            <select
+              value={cCardFilter}
+              onChange={(e) => setCCardFilter(e.target.value)}
+              className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ocean-500 bg-white"
+            >
+              <option value="">すべて</option>
+              {cCardOptions.map((opt) => (
+                <option key={opt} value={opt}>{opt}</option>
+              ))}
+            </select>
+            {hasFilter && (
+              <button onClick={clearFilters}
+                className="text-sm border border-gray-300 rounded-lg px-3 py-1.5 hover:bg-gray-50 transition-colors">
+                すべて表示
+              </button>
+            )}
+          </div>
+        </div>
 
         {filtered.length === 0 ? (
-          <p className="text-center text-gray-400 py-12 text-sm">顧客が見つかりません</p>
+          <p className="text-center text-gray-400 py-12 text-sm">
+            {hasFilter ? '条件に一致する顧客が見つかりません' : '顧客が見つかりません'}
+          </p>
         ) : (
           <div className="bg-white rounded-xl border border-gray-200 overflow-hidden divide-y divide-gray-100">
             {filtered.map((c) => (

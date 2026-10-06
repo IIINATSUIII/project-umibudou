@@ -1,9 +1,11 @@
 import { NextResponse } from 'next/server'
 import { initializeSheets } from '@/lib/sheets'
 
+export const dynamic = 'force-dynamic'
+
 /**
  * GET /api/setup
- * スプレッドシートにヘッダー行を書き込む（初回セットアップ時のみ実行）。
+ * 空のスプレッドシートにヘッダー行を書き込む（初回のみ。既存シートは変更しない）。
  * 本番環境では実行後にこのルートを削除またはアクセス制限すること。
  */
 export async function GET() {

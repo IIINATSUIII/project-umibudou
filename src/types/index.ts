@@ -6,8 +6,10 @@ export interface Reservation {
   guestName: string
   guestCount: number
   phone: string
-  channel: 'hp' | 'email' | 'phone' | 'ota' | 'sns'
+  channel: 'hp' | 'email' | 'phone' | 'ota' | 'sns' | 'google_form'
   status: 'confirmed' | 'pending' | 'cancelled'
+  questionnaireToken?: string
+  questionnaireExpiresAt?: string
   questionnaireId?: string
   notes?: string
 }
@@ -16,6 +18,8 @@ export interface QuestionnaireData {
   id: string
   reservationId: string
   submittedAt: string
+  /** 旧データには存在しないため、保存時に付与される項目は任意 */
+  customerId?: string
   // 基本情報
   lastName: string
   firstName: string
@@ -23,18 +27,16 @@ export interface QuestionnaireData {
   firstNameKana: string
   birthDate: string
   gender: 'male' | 'female' | 'other' | 'unanswered'
-  // 旧データでは未取得。欠落を「なし」と解釈しない。
   postalCode?: string
-  email?: string
-  hypertension?: boolean
-  medicalCertificate?: boolean
   address: string
   phone: string
+  email?: string
   emergencyName: string
   emergencyRelation: string
   emergencyPhone: string
   // 健康状態
   heartDisease: boolean
+  highBloodPressure?: boolean
   respiratoryDisease: boolean
   earDisease: boolean
   epilepsy: boolean
@@ -45,10 +47,14 @@ export interface QuestionnaireData {
   medicationName: string
   latexAllergy: boolean
   // 当日体調
-  sleepHours: number
+  sleepCategory?: string
+  lastDivePeriod?: string
+  medicalCertificate?: boolean
+  sleepHours: number | null
   alcoholLastNight: boolean
   alcoholToday: boolean
   condition: 'good' | 'normal' | 'bad'
+  conditionDetails?: string
   // フライト予定
   flightWithin48h: boolean
   // 経験・スキル
@@ -56,12 +62,44 @@ export interface QuestionnaireData {
   cCardType: string
   cCardOrg: string
   lastDiveDate: string
-  totalDives: number
+  totalDives: number | null
   // 同意
   agreeRisk: boolean
   agreeMedical: boolean
   agreePhoto: boolean
+  consentAt?: string
+  qrIssuedAt?: string
+  qrToken?: string
+  qrExpiresAt?: string
+  qrUsed?: boolean
+  doctorClearance?: string
+  staffReviewStatus?: string
+  staffReviewNotes?: string
 }
+
+/** 検索候補に表示し、健康情報を含めない一覧用データ */
+export type QuestionnaireSummary = Pick<
+  QuestionnaireData,
+  'id' | 'reservationId' | 'submittedAt' | 'lastName' | 'firstName' |
+  'lastNameKana' | 'firstNameKana' | 'phone'
+>
+
+/** ゲストが入力する項目。ID・顧客紐付け・QR情報はサーバー側で設定する。 */
+export type QuestionnaireFormData = Omit<
+  QuestionnaireData,
+  | 'id'
+  | 'reservationId'
+  | 'submittedAt'
+  | 'customerId'
+  | 'consentAt'
+  | 'qrToken'
+  | 'qrIssuedAt'
+  | 'qrExpiresAt'
+  | 'qrUsed'
+  | 'doctorClearance'
+  | 'staffReviewStatus'
+  | 'staffReviewNotes'
+>
 
 export interface Customer {
   id: string
@@ -75,9 +113,23 @@ export interface Customer {
   visitCount: number
   hasCCard: boolean
   cCardType: string
-  totalDives: number
+  totalDives: number | null
   healthNotes: string
   guideNotes: string
+  registeredAt?: string
+  updatedAt?: string
+  /** 問診票の再送で来店回数を重複加算しないための処理済みID一覧 */
+  countedQuestionnaireIds?: string
+  birthDate?: string
+  gender?: QuestionnaireData['gender'] | 'undisclosed'
+  postalCode?: string
+  address?: string
+  emergencyName?: string
+  emergencyRelation?: string
+  emergencyPhone?: string
+  cCardOrg?: string
+  lastDiveDate?: string
+  dmConsent?: string
 }
 
 export interface WeatherDay {

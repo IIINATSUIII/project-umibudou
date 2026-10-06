@@ -5,9 +5,11 @@
  * 関数シグネチャは lib/sheets.ts と揃えてあり、API ルートで差し替え可能。
  */
 
+import { normalizeQuestionnaireRecord } from './questionnaireSchema'
 import { promises as fs } from 'fs'
 import path from 'path'
 import type { Reservation, QuestionnaireData, Customer } from '@/types'
+import { matchesQuestionnaire, nextQuestionnaireId } from './questionnaireUtils'
 import {
   MOCK_RESERVATIONS,
   MOCK_QUESTIONNAIRES,
@@ -62,13 +64,37 @@ export async function updateReservation(
 // ─── 問診票 ───────────────────────────────────────────────────
 
 export async function getQuestionnaires(): Promise<QuestionnaireData[]> {
-  return readStore<QuestionnaireData>('questionnaires', MOCK_QUESTIONNAIRES)
+  const records = await readStore<QuestionnaireData>('questionnaires', MOCK_QUESTIONNAIRES)
+  return records.map((record) => normalizeQuestionnaireRecord(record as unknown as Record<string, unknown>) as unknown as QuestionnaireData)
 }
 
-export async function addQuestionnaire(data: QuestionnaireData): Promise<void> {
+let questionnaireWriteQueue: Promise<void> = Promise.resolve()
+
+export async function addQuestionnaire(
+  data: Omit<QuestionnaireData, 'id'>
+): Promise<QuestionnaireData> {
+  let saved: QuestionnaireData | undefined
+  const write = async () => {
+    const all = await getQuestionnaires()
+    saved = { ...data, id: nextQuestionnaireId(all) }
+    all.push(saved)
+    await writeStore('questionnaires', all)
+  }
+  const pending = questionnaireWriteQueue.then(write, write)
+  questionnaireWriteQueue = pending.then(() => undefined, () => undefined)
+  await pending
+  if (!saved) throw new Error('Failed to create questionnaire')
+  return saved
+}
+
+export async function searchQuestionnaires(query: string): Promise<QuestionnaireData[]> {
   const all = await getQuestionnaires()
-  all.push(data)
-  await writeStore('questionnaires', all)
+  return all.filter((questionnaire) => matchesQuestionnaire(questionnaire, query))
+}
+
+export async function getQuestionnaireById(id: string): Promise<QuestionnaireData | undefined> {
+  const all = await getQuestionnaires()
+  return all.find((questionnaire) => questionnaire.id === id)
 }
 
 // ─── 顧客台帳 ─────────────────────────────────────────────────
