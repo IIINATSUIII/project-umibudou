@@ -45,3 +45,13 @@
 ## 検証
 
 変更後は最低限 `npm run typecheck` を通し、画面に関わる変更は `npm run dev` で実際に該当フローを操作して確認する（Sheets 未設定のモックモードで大半の動作確認が可能）。
+
+## Git 運用ルール
+
+**GitHub Flow** を採用。`main` は常に動く状態を保つ（本番 = Firebase Hosting）。
+
+- `main` に直接 push しない。機能・修正ごとに `feature/xxx` / `fix/xxx` ブランチを切る → PR → レビュー1人以上の承認 → マージ。
+- コミットメッセージは Conventional Commits 風に揃える：`feat:` 新機能／`fix:` バグ修正／`chore:` 設定・環境変更／`docs:` ドキュメント。
+- 1PR = 1機能 or 1修正。大きくしすぎない。
+- `.env.local` や秘密鍵など機密情報は絶対にコミットしない（`.gitignore` 済みか都度確認）。
+- Coworkが書いたコードもそのままコミットせず、内容をレビュー・理解してからコミットする。
