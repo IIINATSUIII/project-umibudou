@@ -75,8 +75,8 @@ export async function PATCH(req: NextRequest) {
       }
     }
 
-    await withRetry(() => patchReservation(id, delta))
-    return NextResponse.json({ ok: true })
+    const updatedAt = await withRetry(() => patchReservation(id, delta))
+    return NextResponse.json({ ok: true, updatedAt })
   } catch (err) {
     console.error('[PATCH /api/reservations]', err)
     if (err instanceof RateLimitedError) {

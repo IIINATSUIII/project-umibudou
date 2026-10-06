@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import Navigation from '@/components/Navigation'
@@ -35,21 +35,30 @@ export default function ReservationsPage() {
   // 空文字 = 全件表示。日付を選ぶとその日のみ表示
   const [dateFilter, setDateFilter] = useState('')
   const [loading, setLoading] = useState(true)
+  /** 更新競合（MSG-20）などをスタッフに知らせるメッセージ */
+  const [notice, setNotice] = useState('')
+
+  const load = useCallback(() => Promise.all([fetchReservations(), fetchQuestionnaires()]).then(([res, qs]) => {
+    setReservations(res)
+    setQuestionnaires(qs)
+    setLoading(false)
+  }), [])
 
   useEffect(() => {
     if (user === undefined) return
     if (!user) { router.push('/login'); return }
-    const load = () => Promise.all([fetchReservations(), fetchQuestionnaires()]).then(([res, qs]) => {
-      setReservations(res)
-      setQuestionnaires(qs)
-      setLoading(false)
-    })
     load()
     // 客側フォームからの申し込みを自動反映（10秒ごと＋ウィンドウ復帰時）
     const iv = setInterval(load, 10000)
     window.addEventListener('focus', load)
     return () => { clearInterval(iv); window.removeEventListener('focus', load) }
-  }, [user, router])
+  }, [user, router, load])
+
+  useEffect(() => {
+    if (!notice) return
+    const t = setTimeout(() => setNotice(''), 8000)
+    return () => clearTimeout(t)
+  }, [notice])
 
   function questionnaireIdFor(reservationId: string): string | undefined {
     return questionnaires.find((q) => q.reservationId === reservationId)?.id
@@ -62,20 +71,30 @@ export default function ReservationsPage() {
       TIME_SLOT_ORDER[a.timeSlot] - TIME_SLOT_ORDER[b.timeSlot]
     )
 
-  async function handleCancel(id: string) {
-    if (!confirm('この予約をキャンセルしますか？')) return
-    await patchReservation(id, { status: CANCELLED_STATUS_ID })
-    setReservations((prev) =>
-      prev.map((r) => r.id === id ? { ...r, status: CANCELLED_STATUS_ID } : r)
-    )
+  /**
+   * ステータス更新。読み込み時点の updatedAt を渡し、他スタッフが先に更新していた場合（MSG-20）は
+   * 上書きせずメッセージを出して最新を再取得する。
+   */
+  async function updateStatus(id: string, status: string) {
+    const target = reservations.find((r) => r.id === id)
+    const res = await patchReservation(id, { status }, target?.updatedAt)
+    if (res.status === 'ok') {
+      setNotice('')
+      setReservations((prev) =>
+        prev.map((r) => r.id === id ? { ...r, status, updatedAt: res.updatedAt } : r)
+      )
+      return
+    }
+    setNotice(res.message)
+    await load()
   }
 
-  async function handleConfirm(id: string) {
-    await patchReservation(id, { status: CONFIRMED_STATUS_ID })
-    setReservations((prev) =>
-      prev.map((r) => r.id === id ? { ...r, status: CONFIRMED_STATUS_ID } : r)
-    )
+  async function handleCancel(id: string) {
+    if (!confirm('この予約をキャンセルしますか？')) return
+    await updateStatus(id, CANCELLED_STATUS_ID)
   }
+
+  const handleConfirm = (id: string) => updateStatus(id, CONFIRMED_STATUS_ID)
 
   function handleCsvImport(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -90,6 +109,12 @@ export default function ReservationsPage() {
     <div className="min-h-screen">
       <Navigation />
       <main className="max-w-5xl mx-auto px-4 py-6 pb-20 md:pb-6 space-y-4">
+
+        {notice && (
+          <div role="alert" className="bg-amber-50 border border-amber-300 text-amber-800 text-sm rounded-xl px-4 py-3">
+            ⚠️ {notice}
+          </div>
+        )}
 
         <div className="flex flex-wrap items-center gap-3">
           <h1 className="text-xl font-bold text-gray-800 flex-1">📅 予約管理</h1>
