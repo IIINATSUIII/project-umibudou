@@ -6,6 +6,7 @@ import {
   SubmissionValidationError,
 } from '@/lib/questionnaireSubmission'
 import { withStoreWriteLock } from '@/lib/storeLock'
+import { getQrError } from '@/lib/questionnaireToken'
 
 /** GET /api/questionnaires?q=... — 条件を指定して問診票を検索 */
 export async function GET(req: NextRequest) {
@@ -30,11 +31,8 @@ export async function GET(req: NextRequest) {
     const qrMatch = matches.find(
       (questionnaire) => questionnaire.qrToken === query
     )
-    if (
-      qrMatch?.qrExpiresAt &&
-      new Date(qrMatch.qrExpiresAt).getTime() <= Date.now()
-    ) {
-      return NextResponse.json({ error: 'QR_EXPIRED' }, { status: 410 })
+    if (qrMatch && getQrError(qrMatch)) {
+      return NextResponse.json({ error: getQrError(qrMatch) }, { status: 410 })
     }
     return NextResponse.json(
       matches.map((questionnaire) => ({

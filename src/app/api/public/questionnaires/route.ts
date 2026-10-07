@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { store } from '@/lib/dataStore'
-import { findReservationByQuestionnaireToken } from '@/lib/questionnaireToken'
+import { findReservationByQuestionnaireToken, getQrError } from '@/lib/questionnaireToken'
 import {
   saveSubmission,
   SubmissionValidationError,
@@ -33,6 +33,8 @@ export async function GET(req: NextRequest) {
     const q = (await store.getQuestionnaires()).find(
       (q) => q.reservationId === reservation.id
     )
+    if (q?.submissionState === 'complete' && getQrError(q))
+      return NextResponse.json({ error: '受付QRが使用済みまたは期限切れです' }, { status: 410, headers: { 'Cache-Control': 'no-store' } })
     return NextResponse.json(
       q?.submissionState === 'complete'
         ? { ...success(q), submitted: true }
@@ -67,6 +69,9 @@ export async function POST(req: NextRequest) {
           { error: '予約URLが無効、または期限切れです' },
           { status: 404 }
         )
+      const prior = (await store.getQuestionnaires()).find(q => q.reservationId === reservation.id)
+      if (prior?.submissionState === 'complete' && getQrError(prior))
+        return NextResponse.json({ error: '受付QRが使用済みまたは期限切れです' }, { status: 410, headers: { 'Cache-Control': 'no-store' } })
       const q = await saveSubmission(reservation, input)
       return NextResponse.json(success(q), {
         headers: { 'Cache-Control': 'no-store' },
