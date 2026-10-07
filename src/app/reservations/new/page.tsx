@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import Navigation from '@/components/Navigation'
 import { useAuth } from '@/lib/authContext'
 import { createReservation } from '@/lib/api'
+import { ISSUE_5_RESERVATION_STATUS } from '@/lib/reservationStatus'
 import type { Reservation } from '@/types'
 
 const COURSES = [
@@ -20,14 +21,16 @@ export default function NewReservationPage() {
   const user = useAuth()
   const router = useRouter()
   const [form, setForm] = useState({
-    date: new Date().toISOString().slice(0, 10),
+    diveDate: new Date().toISOString().slice(0, 10),
     time: '09:00',
-    course: '体験ダイビング',
+    timeSlot: 'unspecified' as const,
+    courseName: '体験ダイビング',
     guestName: '',
     guestCount: 1,
-    phone: '',
+    guestPhone: '',
+    guestEmail: '',
     channel: 'phone' as Reservation['channel'],
-    notes: '',
+    staffNote: '',
   })
   const [saving, setSaving] = useState(false)
 
@@ -46,7 +49,7 @@ export default function NewReservationPage() {
     await createReservation({
       id: `R${Date.now()}`,
       ...form,
-      status: 'confirmed',
+      status: ISSUE_5_RESERVATION_STATUS.requested,
     })
     router.push('/reservations')
   }
@@ -64,7 +67,7 @@ export default function NewReservationPage() {
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">日付 *</label>
-              <input type="date" value={form.date} onChange={(e) => set('date', e.target.value)}
+          <input type="date" value={form.diveDate} onChange={(e) => set('diveDate', e.target.value)}
                 required className={inp} />
             </div>
             <div>
@@ -76,7 +79,7 @@ export default function NewReservationPage() {
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">コース *</label>
-            <select value={form.course} onChange={(e) => set('course', e.target.value)} className={inp}>
+            <select value={form.courseName} onChange={(e) => set('courseName', e.target.value)} className={inp}>
               {COURSES.map((c) => <option key={c}>{c}</option>)}
             </select>
           </div>
@@ -108,13 +111,19 @@ export default function NewReservationPage() {
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">電話番号 *</label>
-            <input type="tel" value={form.phone} onChange={(e) => set('phone', e.target.value)}
+            <input type="tel" value={form.guestPhone} onChange={(e) => set('guestPhone', e.target.value)}
               placeholder="090-0000-0000" required className={inp} />
           </div>
 
           <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">メールアドレス（任意）</label>
+            <input type="email" value={form.guestEmail} onChange={(e) => set('guestEmail', e.target.value)}
+              placeholder="example@example.com" className={inp} />
+          </div>
+
+          <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">メモ</label>
-            <textarea value={form.notes} onChange={(e) => set('notes', e.target.value)}
+            <textarea value={form.staffNote} onChange={(e) => set('staffNote', e.target.value)}
               placeholder="特記事項など" rows={3}
               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ocean-500 resize-none" />
           </div>

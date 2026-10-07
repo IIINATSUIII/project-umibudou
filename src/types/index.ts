@@ -1,14 +1,43 @@
+export type ReservationTimeSlot = 'morning' | 'afternoon' | 'full' | 'unspecified'
+export type ReservationChannel = 'hp' | 'email' | 'phone' | 'ota' | 'sns' | 'google_form'
+
+/** 正準予約データ。旧API/シート名は ReservationInput の境界変換で吸収する。 */
 export interface Reservation {
   id: string
-  date: string        // YYYY-MM-DD
-  time: string        // HH:MM
-  course: string
+  createdAt?: string
+  updatedAt?: string
+  customerId?: string
   guestName: string
+  guestPhone: string
+  guestEmail?: string
+  /** ダイビング日 YYYY-MM-DD */
+  diveDate: string
+  /** 旧フォームが指定した正確な HH:MM。Issue #5 の時間帯とは別に保持する。 */
+  time?: string
+  timeSlot: ReservationTimeSlot
+  courseId?: string
+  /** 自由記述コース名。コースIDへ一意に解決できない場合も保持する。 */
+  courseName: string
   guestCount: number
-  phone: string
-  channel: 'hp' | 'email' | 'phone' | 'ota' | 'sns' | 'google_form'
-  status: 'confirmed' | 'pending' | 'cancelled'
+  status: string
+  staffId?: string
+  staffName?: string
+  channel: ReservationChannel
   questionnaireId?: string
+  /** 同一予約の複数参加者の問診票IDを保持。区切り文字は | */
+  questionnaireIds?: string
+  questionnaireToken?: string
+  questionnaireTokenExpiresAt?: string
+  questionnaireCompleted?: boolean
+  divePoint?: string
+  staffNote?: string
+}
+
+/** 旧 date/course/phone/notes 入力を許す移行期間中のAPI境界型。 */
+export type ReservationInput = Partial<Reservation> & {
+  date?: string
+  course?: string
+  phone?: string
   notes?: string
 }
 
@@ -18,6 +47,8 @@ export interface QuestionnaireData {
   submittedAt: string
   /** 旧データには存在しないため、保存時に付与される項目は任意 */
   customerId?: string
+  /** 同じフォーム送信の再試行を識別するクライアント生成ID */
+  submissionId?: string
   // 基本情報
   lastName: string
   firstName: string
@@ -85,6 +116,7 @@ export type QuestionnaireFormData = Omit<
   | 'reservationId'
   | 'submittedAt'
   | 'customerId'
+  | 'submissionId'
   | 'consentAt'
   | 'qrToken'
   | 'qrExpiresAt'
@@ -111,7 +143,9 @@ export interface Customer {
   guideNotes: string
   registeredAt?: string
   updatedAt?: string
-  /** 問診票の再送で来店回数を重複加算しないための処理済みID一覧 */
+  /** 同一予約の再送で来店回数を重複加算しないための処理済み予約ID一覧 */
+  countedReservationIds?: string
+  /** 旧形式の処理済み問診ID一覧。読み取り時に予約IDへ変換する */
   countedQuestionnaireIds?: string
   birthDate?: string
   gender?: QuestionnaireData['gender'] | 'undisclosed'
@@ -122,6 +156,7 @@ export interface Customer {
   emergencyPhone?: string
   cCardOrg?: string
   lastDiveDate?: string
+  lastDivePeriod?: string
   dmConsent?: string
 }
 

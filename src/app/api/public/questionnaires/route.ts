@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { randomBytes } from 'crypto'
-import { store } from '@/lib/dataStore'
+import { DataStoreError, store, USE_POSTGRES } from '@/lib/dataStore'
 import type { QuestionnaireData, QuestionnaireFormData, Customer } from '@/types'
 import { nextCustomerId } from '@/lib/questionnaireUtils'
+
+export const runtime = 'nodejs'
 
 function stringValue(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
@@ -17,14 +19,42 @@ function isValidPhone(value: string): boolean {
   return /^\+?\d{4,15}$/.test(compact)
 }
 
-function countedQuestionnaireIds(customer: Customer): string[] {
-  try {
-    const ids: unknown = JSON.parse(customer.countedQuestionnaireIds ?? '[]')
-    return Array.isArray(ids) ? ids.filter((id): id is string => typeof id === 'string') : []
-  } catch {
-    return []
+function countedReservationIds(customer: Customer, questionnaires: QuestionnaireData[]): string[] {
+  const reservationByQuestionnaireId = new Map(
+    questionnaires.map((questionnaire) => [questionnaire.id, questionnaire.reservationId] as const)
+  )
+  const parseIds = (value?: string): string[] => {
+    try {
+      const ids: unknown = JSON.parse(value ?? '[]')
+      return Array.isArray(ids) ? ids.filter((id): id is string => typeof id === 'string') : []
+    } catch {
+      return []
+    }
   }
+  // 旧版は問診IDを保存していたため、問診行から予約IDへ変換してから重複判定する。
+  const reservationIds = [
+    ...parseIds(customer.countedReservationIds),
+    ...parseIds(customer.countedQuestionnaireIds),
+  ].map((id) => reservationByQuestionnaireId.get(id) ?? id)
+  return reservationIds.filter((id, index) => reservationIds.indexOf(id) === index)
 }
+
+function healthNotes(questionnaire: QuestionnaireData): string {
+  return [
+    questionnaire.heartDisease       && '心臓疾患',
+    questionnaire.highBloodPressure  && '高血圧',
+    questionnaire.respiratoryDisease && '呼吸器疾患',
+    questionnaire.earDisease         && '耳の疾患',
+    questionnaire.epilepsy           && 'てんかん',
+    questionnaire.diabetes           && '糖尿病',
+    questionnaire.pregnant           && '妊娠中',
+    questionnaire.panicDisorder      && 'パニック障害',
+    questionnaire.medication         && `服薬：${questionnaire.medicationName}`,
+    questionnaire.latexAllergy       && 'ラテックスアレルギー',
+  ].filter(Boolean).join('、') || '特記なし'
+}
+
+const LAST_DIVE_OPTIONS = ['1ヶ月以内', '半年以内', '1年以内', '1年以上', '初めて']
 
 function successResponse(questionnaire: QuestionnaireData): NextResponse {
   return NextResponse.json({
@@ -32,6 +62,10 @@ function successResponse(questionnaire: QuestionnaireData): NextResponse {
     questionnaireId: questionnaire.id,
     qrToken: questionnaire.qrToken,
     qrExpiresAt: questionnaire.qrExpiresAt,
+    lastName: questionnaire.lastName,
+    firstName: questionnaire.firstName,
+    lastNameKana: questionnaire.lastNameKana,
+    firstNameKana: questionnaire.firstNameKana,
   })
 }
 
@@ -72,12 +106,40 @@ async function handlePost(req: NextRequest): Promise<NextResponse> {
     }
     const values = body as Record<string, unknown>
     const reservationId = stringValue(values.reservationId)
+    const reservationToken = stringValue(values.reservationToken)
+    const submissionId = stringValue(values.submissionId)
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(submissionId)) {
+      return NextResponse.json({ error: '送信IDが不正です。ページを再読み込みしてください' }, { status: 400 })
+    }
 
     // 実在する予約に対する提出のみ受け付ける
     const reservations = await store.getReservations()
     const reservation = reservations.find((r) => r.id === reservationId)
-    if (!reservation) {
+    if (!reservation || !reservation.questionnaireToken || reservationToken !== reservation.questionnaireToken) {
       return NextResponse.json({ error: '予約が見つかりません' }, { status: 404 })
+    }
+
+    const questionnaires = await store.getQuestionnaires()
+    const priorQuestionnaire = questionnaires.find(
+      (questionnaire) => questionnaire.submissionId === submissionId
+    )
+    if (priorQuestionnaire && priorQuestionnaire.reservationId !== reservationId) {
+      return NextResponse.json({ error: '送信IDは別の予約で使用済みです' }, { status: 409 })
+    }
+
+    // 同じ送信IDですでに保存済みの問診票は、部分失敗からの再開として期限後も処理する。
+    // 新規票は保存された期限が有効な場合だけ受け付ける。
+    if (!priorQuestionnaire) {
+      const expiryValue = reservation.questionnaireTokenExpiresAt
+      const expiry = expiryValue ? new Date(expiryValue) : null
+      if (
+        !expiry ||
+        !Number.isFinite(expiry.getTime()) ||
+        expiry.toISOString() !== expiryValue ||
+        expiry.getTime() <= Date.now()
+      ) {
+        return NextResponse.json({ error: '問診票URLの有効期限が切れています' }, { status: 410 })
+      }
     }
 
     const gender = values.gender
@@ -139,6 +201,7 @@ async function handlePost(req: NextRequest): Promise<NextResponse> {
       !formData.address || !formData.phone || !formData.emergencyName ||
       !formData.emergencyRelation || !formData.emergencyPhone ||
       !formData.agreeRisk || !formData.agreeMedical ||
+      !LAST_DIVE_OPTIONS.includes(formData.lastDiveDate) ||
       (formData.condition === 'bad' && !formData.conditionDetails) ||
       (formData.medication && !formData.medicationName) ||
       (formData.hasCCard && !formData.cCardType) ||
@@ -160,16 +223,36 @@ async function handlePost(req: NextRequest): Promise<NextResponse> {
       return NextResponse.json({ error: '生年月日を確認してください' }, { status: 400 })
     }
 
-    const customers = await store.getCustomers()
-    const questionnaires = await store.getQuestionnaires()
-    const priorQuestionnaire = questionnaires.find(
-      (questionnaire) => questionnaire.id === reservation.questionnaireId
-    ) ?? questionnaires.find((questionnaire) => questionnaire.reservationId === reservationId)
-    if (priorQuestionnaire && reservation.questionnaireId === priorQuestionnaire.id) {
-      return successResponse(priorQuestionnaire)
+    if (USE_POSTGRES) {
+      if (!store.submitPublicQuestionnaire) {
+        throw new Error('PostgreSQL datastore does not provide transactional questionnaire submission')
+      }
+      try {
+        const result = await store.submitPublicQuestionnaire({
+          reservationId,
+          reservationToken,
+          submissionId,
+          formData,
+        })
+        return successResponse(result.questionnaire)
+      } catch (error) {
+        if (error instanceof DataStoreError) {
+          if (error.code === 'reservation_not_found') {
+            return NextResponse.json({ error: '予約が見つかりません' }, { status: 404 })
+          }
+          if (error.code === 'questionnaire_expired') {
+            return NextResponse.json({ error: '問診票URLの有効期限が切れています' }, { status: 410 })
+          }
+          if (error.code === 'submission_conflict') {
+            return NextResponse.json({ error: '送信IDは別の予約で使用済みです' }, { status: 409 })
+          }
+        }
+        throw error
+      }
     }
 
-    // 予約IDを冪等キーとして扱い、途中失敗後の再送では問診票行を再利用する。
+    const customers = await store.getCustomers()
+    // 送信IDで同じ参加者の再試行だけを識別し、同じ予約の別参加者は別票として保存する。
     const source = priorQuestionnaire ?? formData
     const email = (source.email ?? '').trim().toLocaleLowerCase('ja-JP')
     const phone = normalizedPhone(source.phone)
@@ -179,57 +262,63 @@ async function handlePost(req: NextRequest): Promise<NextResponse> {
     const existingByEmail = email
       ? customers.find((customer) => (customer.email ?? '').trim().toLocaleLowerCase('ja-JP') === email)
       : undefined
-    const existing = existingById ?? existingByEmail ?? customers.find((customer) =>
+    const existingByPhone = customers.find((customer) =>
       !(customer.email ?? '').trim() &&
       normalizedPhone(customer.phone) === phone &&
       customer.lastName === source.lastName &&
       customer.firstName === source.firstName
     )
-    const customerId = priorQuestionnaire?.customerId ?? existing?.id ??
-      nextCustomerId(customers.map((customer) => customer.id))
+    const emailIdentityConflict = Boolean(!existingById && (existingByEmail || existingByPhone))
+    const existing = existingById ?? (emailIdentityConflict ? undefined : existingByEmail ?? existingByPhone)
+    const customerId = priorQuestionnaire?.customerId ?? (emailIdentityConflict
+      ? undefined
+      : existing?.id ?? nextCustomerId(customers.map((customer) => customer.id)))
     const submittedAt = priorQuestionnaire?.submittedAt ?? new Date().toISOString()
-    const qData = priorQuestionnaire ?? await store.addQuestionnaire({
-      ...formData,
-      reservationId,
-      customerId,
-      submittedAt,
-      consentAt: submittedAt,
-      qrToken: randomBytes(16).toString('base64url'),
-      qrExpiresAt: qrExpiryForDiveDate(reservation.date),
-      qrUsed: false,
-      doctorDivingPermit: '',
-      staffReviewStatus: '未確認',
-      staffReviewNotes: '',
-    })
+    const qData = priorQuestionnaire
+      ? emailIdentityConflict && priorQuestionnaire.staffReviewStatus !== '要対応'
+        ? await store.updateQuestionnaire(priorQuestionnaire.id, {
+            staffReviewStatus: '要対応',
+            staffReviewNotes: '既存顧客情報と一致しました。本人確認後に顧客台帳へ反映してください。',
+          })
+        : priorQuestionnaire
+      : await store.addQuestionnaire({
+          ...formData,
+          reservationId,
+          customerId,
+          submissionId,
+          submittedAt,
+          consentAt: submittedAt,
+          qrToken: randomBytes(16).toString('base64url'),
+          qrExpiresAt: qrExpiryForDiveDate(reservation.diveDate),
+          qrUsed: false,
+          doctorDivingPermit: '',
+          staffReviewStatus: emailIdentityConflict ? '要対応' : '未確認',
+          staffReviewNotes: emailIdentityConflict
+            ? '既存顧客情報と一致しました。本人確認後に顧客台帳へ反映してください。'
+            : '',
+        })
 
-    // 問診票は顧客台帳のメールアドレスを優先し、電話番号を副キーとして紐付ける。
+    // 公開フォームのメール一致だけでは本人確認にならないため、既存顧客への反映は保留する。
     const today = qData.submittedAt.slice(0, 10)
 
-    if (!existing) {
+    if (emailIdentityConflict) {
+      // メール一致だけでは本人確認にならないため、既存顧客の情報を公開フォームから変更しない。
+    } else if (!existing) {
       const newCustomer: Customer = {
-        id: customerId,
+        id: customerId ?? nextCustomerId(customers.map((customer) => customer.id)),
         lastName: qData.lastName,
         firstName: qData.firstName,
         lastNameKana: qData.lastNameKana,
         firstNameKana: qData.firstNameKana,
         phone: qData.phone,
-        email: formData.email ?? '',
+        email: source.email ?? '',
         lastVisit: today,
         visitCount: 1,
-        countedQuestionnaireIds: JSON.stringify([qData.id]),
+        countedReservationIds: JSON.stringify([reservationId]),
         hasCCard: qData.hasCCard,
         cCardType: qData.cCardType,
         totalDives: qData.totalDives,
-        healthNotes: [
-          qData.heartDisease       && '心臓疾患',
-          qData.highBloodPressure  && '高血圧',
-          qData.respiratoryDisease && '呼吸器疾患',
-          qData.earDisease         && '耳の疾患',
-          qData.epilepsy           && 'てんかん',
-          qData.diabetes           && '糖尿病',
-          qData.medication         && `服薬：${qData.medicationName}`,
-          qData.latexAllergy       && 'ラテックスアレルギー',
-        ].filter(Boolean).join('、') || '特記なし',
+        healthNotes: healthNotes(qData),
         guideNotes: '',
         registeredAt: submittedAt,
         updatedAt: submittedAt,
@@ -241,13 +330,13 @@ async function handlePost(req: NextRequest): Promise<NextResponse> {
         emergencyRelation: qData.emergencyRelation,
         emergencyPhone: qData.emergencyPhone,
         cCardOrg: qData.cCardOrg,
-        lastDiveDate: qData.lastDiveDate,
+        lastDivePeriod: qData.lastDiveDate,
         dmConsent: '',
       }
       await store.addCustomer(newCustomer)
     } else {
-      const countedIds = countedQuestionnaireIds(existing)
-      const alreadyCounted = countedIds.includes(qData.id)
+      const countedIds = countedReservationIds(existing, questionnaires)
+      const alreadyCounted = countedIds.includes(reservationId)
       await store.updateCustomer(existing.id, {
         lastName: qData.lastName,
         firstName: qData.firstName,
@@ -262,22 +351,32 @@ async function handlePost(req: NextRequest): Promise<NextResponse> {
         emergencyName: qData.emergencyName,
         emergencyRelation: qData.emergencyRelation,
         emergencyPhone: qData.emergencyPhone,
+        healthNotes: healthNotes(qData),
         hasCCard: qData.hasCCard,
         cCardType: qData.cCardType,
         cCardOrg: qData.cCardOrg,
         totalDives: qData.totalDives,
-        lastDiveDate: qData.lastDiveDate,
+        lastDivePeriod: qData.lastDiveDate,
         visitCount: alreadyCounted ? existing.visitCount : existing.visitCount + 1,
-        countedQuestionnaireIds: alreadyCounted
-          ? existing.countedQuestionnaireIds
-          : JSON.stringify([...countedIds, qData.id]),
-        lastVisit: today,
+        countedReservationIds: JSON.stringify(
+          alreadyCounted ? countedIds : [...countedIds, reservationId]
+        ),
+        lastVisit: existing.lastVisit > today ? existing.lastVisit : today,
         updatedAt: submittedAt,
       })
     }
 
-    // 予約に問診票IDをリンク
-    await store.updateReservation(reservationId, { questionnaireId: qData.id })
+    // 予約に全参加者の問診票IDを保持し、従来画面向けの単一IDも最新票へ更新する。
+    const questionnaireIds = new Set<string>(
+      [reservation.questionnaireId, ...(reservation.questionnaireIds ?? '').split('|'),
+        ...questionnaires.filter((questionnaire) => questionnaire.reservationId === reservationId).map((questionnaire) => questionnaire.id),
+        qData.id]
+        .filter((value): value is string => Boolean(value))
+    )
+    await store.updateReservation(reservationId, {
+      questionnaireId: qData.id,
+      questionnaireIds: Array.from(questionnaireIds).join('|'),
+    })
 
     return successResponse(qData)
   } catch (err) {

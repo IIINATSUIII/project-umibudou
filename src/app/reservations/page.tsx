@@ -6,18 +6,25 @@ import Link from 'next/link'
 import Navigation from '@/components/Navigation'
 import { useAuth } from '@/lib/authContext'
 import { fetchReservations, patchReservation } from '@/lib/api'
+import {
+  cancelledReservationStatus,
+  confirmedReservationStatus,
+  isCancellableReservationStatus,
+  isPendingReservationStatus,
+  reservationStatusLabel,
+  reservationStatusStyle,
+} from '@/lib/reservationStatus'
 import type { Reservation } from '@/types'
 
 const CHANNEL_LABELS: Record<string, string> = {
   hp: 'HP', email: 'メール', phone: '電話', ota: 'OTA', sns: 'SNS', google_form: 'Googleフォーム',
 }
-const STATUS_STYLES: Record<string, string> = {
-  confirmed: 'bg-green-100 text-green-700',
-  pending:   'bg-yellow-100 text-yellow-700',
-  cancelled: 'bg-red-100 text-red-700',
+const TIME_SLOT_LABELS: Record<string, string> = {
+  morning: '午前', afternoon: '午後', full: '終日', unspecified: '時間未定',
 }
-const STATUS_LABELS: Record<string, string> = {
-  confirmed: '確定', pending: '仮押さえ', cancelled: 'キャンセル',
+
+function displayTime(reservation: Reservation): string {
+  return reservation.time || TIME_SLOT_LABELS[reservation.timeSlot] || reservation.timeSlot
 }
 
 export default function ReservationsPage() {
@@ -40,21 +47,25 @@ export default function ReservationsPage() {
   }, [user, router])
 
   const filtered = reservations
-    .filter((r) => !dateFilter || r.date === dateFilter)
-    .sort((a, b) => a.date.localeCompare(b.date) || a.time.localeCompare(b.time))
+    .filter((r) => !dateFilter || r.diveDate === dateFilter)
+    .sort((a, b) => a.diveDate.localeCompare(b.diveDate) || (a.time ?? '').localeCompare(b.time ?? ''))
 
   async function handleCancel(id: string) {
     if (!confirm('この予約をキャンセルしますか？')) return
-    await patchReservation(id, { status: 'cancelled' })
+    const reservation = reservations.find((item) => item.id === id)
+    const status = reservation ? cancelledReservationStatus(reservation) : 'STS-04'
+    await patchReservation(id, { status })
     setReservations((prev) =>
-      prev.map((r) => r.id === id ? { ...r, status: 'cancelled' } : r)
+      prev.map((r) => r.id === id ? { ...r, status } : r)
     )
   }
 
   async function handleConfirm(id: string) {
-    await patchReservation(id, { status: 'confirmed' })
+    const reservation = reservations.find((item) => item.id === id)
+    const status = reservation ? confirmedReservationStatus(reservation) : 'STS-03'
+    await patchReservation(id, { status })
     setReservations((prev) =>
-      prev.map((r) => r.id === id ? { ...r, status: 'confirmed' } : r)
+      prev.map((r) => r.id === id ? { ...r, status } : r)
     )
   }
 
@@ -109,41 +120,47 @@ export default function ReservationsPage() {
                     <div className="pt-0.5 w-14 shrink-0">
                       {!dateFilter && (
                         <div className="text-xs text-gray-500">
-                          {r.date.slice(5).replace('-', '/')}
+                          {r.diveDate.slice(5).replace('-', '/')}
                         </div>
                       )}
-                      <div className="text-sm font-mono font-bold text-ocean-600">{r.time}</div>
+                      <div className="text-sm font-mono font-bold text-ocean-600">{displayTime(r)}</div>
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex flex-wrap items-center gap-2 mb-1">
                         <span className="font-semibold text-gray-800">{r.guestName}</span>
                         <span className="text-sm text-gray-500">{r.guestCount}名</span>
                         <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded">{CHANNEL_LABELS[r.channel]}</span>
-                        <span className={`text-xs px-2 py-0.5 rounded ${STATUS_STYLES[r.status]}`}>{STATUS_LABELS[r.status]}</span>
+                        <span className={`text-xs px-2 py-0.5 rounded ${reservationStatusStyle(r.status)}`}>{reservationStatusLabel(r.status)}</span>
                       </div>
-                      <div className="text-sm text-gray-600">{r.course}</div>
-                      <div className="text-xs text-gray-400 mt-0.5">📞 {r.phone}</div>
-                      {r.notes && <div className="text-xs text-gray-500 mt-1 bg-gray-50 rounded px-2 py-1">💬 {r.notes}</div>}
+                      <div className="text-sm text-gray-600">{r.courseName}</div>
+                      <div className="text-xs text-gray-400 mt-0.5">📞 {r.guestPhone}</div>
+                      {r.staffNote && <div className="text-xs text-gray-500 mt-1 bg-gray-50 rounded px-2 py-1">💬 {r.staffNote}</div>}
                     </div>
                     <div className="flex flex-col gap-1.5 shrink-0">
-                      {r.questionnaireId ? (
-                        <Link href={`/questionnaire/scan?id=${r.questionnaireId}`}
+                      {r.questionnaireId || r.questionnaireIds ? (
+                        <Link href={`/questionnaire/scan?id=${r.id}`}
                           className="text-xs bg-teal-50 text-teal-700 border border-teal-200 px-2 py-1 rounded text-center hover:bg-teal-100">
                           📋 問診確認
                         </Link>
                       ) : (
-                        <Link href={`/questionnaire/${r.id}`}
+                        <Link href={`/questionnaire/${r.id}?token=${encodeURIComponent(r.questionnaireToken ?? '')}`}
                           className="text-xs bg-orange-50 text-orange-700 border border-orange-200 px-2 py-1 rounded text-center hover:bg-orange-100">
                           📝 問診URL
                         </Link>
                       )}
-                      {r.status === 'pending' && (
+                      {(r.questionnaireId || r.questionnaireIds) && (
+                        <Link href={`/questionnaire/${r.id}?token=${encodeURIComponent(r.questionnaireToken ?? '')}`}
+                          className="text-xs text-ocean-700 border border-ocean-200 px-2 py-1 rounded text-center hover:bg-ocean-50">
+                          📝 追加参加者URL
+                        </Link>
+                      )}
+                      {isPendingReservationStatus(r.status) && (
                         <button onClick={() => handleConfirm(r.id)}
                           className="text-xs bg-green-600 text-white px-2 py-1 rounded hover:bg-green-700">
                           ✓ 確定する
                         </button>
                       )}
-                      {r.status !== 'cancelled' && (
+                      {isCancellableReservationStatus(r.status) && (
                         <button onClick={() => handleCancel(r.id)}
                           className="text-xs text-red-500 hover:text-red-700 px-2 py-1 border border-red-200 rounded hover:bg-red-50">
                           キャンセル

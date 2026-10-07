@@ -16,7 +16,7 @@ function normalizeText(value: string): string {
 }
 
 function normalizePhone(value: string): string {
-  return value.replace(/\D/g, '')
+  return value.normalize('NFKC').replace(/\D/g, '')
 }
 
 /** ID・予約ID・QRトークン・氏名（漢字/カナ）・電話番号による部分検索。 */

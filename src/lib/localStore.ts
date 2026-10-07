@@ -7,8 +7,13 @@
 
 import { promises as fs } from 'fs'
 import path from 'path'
-import type { Reservation, QuestionnaireData, Customer } from '@/types'
+import type { Reservation, ReservationInput, QuestionnaireData, Customer } from '@/types'
 import { matchesQuestionnaire, nextQuestionnaireId } from './questionnaireUtils'
+import { normalizeReservationInput, normalizeReservationPatch } from './reservationNormalization'
+import {
+  createReservationQuestionnaireToken,
+  questionnaireTokenExpiryForDiveDate,
+} from './reservationQuestionnaireToken'
 import {
   MOCK_RESERVATIONS,
   MOCK_QUESTIONNAIRES,
@@ -40,23 +45,37 @@ async function writeStore<T>(name: string, data: T[]): Promise<void> {
 // ─── 予約 ─────────────────────────────────────────────────────
 
 export async function getReservations(): Promise<Reservation[]> {
-  return readStore<Reservation>('reservations', MOCK_RESERVATIONS)
+  const all = await readStore<ReservationInput>('reservations', MOCK_RESERVATIONS)
+  return all.map(normalizeReservationInput)
 }
 
-export async function addReservation(data: Reservation): Promise<void> {
+export async function addReservation(data: ReservationInput): Promise<Reservation> {
   const all = await getReservations()
-  all.push(data)
+  const normalized = normalizeReservationInput(data)
+  const reservation = {
+    ...normalized,
+    questionnaireToken: normalized.questionnaireToken ?? createReservationQuestionnaireToken(),
+    questionnaireTokenExpiresAt: normalized.questionnaireTokenExpiresAt ??
+      questionnaireTokenExpiryForDiveDate(normalized.diveDate),
+  }
+  all.push(reservation)
   await writeStore('reservations', all)
+  return reservation
 }
 
 export async function updateReservation(
   id: string,
-  data: Partial<Reservation>
+  data: ReservationInput
 ): Promise<void> {
   const all = await getReservations()
   const idx = all.findIndex((r) => r.id === id)
   if (idx === -1) throw new Error(`Reservation ${id} not found`)
-  all[idx] = { ...all[idx], ...data }
+  const patch = normalizeReservationPatch(data)
+  const updated = { ...all[idx], ...patch }
+  if (patch.diveDate !== undefined && patch.questionnaireTokenExpiresAt == null) {
+    updated.questionnaireTokenExpiresAt = questionnaireTokenExpiryForDiveDate(updated.diveDate)
+  }
+  all[idx] = updated
   await writeStore('reservations', all)
 }
 
@@ -93,6 +112,18 @@ export async function searchQuestionnaires(query: string): Promise<Questionnaire
 export async function getQuestionnaireById(id: string): Promise<QuestionnaireData | undefined> {
   const all = await getQuestionnaires()
   return all.find((questionnaire) => questionnaire.id === id)
+}
+
+export async function updateQuestionnaire(
+  id: string,
+  data: Partial<QuestionnaireData>
+): Promise<QuestionnaireData> {
+  const all = await getQuestionnaires()
+  const idx = all.findIndex((questionnaire) => questionnaire.id === id)
+  if (idx === -1) throw new Error(`Questionnaire ${id} not found`)
+  all[idx] = { ...all[idx], ...data }
+  await writeStore('questionnaires', all)
+  return all[idx]
 }
 
 // ─── 顧客台帳 ─────────────────────────────────────────────────

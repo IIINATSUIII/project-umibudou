@@ -7,18 +7,23 @@ import Navigation from '@/components/Navigation'
 import WeatherWidget from '@/components/WeatherWidget'
 import { useAuth } from '@/lib/authContext'
 import { fetchReservations, patchReservation } from '@/lib/api'
+import {
+  confirmedReservationStatus,
+  isPendingReservationStatus,
+  reservationStatusLabel,
+  reservationStatusStyle,
+} from '@/lib/reservationStatus'
 import type { Reservation } from '@/types'
 
 const CHANNEL_LABELS: Record<string, string> = {
   hp: 'HP', email: 'メール', phone: '電話', ota: 'OTA', sns: 'SNS', google_form: 'Googleフォーム',
 }
-const STATUS_STYLES: Record<string, string> = {
-  confirmed: 'bg-green-100 text-green-700',
-  pending:   'bg-yellow-100 text-yellow-700',
-  cancelled: 'bg-red-100 text-red-700',
+const TIME_SLOT_LABELS: Record<string, string> = {
+  morning: '午前', afternoon: '午後', full: '終日', unspecified: '時間未定',
 }
-const STATUS_LABELS: Record<string, string> = {
-  confirmed: '確定', pending: '仮押さえ', cancelled: 'キャンセル',
+
+function displayTime(reservation: Reservation): string {
+  return reservation.time || TIME_SLOT_LABELS[reservation.timeSlot] || reservation.timeSlot
 }
 
 export default function DashboardPage() {
@@ -45,20 +50,22 @@ export default function DashboardPage() {
   }, [user, router])
 
   async function handleConfirm(id: string) {
-    await patchReservation(id, { status: 'confirmed' })
+    const reservation = reservations.find((item) => item.id === id)
+    const status = reservation ? confirmedReservationStatus(reservation) : 'STS-03'
+    await patchReservation(id, { status })
     setReservations((prev) =>
-      prev.map((r) => r.id === id ? { ...r, status: 'confirmed' } : r)
+      prev.map((r) => r.id === id ? { ...r, status } : r)
     )
   }
 
-  const todayRes    = reservations.filter((r) => r.date === today)
-  const tomorrowRes = reservations.filter((r) => r.date === tomorrow)
+  const todayRes    = reservations.filter((r) => r.diveDate === today)
+  const tomorrowRes = reservations.filter((r) => r.diveDate === tomorrow)
   // 未確定の申し込みは日付に関係なくすべて表示する（客側フォームからの申し込みを見逃さないため）
   const pendingRes = reservations
-    .filter((r) => r.status === 'pending')
-    .sort((a, b) => a.date.localeCompare(b.date) || a.time.localeCompare(b.time))
+    .filter((r) => isPendingReservationStatus(r.status))
+    .sort((a, b) => a.diveDate.localeCompare(b.diveDate) || (a.time ?? '').localeCompare(b.time ?? ''))
   const totalGuests = todayRes.reduce((s, r) => s + r.guestCount, 0)
-  const withQr      = todayRes.filter((r) => r.questionnaireId).length
+  const withQr      = todayRes.filter((r) => r.questionnaireId || r.questionnaireIds).length
 
   if (loading) return <LoadingScreen />
 
@@ -81,11 +88,11 @@ export default function DashboardPage() {
               {pendingRes.map((r) => (
                 <div key={r.id} className="px-4 py-3 flex items-center gap-3">
                   <div className="text-sm font-mono font-semibold text-yellow-800 shrink-0">
-                    {r.date.slice(5).replace('-', '/')} {r.time}
+                    {r.diveDate.slice(5).replace('-', '/')} {displayTime(r)}
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="font-medium text-gray-800 text-sm">{r.guestName}（{r.guestCount}名）</div>
-                    <div className="text-xs text-gray-500">{r.course} ／ {CHANNEL_LABELS[r.channel]}経由</div>
+                    <div className="text-xs text-gray-500">{r.courseName} ／ {CHANNEL_LABELS[r.channel]}経由</div>
                   </div>
                   <button onClick={() => handleConfirm(r.id)}
                     className="text-xs bg-green-600 text-white px-3 py-1.5 rounded-lg hover:bg-green-700 shrink-0">
@@ -126,27 +133,33 @@ export default function DashboardPage() {
             <div className="divide-y divide-gray-50">
               {todayRes.map((r) => (
                 <div key={r.id} className="px-4 py-3 flex items-center gap-3">
-                  <div className="text-sm font-mono font-semibold text-ocean-600 w-12">{r.time}</div>
+                  <div className="text-sm font-mono font-semibold text-ocean-600 w-12">{displayTime(r)}</div>
                   <div className="flex-1 min-w-0">
                     <div className="font-medium text-gray-800 text-sm">{r.guestName}（{r.guestCount}名）</div>
-                    <div className="text-xs text-gray-500">{r.course}</div>
+                    <div className="text-xs text-gray-500">{r.courseName}</div>
                   </div>
                   <div className="flex items-center gap-2">
                     <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded">
                       {CHANNEL_LABELS[r.channel]}
                     </span>
-                    <span className={`text-xs px-2 py-0.5 rounded ${STATUS_STYLES[r.status]}`}>
-                      {STATUS_LABELS[r.status]}
+                    <span className={`text-xs px-2 py-0.5 rounded ${reservationStatusStyle(r.status)}`}>
+                      {reservationStatusLabel(r.status)}
                     </span>
-                    {r.questionnaireId ? (
-                      <Link href={`/questionnaire/scan?id=${r.questionnaireId}`}
+                    {r.questionnaireId || r.questionnaireIds ? (
+                      <Link href={`/questionnaire/scan?id=${r.id}`}
                         className="text-xs bg-teal-50 text-teal-700 border border-teal-200 px-2 py-0.5 rounded hover:bg-teal-100">
                         📋 問診確認
                       </Link>
                     ) : (
-                      <Link href={`/questionnaire/${r.id}`}
+                      <Link href={`/questionnaire/${r.id}?token=${encodeURIComponent(r.questionnaireToken ?? '')}`}
                         className="text-xs bg-orange-50 text-orange-700 border border-orange-200 px-2 py-0.5 rounded hover:bg-orange-100">
                         📝 問診未提出
+                      </Link>
+                    )}
+                    {r.questionnaireId && (
+                      <Link href={`/questionnaire/${r.id}?token=${encodeURIComponent(r.questionnaireToken ?? '')}`}
+                        className="text-xs text-ocean-700 border border-ocean-200 px-2 py-0.5 rounded hover:bg-ocean-50">
+                        📝 追加参加者
                       </Link>
                     )}
                   </div>
@@ -164,13 +177,13 @@ export default function DashboardPage() {
             <div className="divide-y divide-gray-50">
               {tomorrowRes.map((r) => (
                 <div key={r.id} className="px-4 py-3 flex items-center gap-3">
-                  <div className="text-sm font-mono font-semibold text-gray-500 w-12">{r.time}</div>
+                  <div className="text-sm font-mono font-semibold text-gray-500 w-12">{displayTime(r)}</div>
                   <div className="flex-1">
                     <div className="font-medium text-gray-700 text-sm">{r.guestName}（{r.guestCount}名）</div>
-                    <div className="text-xs text-gray-400">{r.course}</div>
+                    <div className="text-xs text-gray-400">{r.courseName}</div>
                   </div>
-                  <span className={`text-xs px-2 py-0.5 rounded ${STATUS_STYLES[r.status]}`}>
-                    {STATUS_LABELS[r.status]}
+                  <span className={`text-xs px-2 py-0.5 rounded ${reservationStatusStyle(r.status)}`}>
+                    {reservationStatusLabel(r.status)}
                   </span>
                 </div>
               ))}

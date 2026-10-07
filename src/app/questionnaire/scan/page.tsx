@@ -1,11 +1,16 @@
 'use client'
 
-import { useEffect, useState, Suspense } from 'react'
+import { useEffect, useRef, useState, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Navigation from '@/components/Navigation'
 import { useAuth } from '@/lib/authContext'
-import { fetchQuestionnaireById, fetchQuestionnaires } from '@/lib/api'
-import type { QuestionnaireData, QuestionnaireSummary } from '@/types'
+import { fetchCustomers, fetchQuestionnaireById, fetchQuestionnaires } from '@/lib/api'
+import type { Customer, QuestionnaireData, QuestionnaireSummary } from '@/types'
+
+type BarcodeDetectorLike = {
+  detect: (source: HTMLVideoElement) => Promise<{ rawValue: string }[]>
+}
+type BarcodeDetectorConstructor = new (options: { formats: string[] }) => BarcodeDetectorLike
 
 const HEALTH_FLAGS: [keyof QuestionnaireData, string][] = [
   ['heartDisease', '心臓・循環器系疾患'],
@@ -32,17 +37,151 @@ function ScanContent() {
   const [searching, setSearching] = useState(false)
   const [searchError, setSearchError] = useState(false)
   const [expiredQr, setExpiredQr] = useState(false)
+  const [customers, setCustomers] = useState<Customer[]>([])
+  const [selectedCustomerId, setSelectedCustomerId] = useState('')
+  const [customerLoadError, setCustomerLoadError] = useState(false)
+  const [resolving, setResolving] = useState(false)
+  const [resolveError, setResolveError] = useState('')
+  const [cameraOpen, setCameraOpen] = useState(false)
+  const [cameraBusy, setCameraBusy] = useState(false)
+  const [cameraError, setCameraError] = useState('')
+  const [checkinMessage, setCheckinMessage] = useState<{ text: string; already: boolean } | null>(null)
+  const videoRef = useRef<HTMLVideoElement>(null)
+  const streamRef = useRef<MediaStream | null>(null)
+  const frameRef = useRef<number | null>(null)
+  const scanBusyRef = useRef(false)
 
   useEffect(() => {
     if (user === undefined) return
     if (!user) { router.push('/login'); return }
-    const initialQuery = searchParams.get('token') ?? searchParams.get('id')
-    if (initialQuery) {
-      setQuery(initialQuery)
-      void lookup(initialQuery)
+    const initialToken = searchParams.get('token')
+    const initialId = searchParams.get('id')
+    if (initialToken) void processQrValue(initialToken)
+    else if (initialId) {
+      setQuery(initialId)
+      void lookup(initialId)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, router, searchParams])
+
+  useEffect(() => () => {
+    streamRef.current?.getTracks().forEach((track) => track.stop())
+    if (frameRef.current !== null) window.cancelAnimationFrame(frameRef.current)
+  }, [])
+
+  function stopCamera() {
+    if (frameRef.current !== null) window.cancelAnimationFrame(frameRef.current)
+    frameRef.current = null
+    streamRef.current?.getTracks().forEach((track) => track.stop())
+    streamRef.current = null
+    setCameraOpen(false)
+  }
+
+  async function startCamera() {
+    setCameraError('')
+    const Detector = (window as unknown as { BarcodeDetector?: BarcodeDetectorConstructor }).BarcodeDetector
+    if (!Detector) {
+      setCameraError('このブラウザーはカメラでのQR読取に対応していません。ChromeまたはEdgeで開いてください。')
+      return
+    }
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setCameraError('カメラを利用できません。HTTPSで開いていることをご確認ください。')
+      return
+    }
+
+    setCameraBusy(true)
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: 'environment' } },
+        audio: false,
+      })
+      streamRef.current = stream
+      setCameraOpen(true)
+      await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()))
+      const video = videoRef.current
+      if (!video) throw new Error('カメラ映像を開始できませんでした。')
+      video.srcObject = stream
+      await video.play()
+
+      const detector = new Detector({ formats: ['qr_code'] })
+      const scanFrame = async () => {
+        if (!streamRef.current || scanBusyRef.current) return
+        try {
+          const codes = await detector.detect(video)
+          const code = codes.find((item) => item.rawValue.trim())
+          if (code) {
+            void processQrValue(code.rawValue)
+            return
+          }
+        } catch {
+          // フレームが不鮮明な間は次のフレームで再試行する。
+        }
+        if (streamRef.current) frameRef.current = window.requestAnimationFrame(() => void scanFrame())
+      }
+      frameRef.current = window.requestAnimationFrame(() => void scanFrame())
+    } catch (error) {
+      stopCamera()
+      setCameraError(error instanceof Error && error.name === 'NotAllowedError'
+        ? 'カメラの使用が許可されていません。ブラウザーの設定でカメラを許可してください。'
+        : 'カメラを起動できませんでした。ブラウザーのカメラ権限をご確認ください。')
+    } finally {
+      setCameraBusy(false)
+    }
+  }
+
+  async function processQrValue(rawValue: string) {
+    if (scanBusyRef.current) return
+    scanBusyRef.current = true
+    stopCamera()
+    setCameraError('')
+    setCheckinMessage(null)
+
+    let token = rawValue.trim()
+    try {
+      const url = new URL(token)
+      token = url.searchParams.get('token') ?? token
+    } catch {
+      // LINEの受付QRはURLではなく、参加者ごとのランダムなトークンを格納する。
+    }
+
+    setQuery(token)
+    setResult(null)
+    setNotFound(false)
+    setSearchError(false)
+    setExpiredQr(false)
+    setCameraBusy(true)
+    try {
+      const response = await fetch('/api/questionnaires/checkin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token }),
+      })
+      const data = await response.json() as {
+        error?: string
+        questionnaireId?: string
+        alreadyCheckedIn?: boolean
+      }
+      if (!response.ok) {
+        if (response.status === 410) setExpiredQr(true)
+        else setCameraError(data.error ?? '受付用QRコードを確認できませんでした。')
+        return
+      }
+      if (!data.questionnaireId) {
+        setCameraError('受付情報を確認できませんでした。')
+        return
+      }
+      setCheckinMessage({
+        text: data.alreadyCheckedIn ? 'この参加者はすでに受付済みです。' : '受付を記録しました。',
+        already: Boolean(data.alreadyCheckedIn),
+      })
+      await selectQuestionnaire(data.questionnaireId)
+    } catch {
+      setCameraError('受付を記録できませんでした。通信状態を確認して再度お試しください。')
+    } finally {
+      setCameraBusy(false)
+      scanBusyRef.current = false
+    }
+  }
 
   async function lookup(searchTerm: string) {
     setNotFound(false)
@@ -68,10 +207,21 @@ function ScanContent() {
 
   async function selectQuestionnaire(id: string) {
     setSearchError(false)
+    setResolveError('')
+    setCustomerLoadError(false)
     setResult(null)
     setSearching(true)
     try {
-      setResult(await fetchQuestionnaireById(id))
+      const questionnaire = await fetchQuestionnaireById(id)
+      setResult(questionnaire)
+      setSelectedCustomerId(questionnaire.customerId ?? '')
+      if (questionnaire.staffReviewStatus === '要対応') {
+        try {
+          setCustomers(await fetchCustomers())
+        } catch {
+          setCustomerLoadError(true)
+        }
+      }
     } catch {
       setSearchError(true)
     } finally {
@@ -79,8 +229,41 @@ function ScanContent() {
     }
   }
 
+  async function resolveExistingCustomer() {
+    if (!result || result.staffReviewStatus !== '要対応' || !selectedCustomerId) return
+    const customer = customers.find((item) => item.id === selectedCustomerId)
+    if (!customer) {
+      setResolveError('顧客を選択してください。')
+      return
+    }
+
+    const guestName = `${result.lastName} ${result.firstName}`
+    const customerName = `${customer.lastName} ${customer.firstName}`
+    if (!window.confirm(
+      `${guestName} 様の問診票を、本人確認した顧客 ${customer.id}（${customerName}）へ反映します。健康情報と顧客プロフィールを更新し、この予約の来店回数を一度だけ加算します。よろしいですか？`
+    )) return
+
+    setResolving(true)
+    setResolveError('')
+    try {
+      const response = await fetch('/api/questionnaires', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ questionnaireId: result.id, customerId: customer.id }),
+      })
+      const data = await response.json() as { error?: string; questionnaire?: QuestionnaireData }
+      if (!response.ok) throw new Error(data.error ?? '顧客台帳への反映に失敗しました。')
+      setResult(data.questionnaire ?? await fetchQuestionnaireById(result.id))
+    } catch (error) {
+      setResolveError(error instanceof Error ? error.message : '顧客台帳への反映に失敗しました。')
+    } finally {
+      setResolving(false)
+    }
+  }
+
   function handleSearch(e: React.FormEvent) {
     e.preventDefault()
+    setCheckinMessage(null)
     void lookup(query)
   }
 
@@ -91,6 +274,20 @@ function ScanContent() {
       <Navigation />
       <main className="max-w-lg mx-auto px-4 py-6 pb-20 md:pb-6 space-y-4">
         <h1 className="text-xl font-bold text-gray-800">📷 QRコード読取・問診確認</h1>
+
+        <section className="bg-white rounded-xl border border-gray-200 p-4 space-y-3">
+          <p className="text-sm text-gray-700">お客様のLINEに表示された受付QRを読み取ります。読み取り後、自動で受付済みに記録します。</p>
+          <button type="button" onClick={() => cameraOpen ? stopCamera() : void startCamera()}
+            disabled={cameraBusy && !cameraOpen}
+            className="w-full bg-ocean-600 text-white px-4 py-3 rounded-lg text-sm font-semibold hover:bg-ocean-700 disabled:opacity-50">
+            {cameraOpen ? 'カメラを閉じる' : cameraBusy ? '準備中…' : 'カメラで受付QRを読み取る'}
+          </button>
+          {cameraOpen && (
+            <video ref={videoRef} muted playsInline className="w-full rounded-lg bg-black" aria-label="受付QR読取カメラ" />
+          )}
+          <p className="text-xs text-gray-500">カメラを使うには、HTTPSで開き、ブラウザーのカメラ使用を許可してください。</p>
+          {cameraError && <p role="alert" className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700">{cameraError}</p>}
+        </section>
 
         <form onSubmit={handleSearch} className="bg-white rounded-xl border border-gray-200 p-4">
           <p className="text-xs text-gray-500 mb-2">問診票ID・予約ID・QRトークン・氏名・電話番号で検索できます</p>
@@ -104,6 +301,12 @@ function ScanContent() {
             </button>
           </div>
         </form>
+
+        {checkinMessage && (
+          <div role="status" className={`rounded-xl border p-4 text-sm ${checkinMessage.already ? 'bg-amber-50 border-amber-200 text-amber-900' : 'bg-green-50 border-green-200 text-green-800'}`}>
+            <p className="font-semibold">{checkinMessage.text}</p>
+          </div>
+        )}
 
         {searchError && (
           <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-sm text-red-700">
@@ -136,6 +339,43 @@ function ScanContent() {
 
         {result && (
           <div className="space-y-4">
+            {result.staffReviewStatus === '要対応' && (
+              <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 space-y-3">
+                <p className="text-sm text-amber-900">
+                  {result.staffReviewNotes || 'この問診票は本人確認が必要です。スタッフが内容を確認してください。'}
+                </p>
+                <div>
+                  <label htmlFor="review-customer" className="block text-sm font-medium text-amber-950 mb-1">
+                    本人確認後、反映する顧客を選択
+                  </label>
+                  <select id="review-customer" value={selectedCustomerId}
+                    onChange={(e) => setSelectedCustomerId(e.target.value)}
+                    disabled={resolving || customerLoadError}
+                    className="w-full rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm text-gray-800">
+                    <option value="">顧客IDを選択してください</option>
+                    {customers.map((customer) => (
+                      <option key={customer.id} value={customer.id}>
+                        {customer.id} · {customer.lastName} {customer.firstName} · {customer.phone}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                {customerLoadError && (
+                  <p role="alert" className="text-sm text-red-700">顧客一覧を取得できませんでした。ページを再読み込みしてください。</p>
+                )}
+                {resolveError && <p role="alert" className="text-sm text-red-700">{resolveError}</p>}
+                <button onClick={() => void resolveExistingCustomer()}
+                  disabled={resolving || !selectedCustomerId || customerLoadError}
+                  className="w-full rounded-lg bg-amber-700 px-3 py-2 text-sm font-medium text-white hover:bg-amber-800 disabled:cursor-not-allowed disabled:opacity-50">
+                  {resolving ? '顧客台帳へ反映中…' : '本人確認して顧客台帳へ反映'}
+                </button>
+              </div>
+            )}
+            {result.staffReviewStatus === '確認済' && (
+              <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-sm text-green-800">
+                {result.staffReviewNotes || '本人確認済みで、顧客台帳へ反映されています。'}
+              </div>
+            )}
             {result.qrExpiresAt && new Date(result.qrExpiresAt).getTime() <= Date.now() && (
               <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-800">
                 QRコードの有効期限が切れています。受付で本人確認を行ってください。
@@ -181,11 +421,11 @@ function ScanContent() {
                 <div className="space-y-1 text-sm">
                   <p>Cカード：{result.cCardType}（{result.cCardOrg}）</p>
                   <p>総本数：{result.totalDives} 本</p>
-                  {result.lastDiveDate && <p>前回：{result.lastDiveDate}</p>}
                 </div>
               ) : (
                 <p className="text-sm text-gray-500">Cカードなし（体験ダイビング）</p>
               )}
+              {result.lastDiveDate && <p className="text-sm mt-1">最後に潜った時期：{result.lastDiveDate}</p>}
             </div>
 
             <div className="bg-white rounded-xl border border-gray-200 p-4">

@@ -3,7 +3,7 @@
  * サーバーの API ルートを fetch し、Google Sheets のデータを操作する。
  */
 
-import type { Reservation, QuestionnaireData, QuestionnaireFormData, QuestionnaireSummary, Customer } from '@/types'
+import type { Reservation, ReservationInput, QuestionnaireData, QuestionnaireFormData, QuestionnaireSummary, Customer } from '@/types'
 
 // ─── 予約 ─────────────────────────────────────────────────────
 
@@ -13,7 +13,7 @@ export async function fetchReservations(): Promise<Reservation[]> {
   return res.json()
 }
 
-export async function createReservation(data: Reservation): Promise<void> {
+export async function createReservation(data: ReservationInput): Promise<void> {
   const res = await fetch('/api/reservations', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
