@@ -13,6 +13,7 @@ import {
   type RecordValue,
 } from './storeSchema'
 import { withStoreWriteLock } from './storeLock'
+import { withRetry } from './withRetry'
 import { matchesCustomer } from './customerSearch'
 import { matchesQuestionnaire } from './questionnaireUtils'
 export { HEADERS } from './storeSchema'
@@ -40,10 +41,14 @@ export async function getSheetValues(
   sheetName: string,
   id = spreadsheetId()
 ): Promise<string[][]> {
-  const r = await client().spreadsheets.values.get({
-    spreadsheetId: id,
-    range: quote(sheetName),
-  })
+  // API制限(429)で拒否された呼び出しだけを指数バックオフで再送する（詳細設計書 2-5-1）。
+  // 拒否された呼び出しは未処理なので再送しても二重登録にならない。
+  const r = await withRetry(() =>
+    client().spreadsheets.values.get({
+      spreadsheetId: id,
+      range: quote(sheetName),
+    })
+  )
   return (r.data.values ?? []).map((row) => row.map((v) => String(v ?? '')))
 }
 const record = (headers: string[], row: string[]) =>
@@ -76,15 +81,19 @@ async function add<T extends { id: string }>(kind: StoreKind, v: T) {
     const s = await snapshot(kind, true)
     if (s.data.some((r) => r.id === v.id))
       throw new Error(`ID ${v.id} は登録済みです`)
-    await client().spreadsheets.values.append({
-      spreadsheetId: spreadsheetId(),
-      range: `${quote(names[kind])}!A1`,
-      valueInputOption: 'RAW',
-      insertDataOption: 'INSERT_ROWS',
-      requestBody: {
-        values: [s.headers.map((h) => cell((v as unknown as RecordValue)[h]))],
-      },
-    })
+    await withRetry(() =>
+      client().spreadsheets.values.append({
+        spreadsheetId: spreadsheetId(),
+        range: `${quote(names[kind])}!A1`,
+        valueInputOption: 'RAW',
+        insertDataOption: 'INSERT_ROWS',
+        requestBody: {
+          values: [
+            s.headers.map((h) => cell((v as unknown as RecordValue)[h])),
+          ],
+        },
+      })
+    )
   })
 }
 function column(index: number) {
@@ -110,10 +119,12 @@ async function update<T>(kind: StoreKind, id: string, delta: Partial<T>) {
         }
       })
     if (data.length)
-      await client().spreadsheets.values.batchUpdate({
-        spreadsheetId: spreadsheetId(),
-        requestBody: { valueInputOption: 'RAW', data },
-      })
+      await withRetry(() =>
+        client().spreadsheets.values.batchUpdate({
+          spreadsheetId: spreadsheetId(),
+          requestBody: { valueInputOption: 'RAW', data },
+        })
+      )
   })
 }
 export const getReservations = () => read<Reservation>('RESERVATIONS')
