@@ -1,10 +1,11 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Navigation from '@/components/Navigation'
 import { useAuth } from '@/lib/authContext'
-import { fetchCustomers, patchCustomer } from '@/lib/api'
+import { fetchCustomers, fetchReservations, patchCustomer } from '@/lib/api'
+import { buildDiveHistory } from '@/lib/diveHistory'
 import { changedCustomerFields } from '@/lib/customerEdit'
 import { MSG } from '@/lib/messages'
 import {
@@ -12,7 +13,7 @@ import {
   validateCustomerUpdate,
   type CustomerFieldErrors,
 } from '@/lib/customerValidation'
-import type { Customer } from '@/types'
+import type { Customer, Reservation } from '@/types'
 
 /** 編集フォームの入力値（数値もいったん文字列で保持する） */
 interface ProfileForm {
@@ -97,6 +98,8 @@ export default function CustomerDetailPage() {
   const user = useAuth()
   const router = useRouter()
   const [customer, setCustomer] = useState<Customer | null>(null)
+  /** ダイブ履歴用。null=読み込み中、'error'=取得失敗 */
+  const [reservations, setReservations] = useState<Reservation[] | 'error' | null>(null)
 
   // 編集状態
   const [editingProfile, setEditingProfile] = useState(false)
@@ -135,7 +138,18 @@ export default function CustomerDetailPage() {
       }
       applyCustomer(c)
     })
+    fetchReservations()
+      .then(setReservations)
+      .catch(() => setReservations('error'))
   }, [id, user, router, applyCustomer])
+
+  const diveHistory = useMemo(
+    () =>
+      customer && Array.isArray(reservations)
+        ? buildDiveHistory(customer.id, reservations)
+        : [],
+    [customer, reservations]
+  )
 
   useEffect(() => {
     if (!toast) return
@@ -549,6 +563,44 @@ export default function CustomerDetailPage() {
             </div>
           ) : (
             <p className="text-sm text-gray-500">Cカードなし</p>
+          )}
+        </div>
+
+        <div className="bg-white rounded-xl border border-gray-200 p-4">
+          <p className="text-sm font-semibold text-gray-700 mb-2">
+            📆 ダイブ履歴
+          </p>
+          {reservations === null ? (
+            <p className="text-sm text-gray-400">読み込み中…</p>
+          ) : reservations === 'error' ? (
+            <p className="text-sm text-red-600">
+              履歴を取得できませんでした。再読み込みしてください。
+            </p>
+          ) : diveHistory.length === 0 ? (
+            <p className="text-sm text-gray-400">ダイブ履歴はありません</p>
+          ) : (
+            <ul className="divide-y divide-gray-100">
+              {diveHistory.map((h) => (
+                <li
+                  key={h.reservationId}
+                  className={`flex items-center gap-3 py-2 text-sm ${
+                    h.cancelled ? 'text-gray-400' : 'text-gray-700'
+                  }`}
+                >
+                  <span className="font-mono w-24 shrink-0">{h.date}</span>
+                  <span className="flex-1 min-w-0 truncate">
+                    {h.courseName}
+                    {h.divePoint && (
+                      <span className="text-xs text-gray-400">
+                        {' '}
+                        / {h.divePoint}
+                      </span>
+                    )}
+                  </span>
+                  <span className="text-xs shrink-0">{h.statusName}</span>
+                </li>
+              ))}
+            </ul>
           )}
         </div>
 
