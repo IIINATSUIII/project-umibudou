@@ -60,6 +60,7 @@ it('GET: API制限が続く場合は503とMSG-17を返す(500にしない)', asy
 
   expect(res.status).toBe(503)
   expect(await res.json()).toEqual({ error: MSG.RATE_LIMITED })
+  expect(mock.getReservations).toHaveBeenCalledTimes(1)
 })
 
 it('GET: API制限以外の失敗は従来どおり500', async () => {

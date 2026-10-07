@@ -5,11 +5,13 @@ import type { Reservation, QuestionnaireData } from '@/types'
 const memory = vi.hoisted(() => ({
   reservations: [] as Reservation[],
   qs: [] as QuestionnaireData[],
+  getReservations: vi.fn(),
+  getQuestionnaires: vi.fn(),
   submitPublicQuestionnaire: vi.fn(),
 }))
 vi.mock('@/lib/dataStore', () => ({ store: {
-  getReservations: async () => memory.reservations,
-  getQuestionnaires: async () => memory.qs,
+  getReservations: memory.getReservations,
+  getQuestionnaires: memory.getQuestionnaires,
   updateReservation: async (id: string, delta: Partial<Reservation>) => Object.assign(memory.reservations.find(r => r.id === id)!, delta),
   submitPublicQuestionnaire: memory.submitPublicQuestionnaire,
 }, USE_POSTGRES: true, DataStoreError: class DataStoreError extends Error {} }))
@@ -22,6 +24,8 @@ import { GET, POST } from '@/app/api/public/questionnaires/route'
 import { POST as issue, DELETE as revoke } from '@/app/api/reservations/questionnaire-url/route'
 import { middleware } from '@/middleware'
 import { findReservationByQuestionnaireToken, getQuestionnaireExpiry, getQrError } from '../questionnaireToken'
+import { MSG } from '../messages'
+import { RateLimitedError } from '../withRetry'
 
 const token = 'input-token-with-at-least-128-bits'
 const submissionId = '00000000-0000-4000-8000-000000000001'
@@ -78,6 +82,8 @@ beforeEach(() => {
   vi.stubEnv('SESSION_SECRET', 'test-only-secret')
   memory.reservations = [{ id: 'R-1', diveDate: '2026-10-06', status: 'STS-03', questionnaireToken: token, questionnaireTokenExpiresAt: '2026-10-06T15:00:00.000Z' } as Reservation]
   memory.qs = [{ id: 'M-1', reservationId: 'R-1', qrToken: 'independent-reception-token', qrExpiresAt: '2026-10-06T15:00:00.000Z', qrUsed: false, submissionState: 'complete' } as QuestionnaireData]
+  memory.getReservations.mockReset().mockResolvedValue(memory.reservations)
+  memory.getQuestionnaires.mockReset().mockResolvedValue(memory.qs)
   memory.submitPublicQuestionnaire.mockReset().mockImplementation(async () => ({ questionnaire: memory.qs[0] }))
 })
 afterEach(() => { vi.useRealTimers(); vi.unstubAllEnvs() })
@@ -98,6 +104,15 @@ it('resolves the reservation from accessToken even when a different reservationI
 })
 it.each(['R-1', 'independent-reception-token', ''])('rejects GET using %s', async value => {
   expect((await read(value)).status).toBe(404)
+})
+it('returns MSG-17 with no-store when public questionnaire status GET is rate limited', async () => {
+  memory.getReservations.mockRejectedValueOnce(new RateLimitedError('Sheets API rate limited'))
+
+  const response = await read(token)
+
+  expect(response.status).toBe(503)
+  expect(response.headers.get('cache-control')).toBe('no-store')
+  expect(await response.json()).toEqual({ error: MSG.RATE_LIMITED })
 })
 it.each(['STS-04', 'STS-06', 'cancelled'])('rejects cancelled or unavailable reservation %s for all guest access', async status => {
   memory.reservations[0].status = status

@@ -25,7 +25,7 @@ import {
   questionnaireTokenExpiryForDiveDate,
 } from '@/lib/reservationQuestionnaireToken'
 import { generateQuestionnaireToken, getQuestionnaireExpiry } from '@/lib/questionnaireToken'
-import { withRetry, RateLimitedError } from '@/lib/withRetry'
+import { RateLimitedError } from '@/lib/withRetry'
 import { StoreBusyError, withStoreWriteLock } from '@/lib/storeLock'
 import type { ReservationInput, ReservationTimeSlot } from '@/types'
 
@@ -40,7 +40,7 @@ export async function GET(req: NextRequest) {
   try {
     const result = await importGoogleFormBookings()
     if (result.errors.length) console.warn('[GET /api/reservations] Googleフォーム取込:', result.errors)
-    const reservations = await withRetry(() => store.getReservations())
+    const reservations = await store.getReservations()
     for (const reservation of reservations) {
       const token = reservation.questionnaireToken?.trim() || deriveReservationQuestionnaireToken(reservation.id)
       const expiry = reservation.questionnaireTokenExpiresAt?.trim() || questionnaireTokenExpiryForDiveDate(reservation.diveDate)

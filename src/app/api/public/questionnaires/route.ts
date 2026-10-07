@@ -145,7 +145,14 @@ export async function GET(req: NextRequest) {
         : { submitted: false },
       { headers: { 'Cache-Control': 'no-store' } },
     )
-  } catch {
+  } catch (err) {
+    if (err instanceof RateLimitedError) {
+      return NextResponse.json(
+        { error: MSG.RATE_LIMITED },
+        { status: 503, headers: { 'Cache-Control': 'no-store' } },
+      )
+    }
+
     return NextResponse.json(
       { error: '送信状態を確認できませんでした' },
       { status: 500, headers: { 'Cache-Control': 'no-store' } },
