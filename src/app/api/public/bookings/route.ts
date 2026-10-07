@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createReservation } from '@/lib/reservations'
 import { DEFAULT_STATUS_ID } from '@/lib/masters'
+import { MSG } from '@/lib/messages'
+import { RateLimitedError } from '@/lib/withRetry'
 import {
   validateNewReservationInput,
   ReservationValidationError,
@@ -45,6 +47,9 @@ export async function POST(req: NextRequest) {
       }, { status: 400 })
     }
     console.error('[POST /api/public/bookings]', err)
+    if (err instanceof RateLimitedError) {
+      return NextResponse.json({ error: MSG.RATE_LIMITED }, { status: 503 })
+    }
     return NextResponse.json({ error: 'Failed to create booking' }, { status: 500 })
   }
 }

@@ -8,4 +8,6 @@ export const MSG = {
   SAVED: '保存しました。',
   /** MSG-20 確認：他スタッフの更新を検知（SC-04／SC-08） */
   CONFLICT: '他のスタッフが先に更新した可能性があります。最新の内容をご確認ください。',
+  /** MSG-17 エラー：Google Sheets API の呼び出し制限（共通） */
+  RATE_LIMITED: '通信が集中しています。しばらく経ってから再度お試しください。',
 } as const

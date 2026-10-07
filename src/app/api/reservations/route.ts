@@ -6,7 +6,8 @@ import {
   ReservationConflictError,
 } from '@/lib/reservations'
 import { importGoogleFormBookings } from '@/lib/googleFormImport'
-import { withRetry, RateLimitedError } from '@/lib/withRetry'
+import { RateLimitedError } from '@/lib/withRetry'
+import { MSG } from '@/lib/messages'
 import { StoreBusyError } from '@/lib/storeLock'
 import { CONFIRMED_STATUS_ID } from '@/lib/masters'
 import {
@@ -19,13 +20,15 @@ import {
 export async function GET(req: NextRequest) {
   try {
     await importGoogleFormBookings()
-    const all = await withRetry(() => store.getReservations())
+    const all = await store.getReservations()
     const date = req.nextUrl.searchParams.get('date')
     return NextResponse.json(
       date ? all.filter((r) => r.diveDate === date) : all
     )
   } catch (err) {
     console.error('[GET /api/reservations]', err)
+    if (err instanceof RateLimitedError)
+      return NextResponse.json({ error: MSG.RATE_LIMITED }, { status: 503 })
     return NextResponse.json(
       { error: 'Failed to fetch reservations' },
       { status: 500 }
@@ -66,6 +69,8 @@ export async function POST(req: NextRequest) {
       )
     }
     console.error('[POST /api/reservations]', err)
+    if (err instanceof RateLimitedError)
+      return NextResponse.json({ error: MSG.RATE_LIMITED }, { status: 503 })
     return NextResponse.json(
       { error: 'Failed to add reservation' },
       { status: 500 }
@@ -121,7 +126,9 @@ export async function PATCH(req: NextRequest) {
         { error: err.message, conflict: true },
         { status: 409 }
       )
-    if (err instanceof StoreBusyError || err instanceof RateLimitedError)
+    if (err instanceof RateLimitedError)
+      return NextResponse.json({ error: MSG.RATE_LIMITED }, { status: 503 })
+    if (err instanceof StoreBusyError)
       return NextResponse.json(
         { error: '保存処理中です。時間をおいて再度お試しください。' },
         { status: 503 }
