@@ -90,7 +90,8 @@ export async function getCustomers(): Promise<Customer[]> {
 
 /** 顧客を氏名・電話・メール・顧客IDの部分一致で検索する。 */
 export async function searchCustomers(query: string): Promise<Customer[]> {
-  const normalizedQuery = query.trim().toLocaleLowerCase()
+  const normalize = (value: string) => value.normalize('NFKC').toLocaleLowerCase('ja-JP').replace(/\s/g, '')
+  const normalizedQuery = normalize(query)
   if (!normalizedQuery) return getCustomers()
 
   const customers = await getCustomers()
@@ -98,11 +99,13 @@ export async function searchCustomers(query: string): Promise<Customer[]> {
     customer.id,
     customer.lastName,
     customer.firstName,
+    `${customer.lastName}${customer.firstName}`,
     customer.lastNameKana,
     customer.firstNameKana,
+    `${customer.lastNameKana}${customer.firstNameKana}`,
     customer.phone,
     customer.email,
-  ].some((value) => value.toLocaleLowerCase().includes(normalizedQuery)))
+  ].some((value) => normalize(value || '').includes(normalizedQuery)))
 }
 
 export async function addCustomer(data: Customer): Promise<void> {
