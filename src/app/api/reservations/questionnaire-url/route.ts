@@ -6,6 +6,7 @@ import {
   generateQuestionnaireToken,
   getQuestionnaireExpiry,
   isQuestionnaireUrlValid,
+  isReservationActive,
 } from '@/lib/questionnaireToken'
 export async function POST(req: NextRequest) {
   const body: unknown = await req.json().catch(() => null)
@@ -22,7 +23,7 @@ export async function POST(req: NextRequest) {
       const r = (await store.getReservations()).find((r) => r.id === input.id)
       if (
         !r ||
-        ['STS-04', 'STS-06'].includes(r.status) ||
+        !isReservationActive(r) ||
         Date.parse(getQuestionnaireExpiry(r.diveDate)) <= Date.now()
       )
         return NextResponse.json(
@@ -43,12 +44,29 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({
         questionnaireToken: token,
         questionnaireTokenExpiresAt: expiry,
-      })
+      }, { headers: { 'Cache-Control': 'no-store' } })
     })
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : '発行できませんでした' },
       { status: err instanceof StoreBusyError ? 503 : 500 }
     )
+  }
+}
+
+/** 入力URLだけを失効させる。提出済みの同意・受付QRは変更しない。 */
+export async function DELETE(req: NextRequest) {
+  const body = await req.json().catch(() => null)
+  if (!body || typeof body.id !== 'string')
+    return NextResponse.json({ error: '予約IDが必要です' }, { status: 400 })
+  try {
+    return await withStoreWriteLock(async () => {
+      const r = (await store.getReservations()).find(r => r.id === body.id)
+      if (!r) return NextResponse.json({ error: '予約が見つかりません' }, { status: 404 })
+      await store.updateReservation(r.id, { questionnaireToken: '', questionnaireTokenExpiresAt: '', updatedAt: nextUpdatedAt(r.updatedAt) })
+      return NextResponse.json({ ok: true }, { headers: { 'Cache-Control': 'no-store' } })
+    })
+  } catch (err) {
+    return NextResponse.json({ error: '入力URLを失効できませんでした' }, { status: err instanceof StoreBusyError ? 503 : 500 })
   }
 }

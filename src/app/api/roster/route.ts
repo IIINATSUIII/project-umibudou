@@ -3,6 +3,7 @@ import { store } from '@/lib/dataStore'
 import type { QuestionnaireData, RosterEntry } from '@/types'
 import { withStoreWriteLock } from '@/lib/storeLock'
 import { randomUUID } from 'crypto'
+import { getQrError, isReservationActive } from '@/lib/questionnaireToken'
 
 function ageAt(birthDate: string, date: string): number {
   const birth = new Date(`${birthDate}T00:00:00+09:00`)
@@ -40,11 +41,13 @@ export async function POST(req: NextRequest) {
       if (!q) return { error: '問診情報が見つかりません' }
       if (method === 'QR読取') {
         if (!body.qrToken || body.qrToken !== q.qrToken) return { error: 'QRコードが無効です' }
-        if (q.qrUsed) return { error: 'MSG-22：このQRコードは受付済みです。' }
-        if (!q.qrExpiresAt || !Number.isFinite(Date.parse(q.qrExpiresAt)) || Date.parse(q.qrExpiresAt) <= Date.now()) return { error: 'MSG-10：QRコードの有効期限が切れています。' }
+        const qrError = getQrError(q)
+        if (qrError === 'QR_USED') return { error: 'MSG-22：このQRコードは受付済みです。' }
+        if (qrError) return { error: 'MSG-10：QRコードの有効期限が切れています。' }
       }
       const reservation = reservations.find((item) => item.id === q.reservationId)
       if (!reservation) return { error: '予約情報が見つかりません' }
+      if (!isReservationActive(reservation)) return { error: '予約情報が無効です' }
       const existing = roster.find((item) => item.questionnaireId === q.id)
       if (existing) {if(!q.qrUsed) await store.updateQuestionnaire(q.id,{qrUsed:true});return { ok: true, entry: existing, alreadyExists: true }}
       const customer = customers.find((item) => item.id === q.customerId) ?? customers.find((item) => normalizePhone(item.phone) === normalizePhone(q.phone) || `${item.lastName} ${item.firstName}` === `${q.lastName} ${q.firstName}`)

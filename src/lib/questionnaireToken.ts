@@ -1,9 +1,21 @@
 import { randomBytes } from 'crypto'
-import type { Reservation } from '@/types'
+import type { Reservation, QuestionnaireData } from '@/types'
 import { isQuestionnaireReservationAllowed } from './reservationStatus'
 
 export const generateQuestionnaireToken = () =>
   randomBytes(32).toString('base64url')
+/** 受付資格は入力URLとは独立に発行する。 */
+export const generateQrToken = () => randomBytes(32).toString('base64url')
+
+export function isReservationActive(r: Reservation): boolean {
+  return isQuestionnaireReservationAllowed(r.status)
+}
+
+export function getQrError(q: QuestionnaireData, now = Date.now()): 'QR_USED' | 'QR_EXPIRED' | null {
+  if (q.qrUsed) return 'QR_USED'
+  if (!q.qrToken || !Number.isFinite(Date.parse(q.qrExpiresAt ?? '')) || Date.parse(q.qrExpiresAt!) <= now) return 'QR_EXPIRED'
+  return null
+}
 export function getQuestionnaireExpiry(date: string): string {
   const value = new Date(`${date}T00:00:00Z`)
   if (
@@ -23,18 +35,23 @@ export function isQuestionnaireUrlValid(
   if (
     !r?.questionnaireToken ||
     !r.questionnaireTokenExpiresAt ||
-    !isQuestionnaireReservationAllowed(r.status)
+    !isReservationActive(r)
   )
     return false
   const expiry = Date.parse(r.questionnaireTokenExpiresAt)
-  return Number.isFinite(expiry) && expiry > now.getTime()
+  try {
+    return Number.isFinite(expiry) && expiry > now.getTime() &&
+      Date.parse(getQuestionnaireExpiry(r.diveDate)) > now.getTime()
+  } catch {
+    return false
+  }
 }
 export function findReservationByQuestionnaireToken(
   rows: Reservation[],
-  token: string,
+  token: unknown,
   now = new Date()
 ) {
-  if (!token || token.length > 200) return undefined
+  if (typeof token !== 'string' || !token || token.length > 200) return undefined
   const r = rows.find((v) => v.questionnaireToken === token)
   return isQuestionnaireUrlValid(r, now) ? r : undefined
 }

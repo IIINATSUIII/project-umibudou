@@ -170,6 +170,8 @@ export default function QuestionnairePage() {
   const [errors, setErrors] = useState<FieldErrors>({})
   const [focusField, setFocusField] = useState('')
   const [submitError, setSubmitError] = useState('')
+  const [checkingAccess, setCheckingAccess] = useState(true)
+  const [accessError, setAccessError] = useState('')
   useEffect(() => {
     if (initializedFor.current !== submissionStorageKey) {
       initializedFor.current = submissionStorageKey
@@ -269,10 +271,20 @@ export default function QuestionnairePage() {
 
   useEffect(() => {
     let active = true
+    setCheckingAccess(true)
+    setAccessError('')
     fetch('/api/public/questionnaires?accessToken=' + encodeURIComponent(id))
       .then(async (r) => {
-        if (!r.ok) return
+        if (!r.ok) throw new Error(r.status === 410
+          ? '受付QRが使用済みまたは期限切れです。スタッフにお問い合わせください。'
+          : r.status === 404 ? '問診URLが無効または期限切れです。スタッフにお問い合わせください。'
+            : '送信状態を確認できませんでした。再読み込みしてください。')
         const data = await r.json()
+        if (typeof data.submitted !== 'boolean' || (data.submitted &&
+          (data.ok !== true || typeof data.questionnaireId !== 'string' || !data.questionnaireId ||
+           typeof data.qrToken !== 'string' || !data.qrToken ||
+           !Number.isFinite(Date.parse(data.qrExpiresAt)) || Date.parse(data.qrExpiresAt) <= Date.now())))
+          throw new Error('送信状態を確認できませんでした。再読み込みしてください。')
         if (active && data.submitted && data.ok && data.qrToken) {
           setForm((prev) => ({
             ...prev,
@@ -285,7 +297,8 @@ export default function QuestionnairePage() {
           setStep('done')
         }
       })
-      .catch(() => undefined)
+      .catch((error) => { if (active) setAccessError(error instanceof Error ? error.message : '通信に失敗しました。再読み込みしてください。') })
+      .finally(() => { if (active) setCheckingAccess(false) })
     return () => {
       active = false
     }
@@ -402,9 +415,10 @@ export default function QuestionnairePage() {
       if (
         data.ok !== true ||
         typeof data.questionnaireId !== 'string' ||
+        !data.questionnaireId ||
         typeof data.qrToken !== 'string' ||
         !data.qrToken ||
-        !Number.isFinite(Date.parse(data.qrExpiresAt))
+        !Number.isFinite(Date.parse(data.qrExpiresAt)) || Date.parse(data.qrExpiresAt) <= Date.now()
       )
         throw new Error('送信結果を確認できませんでした')
       const remainingPending = readPendingSubmissions(pendingStorageKey)
@@ -437,6 +451,16 @@ export default function QuestionnairePage() {
 
   const stepIdx = STEPS.indexOf(step)
   const progress = Math.round((stepIdx / (STEPS.length - 1)) * 100)
+
+  if (checkingAccess || accessError) return (
+    <main className="max-w-lg mx-auto p-6 space-y-4">
+      <h1 className="font-bold">ダイビング問診票</h1>
+      {checkingAccess ? <p role="status">送信状態を確認しています…</p> : <>
+        <p role="alert">{accessError}</p>
+        <button onClick={() => window.location.reload()} className="bg-ocean-600 text-white rounded-lg px-4 py-3">再読み込み</button>
+      </>}
+    </main>
+  )
 
   return (
     <div className="min-h-screen bg-gray-50">

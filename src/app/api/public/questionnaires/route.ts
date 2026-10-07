@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { randomBytes } from 'crypto'
+import { randomBytes, randomUUID } from 'crypto'
 import { DataStoreError, store, USE_POSTGRES } from '@/lib/dataStore'
 import type { QuestionnaireData, QuestionnaireFormData, Customer } from '@/types'
 import { nextCustomerId } from '@/lib/questionnaireUtils'
-import { findReservationByQuestionnaireToken } from '@/lib/questionnaireToken'
+import { findReservationByQuestionnaireToken, getQrError } from '@/lib/questionnaireToken'
 import { isQuestionnaireReservationAllowed } from '@/lib/reservationStatus'
 import { completedQuestionnairesForReservation, hasAllGuestQuestionnaires } from '@/lib/questionnaireCompletion'
 import { validateSubmission } from '@/lib/questionnaireSubmission'
 import { normalizeQuestionnaireExperience } from '@/lib/questionnaireExperience'
+import { StoreBusyError, withStoreWriteLock } from '@/lib/storeLock'
 
 export const runtime = 'nodejs'
 
@@ -103,11 +104,19 @@ let submissionQueue: Promise<void> = Promise.resolve()
 export async function POST(req: NextRequest) {
   let response: NextResponse | null = null
   const submit = async () => {
-    response = await handlePost(req)
+    response = await withStoreWriteLock(() => handlePost(req))
   }
   const pending = submissionQueue.then(submit, submit)
   submissionQueue = pending.then(() => undefined, () => undefined)
-  await pending
+  try {
+    await pending
+  } catch (err) {
+    if (err instanceof StoreBusyError) {
+      return NextResponse.json({ error: err.message }, { status: 503 })
+    }
+    console.error('[POST /api/public/questionnaires]', err)
+    return NextResponse.json({ error: 'Failed to save questionnaire' }, { status: 500 })
+  }
   return response ?? NextResponse.json({ error: 'Failed to save questionnaire' }, { status: 500 })
 }
 
@@ -130,6 +139,8 @@ export async function GET(req: NextRequest) {
       .sort((a, b) => b.submittedAt.localeCompare(a.submittedAt))
     const questionnaire = completedQuestionnaires[0]
     const submitted = hasAllGuestQuestionnaires(reservation, questionnaires)
+    if (submitted && questionnaire && getQrError(questionnaire))
+      return NextResponse.json({ error: '受付QRが使用済みまたは期限切れです' }, { status: 410, headers: { 'Cache-Control': 'no-store' } })
     return NextResponse.json(
       submitted && questionnaire
         ? { ...successPayload(questionnaire), submitted: true }
@@ -152,19 +163,15 @@ async function handlePost(req: NextRequest): Promise<NextResponse> {
     }
     const values = body as Record<string, unknown>
     const accessToken = stringValue(values.accessToken)
-    const reservationId = stringValue(values.reservationId)
-    const reservationToken = stringValue(values.reservationToken) || accessToken
-    const submissionId = stringValue(values.submissionId)
-    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(submissionId)) {
-      return NextResponse.json({ error: '送信IDが不正です。ページを再読み込みしてください' }, { status: 400 })
+    if (!accessToken) {
+      return NextResponse.json({ error: '予約URLが無効、または期限切れです' }, { status: 404 })
     }
+    const reservationToken = accessToken
 
     // 実在する予約に対する提出のみ受け付ける
     const reservations = await store.getReservations()
-    const reservation = accessToken
-      ? reservations.find((r) => r.questionnaireToken === accessToken)
-      : reservations.find((r) => r.id === reservationId)
-    const resolvedReservationId = reservation?.id ?? reservationId
+    const reservation = reservations.find((r) => r.questionnaireToken === accessToken)
+    const resolvedReservationId = reservation?.id ?? ''
     if (
       !reservation ||
       !isQuestionnaireReservationAllowed(reservation.status) ||
@@ -175,6 +182,10 @@ async function handlePost(req: NextRequest): Promise<NextResponse> {
     }
 
     const questionnaires = await store.getQuestionnaires()
+    const submissionId = stringValue(values.submissionId) || randomUUID()
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(submissionId)) {
+      return NextResponse.json({ error: '送信IDが不正です。ページを再読み込みしてください' }, { status: 400 })
+    }
     const priorQuestionnaire = questionnaires.find(
       (questionnaire) => questionnaire.submissionId === submissionId
     )
@@ -185,16 +196,13 @@ async function handlePost(req: NextRequest): Promise<NextResponse> {
     // 同じ送信IDですでに保存済みの問診票は、部分失敗からの再開として期限後も処理する。
     // 新規票は保存された期限が有効な場合だけ受け付ける。
     if (!priorQuestionnaire) {
-      const expiryValue = reservation.questionnaireTokenExpiresAt
-      const expiry = expiryValue ? new Date(expiryValue) : null
-      if (
-        !expiry ||
-        !Number.isFinite(expiry.getTime()) ||
-        expiry.toISOString() !== expiryValue ||
-        expiry.getTime() <= Date.now()
-      ) {
-        return NextResponse.json({ error: '問診票URLの有効期限が切れています' }, { status: 410 })
+      if (!findReservationByQuestionnaireToken(reservations, accessToken)) {
+        return NextResponse.json({ error: '予約URLが無効、または期限切れです' }, { status: 404 })
       }
+    }
+    const completedQuestionnaires = completedQuestionnairesForReservation(reservation, questionnaires)
+    if (completedQuestionnaires.some((questionnaire) => getQrError(questionnaire))) {
+      return NextResponse.json({ error: '受付QRが使用済みまたは期限切れです' }, { status: 410, headers: { 'Cache-Control': 'no-store' } })
     }
 
     const modernForm = values.sleepCategory !== undefined || values.lastDivePeriod !== undefined

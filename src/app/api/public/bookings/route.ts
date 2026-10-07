@@ -1,11 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { store } from '@/lib/dataStore'
-import { DEFAULT_STATUS_ID, getCourseName } from '@/lib/masters'
-import { generateReservationId } from '@/lib/reservations'
-import { validateNewReservationInput } from '@/lib/reservationValidation'
+import { DEFAULT_STATUS_ID } from '@/lib/masters'
+import { MSG } from '@/lib/messages'
+import { createReservation, generateReservationId } from '@/lib/reservations'
+import { RateLimitedError } from '@/lib/withRetry'
+import {
+  validateNewReservationInput,
+  ReservationValidationError,
+} from '@/lib/reservationValidation'
 import { normalizeReservationInput } from '@/lib/reservationNormalization'
 import { generateQuestionnaireToken, getQuestionnaireExpiry } from '@/lib/questionnaireToken'
-import { withStoreWriteLock } from '@/lib/storeLock'
+import { StoreBusyError, withStoreWriteLock } from '@/lib/storeLock'
 import type { ReservationInput, ReservationTimeSlot } from '@/types'
 
 export const runtime = 'nodejs'
@@ -70,13 +75,27 @@ export async function POST(req: NextRequest) {
       }, { status: 400 })
     }
 
+    if (validated?.ok) {
+      const reservation = await createReservation({
+        ...validated.data,
+        channel: 'hp',
+        status: DEFAULT_STATUS_ID,
+      })
+      return NextResponse.json({
+        ok: true,
+        id: reservation.id,
+        questionnaireToken: reservation.questionnaireToken,
+        questionnaireTokenExpiresAt: reservation.questionnaireTokenExpiresAt,
+      })
+    }
+
     if (!isDate(diveDate))
       return NextResponse.json({ error: '日付が不正です' }, { status: 400 })
     if (diveDate < new Date().toISOString().slice(0, 10))
       return NextResponse.json({ error: '過去の日付は指定できません' }, { status: 400 })
     if (exactTime && !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(exactTime))
       return NextResponse.json({ error: '時間が不正です' }, { status: 400 })
-    if (!courseName && !(validated?.ok && getCourseName(validated.data.courseId)))
+    if (!courseName)
       return NextResponse.json({ error: 'コースを選択してください' }, { status: 400 })
     if (!guestName || guestName.length > 50 || !guestPhone || guestPhone.length > 20)
       return NextResponse.json({ error: '必須項目が未入力です' }, { status: 400 })
@@ -96,7 +115,7 @@ export async function POST(req: NextRequest) {
       ...(exactTime ? { time: exactTime, legacyTime: exactTime } : {}),
       timeSlot: timeSlot as ReservationTimeSlot,
       ...(courseId ? { courseId } : {}),
-      courseName: courseName || (validated?.ok ? getCourseName(validated.data.courseId) : ''),
+      courseName,
       guestName,
       guestPhone,
       ...(guestEmail ? { guestEmail } : {}),
@@ -117,6 +136,19 @@ export async function POST(req: NextRequest) {
       questionnaireTokenExpiresAt: saved.questionnaireTokenExpiresAt,
     })
   } catch (err) {
+    if (err instanceof ReservationValidationError) {
+      return NextResponse.json({
+        error: 'VALIDATION_ERROR',
+        message: err.message,
+        fields: err.fields,
+      }, { status: 400 })
+    }
+    if (err instanceof RateLimitedError) {
+      return NextResponse.json({ error: MSG.RATE_LIMITED }, { status: 503 })
+    }
+    if (err instanceof StoreBusyError) {
+      return NextResponse.json({ error: '保存処理中です。時間をおいて再度お試しください。' }, { status: 503 })
+    }
     console.error('[POST /api/public/bookings]', err)
     return NextResponse.json({ error: 'Failed to create booking' }, { status: 500 })
   }

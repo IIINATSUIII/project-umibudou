@@ -15,6 +15,7 @@ const PUBLIC_PATHS = [
 function isPublic(pathname: string): boolean {
   // The handler still requires its own CRON_SECRET bearer token.
   if (pathname === '/api/cron/sheets-outbox') return true
+  if (pathname === '/questionnaire/scan' || pathname.startsWith('/questionnaire/scan/')) return false
   if (PUBLIC_PATHS.some((p) => pathname.startsWith(p))) return true
   // ダイバー向け問診票入力画面はログイン不要（/questionnaire/[id] のみ）
   if (/^\/questionnaire\/[^/]+\/?$/.test(pathname)) return true
