@@ -1,90 +1,94 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { store } from '@/lib/dataStore'
-import type { QuestionnaireData, Customer } from '@/types'
-
-/**
- * POST /api/public/questionnaires — 問診票提出（ログイン不要）
- * 提出に伴う「予約への紐付け」「顧客台帳への反映」はすべてサーバー側で行う。
- * 客側に顧客台帳を読ませない・予約を任意に書き換えさせないための境界。
- */
-export async function POST(req: NextRequest) {
+import { findReservationByQuestionnaireToken, getQrError } from '@/lib/questionnaireToken'
+import {
+  saveSubmission,
+  SubmissionValidationError,
+} from '@/lib/questionnaireSubmission'
+import { StoreBusyError, withStoreWriteLock } from '@/lib/storeLock'
+import type { QuestionnaireData } from '@/types'
+export const dynamic = 'force-dynamic'
+function success(q: QuestionnaireData) {
+  return {
+    ok: true,
+    questionnaireId: q.id,
+    qrToken: q.qrToken,
+    qrExpiresAt: q.qrExpiresAt,
+    lastName: q.lastName,
+    firstName: q.firstName,
+  }
+}
+export async function GET(req: NextRequest) {
   try {
-    let body
-    try {
-      body = await req.json()
-    } catch {
-      return NextResponse.json({ error: '不正なJSONです' }, { status: 400 })
-    }
-    if (!body || typeof body !== 'object' || Array.isArray(body) ||
-        body.agreeRisk !== true || body.agreeMedical !== true ||
-        typeof body.agreePhoto !== 'boolean') {
-      return NextResponse.json({ error: '必須の同意事項と写真・動画の使用可否を確認してください' }, { status: 400 })
-    }
-    const reservationId = String(body.reservationId ?? '')
-
-    // 実在する予約に対する提出のみ受け付ける
-    const reservations = await store.getReservations()
-    const reservation = reservations.find((r) => r.id === reservationId)
-    if (!reservation) {
-      return NextResponse.json({ error: '予約が見つかりません' }, { status: 404 })
-    }
-
-    const questionnaireId = `Q${Date.now()}`
-    const qData: QuestionnaireData = {
-      ...body,
-      id: questionnaireId,
-      reservationId,
-      submittedAt: new Date().toISOString(),
-    }
-    await store.addQuestionnaire(qData)
-
-    // 予約に問診票IDをリンク
-    await store.updateReservation(reservationId, { questionnaireId })
-
-    // 顧客台帳に自動登録（氏名で重複チェック）
-    const customers = await store.getCustomers()
-    const fullName = `${qData.lastName} ${qData.firstName}`
-    const existing = customers.find(
-      (c) => `${c.lastName} ${c.firstName}` === fullName
+    const token = req.nextUrl.searchParams.get('accessToken') || ''
+    const reservation = findReservationByQuestionnaireToken(
+      await store.getReservations(),
+      token
     )
-    const today = new Date().toISOString().slice(0, 10)
-
-    if (!existing) {
-      const newCustomer: Customer = {
-        id: `C${Date.now()}`,
-        lastName: qData.lastName,
-        firstName: qData.firstName,
-        lastNameKana: qData.lastNameKana,
-        firstNameKana: qData.firstNameKana,
-        phone: qData.phone,
-        email: '',
-        lastVisit: today,
-        visitCount: 1,
-        hasCCard: qData.hasCCard,
-        cCardType: qData.cCardType,
-        totalDives: qData.totalDives,
-        healthNotes: [
-          qData.heartDisease       && '心臓疾患',
-          qData.respiratoryDisease && '呼吸器疾患',
-          qData.earDisease         && '耳の疾患',
-          qData.epilepsy           && 'てんかん',
-          qData.diabetes           && '糖尿病',
-          qData.medication         && `服薬：${qData.medicationName}`,
-          qData.latexAllergy       && 'ラテックスアレルギー',
-        ].filter(Boolean).join('、') || '特記なし',
-        guideNotes: '',
-      }
-      await store.addCustomer(newCustomer)
-    } else {
-      await store.updateCustomer(existing.id, {
-        visitCount: existing.visitCount + 1,
-        lastVisit: today,
+    if (!reservation)
+      return NextResponse.json(
+        { error: '予約URLが無効、または期限切れです' },
+        { status: 404 }
+      )
+    const q = (await store.getQuestionnaires()).find(
+      (q) => q.reservationId === reservation.id
+    )
+    if (q?.submissionState === 'complete' && getQrError(q))
+      return NextResponse.json({ error: '受付QRが使用済みまたは期限切れです' }, { status: 410, headers: { 'Cache-Control': 'no-store' } })
+    return NextResponse.json(
+      q?.submissionState === 'complete'
+        ? { ...success(q), submitted: true }
+        : { submitted: false },
+      { headers: { 'Cache-Control': 'no-store' } }
+    )
+  } catch {
+    return NextResponse.json(
+      { error: '送信状態を確認できませんでした' },
+      { status: 500 }
+    )
+  }
+}
+export async function POST(req: NextRequest) {
+  const body: unknown = await req.json().catch(() => null)
+  if (!body || typeof body !== 'object' || Array.isArray(body))
+    return NextResponse.json(
+      { error: 'JSON形式の入力が不正です' },
+      { status: 400 }
+    )
+  const input = body as Record<string, unknown>
+  try {
+    return await withStoreWriteLock(async () => {
+      const token =
+        typeof input.accessToken === 'string' ? input.accessToken : ''
+      const reservation = findReservationByQuestionnaireToken(
+        await store.getReservations(),
+        token
+      )
+      if (!reservation)
+        return NextResponse.json(
+          { error: '予約URLが無効、または期限切れです' },
+          { status: 404 }
+        )
+      const prior = (await store.getQuestionnaires()).find(q => q.reservationId === reservation.id)
+      if (prior?.submissionState === 'complete' && getQrError(prior))
+        return NextResponse.json({ error: '受付QRが使用済みまたは期限切れです' }, { status: 410, headers: { 'Cache-Control': 'no-store' } })
+      const q = await saveSubmission(reservation, input)
+      return NextResponse.json(success(q), {
+        headers: { 'Cache-Control': 'no-store' },
       })
-    }
-
-    return NextResponse.json({ ok: true, questionnaireId })
+    })
   } catch (err) {
+    if (err instanceof SubmissionValidationError)
+      return NextResponse.json(
+        { error: err.message, errors: err.fields },
+        { status: 400 }
+      )
+    if (err instanceof StoreBusyError)
+      return NextResponse.json({ error: err.message }, { status: 503 })
     console.error('[POST /api/public/questionnaires]', err)
-    return NextResponse.json({ error: 'Failed to save questionnaire' }, { status: 500 })
+    return NextResponse.json(
+      { error: '保存結果を確認できません。時間をおいて再送してください' },
+      { status: 500 }
+    )
   }
 }
