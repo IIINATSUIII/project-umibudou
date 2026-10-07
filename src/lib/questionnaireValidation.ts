@@ -63,8 +63,7 @@ export function validateQuestionnaireInput(input: unknown): QuestionnaireValidat
   if (emergencyPhone && !isPhone(emergencyPhone)) errors.emergencyPhone = '緊急連絡先電話番号の形式が正しくありません'
   if (!GENDERS.has(String(source.gender))) errors.gender = '性別の値が不正です'
   if (!CONDITIONS.has(String(source.condition))) errors.condition = '体調の値が不正です'
-  if (!lastDiveDate) errors.lastDiveDate = '最終ダイビング時期を入力してください'
-  else if (!/^\d{4}-\d{2}$/.test(lastDiveDate)) errors.lastDiveDate = '最終ダイビング時期の形式が不正です'
+  if (lastDiveDate && !/^\d{4}-\d{2}$/.test(lastDiveDate)) errors.lastDiveDate = '最終ダイビング時期の形式が不正です'
 
   const booleanKeys = ['heartDisease','hypertension','respiratoryDisease','earDisease','epilepsy','diabetes','pregnant','panicDisorder','medication','latexAllergy','alcoholLastNight','alcoholToday','flightWithin48h','hasCCard','agreeRisk','agreeMedical','agreePhoto'] as const
   const values = {} as Record<typeof booleanKeys[number], boolean>
@@ -81,7 +80,7 @@ export function validateQuestionnaireInput(input: unknown): QuestionnaireValidat
   if (source.condition === 'bad' && !conditionDetail) errors.conditionDetail = '体調が悪い場合は詳細を入力してください'
   if (values.medication && !medicationName) errors.medicationName = '服薬中の場合は薬剤名を入力してください'
   if (values.hasCCard && (!cCardType || !cCardOrg)) errors.cCard = 'Cカード保有時は種別と認定団体を入力してください'
-  if (!values.agreeRisk || !values.agreeMedical || !values.agreePhoto) errors.agree = '同意事項をすべて確認してください'
+  if (!values.agreeRisk || !values.agreeMedical) errors.agree = '必須の同意事項を確認してください'
   if (Object.keys(errors).length > 0) return { ok: false, errors }
 
   return { ok: true, data: {

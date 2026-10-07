@@ -49,6 +49,7 @@ export const HEADERS = {
     'id','lastName','firstName','lastNameKana','firstNameKana',
     'phone','email','lastVisit','visitCount',
     'hasCCard','cCardType','totalDives','healthNotes','guideNotes',
+    'lastQuestionnaireId',
   ],
 }
 

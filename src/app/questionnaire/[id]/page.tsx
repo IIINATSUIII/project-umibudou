@@ -256,7 +256,7 @@ export default function QuestionnairePage() {
                 <F label="総ダイビング本数"><input type="number" min={0} value={form.totalDives || ''} onChange={(e) => set('totalDives', Number(e.target.value))} placeholder="0" className={inp} /></F>
               </div>
             )}
-            <F label="最後にダイビングした時期 *"><input type="month" value={form.lastDiveDate} onChange={(e) => set('lastDiveDate', e.target.value)} required className={inp} /></F>
+            <F label="最後にダイビングした時期（経験者のみ）"><input type="month" value={form.lastDiveDate} onChange={(e) => set('lastDiveDate', e.target.value)} className={inp} /></F>
             <Nav onPrev={prev} onNext={next} canNext />
           </div>
         )}

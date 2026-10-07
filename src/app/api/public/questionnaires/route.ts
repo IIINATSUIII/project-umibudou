@@ -45,26 +45,33 @@ export async function POST(req: NextRequest) {
       if (!reservation) return NextResponse.json({ error: '予約が見つかりません' }, { status: 404 })
 
       const existing = (await store.getQuestionnaires()).find((item) => item.reservationId === reservation.id)
-      if (existing) return NextResponse.json({ ok: true, questionnaireId: existing.id, qrToken: existing.qrToken, qrExpiresAt: existing.qrExpiresAt, alreadySubmitted: true })
+      let qData: QuestionnaireData
+      if (existing) {
+        // 問診追加後に後続処理が失敗した再送では、既存データを使って不足処理を再開する。
+        qData = existing
+      } else {
+        const validation = validateQuestionnaireInput(payload)
+        if (!validation.ok) return NextResponse.json({ error: '入力内容を確認してください', fields: validation.errors }, { status: 400 })
 
-      const validation = validateQuestionnaireInput(payload)
-      if (!validation.ok) return NextResponse.json({ error: '入力内容を確認してください', fields: validation.errors }, { status: 400 })
-
-      const questionnaireId = `Q-${randomUUID()}`
-      const qrIssuedAt = new Date().toISOString()
-      const qrExpiresAt = new Date(new Date(`${reservation.date}T00:00:00+09:00`).getTime() + 24 * 60 * 60 * 1000).toISOString()
-      const qData: QuestionnaireData = {
-        ...validation.data,
-        id: questionnaireId,
-        reservationId: reservation.id,
-        submittedAt: new Date().toISOString(),
-        qrToken: randomBytes(32).toString('hex'),
-        qrIssuedAt,
-        qrExpiresAt,
-        qrUsed: false,
+        const questionnaireId = `Q-${randomUUID()}`
+        const qrIssuedAt = new Date().toISOString()
+        const qrExpiresAt = new Date(new Date(`${reservation.date}T00:00:00+09:00`).getTime() + 24 * 60 * 60 * 1000).toISOString()
+        qData = {
+          ...validation.data,
+          id: questionnaireId,
+          reservationId: reservation.id,
+          submittedAt: new Date().toISOString(),
+          qrToken: randomBytes(32).toString('hex'),
+          qrIssuedAt,
+          qrExpiresAt,
+          qrUsed: false,
+        }
+        await store.addQuestionnaire(qData)
       }
-      await store.addQuestionnaire(qData)
-      await store.updateReservation(reservation.id, { questionnaireId })
+
+      if (reservation.questionnaireId !== qData.id) {
+        await store.updateReservation(reservation.id, { questionnaireId: qData.id })
+      }
 
       const customers = await store.getCustomers()
       const fullName = `${qData.lastName} ${qData.firstName}`
@@ -77,14 +84,14 @@ export async function POST(req: NextRequest) {
           phone: qData.phone, email: '', lastVisit: today, visitCount: 1,
           hasCCard: qData.hasCCard, cCardType: qData.cCardType, totalDives: qData.totalDives,
           healthNotes: [qData.heartDisease && '心臓疾患', qData.respiratoryDisease && '呼吸器疾患', qData.earDisease && '耳の疾患', qData.epilepsy && 'てんかん', qData.diabetes && '糖尿病', qData.medication && `服薬：${qData.medicationName}`, qData.latexAllergy && 'ラテックスアレルギー'].filter(Boolean).join('、') || '特記なし',
-          guideNotes: '',
+          guideNotes: '', lastQuestionnaireId: qData.id,
         }
         await store.addCustomer(newCustomer)
-      } else {
-        await store.updateCustomer(existingCustomer.id, { visitCount: existingCustomer.visitCount + 1, lastVisit: today })
+      } else if (existingCustomer.lastQuestionnaireId !== qData.id) {
+        await store.updateCustomer(existingCustomer.id, { visitCount: existingCustomer.visitCount + 1, lastVisit: today, lastQuestionnaireId: qData.id })
       }
 
-      return NextResponse.json({ ok: true, questionnaireId, qrToken: qData.qrToken, qrExpiresAt })
+      return NextResponse.json({ ok: true, questionnaireId: qData.id, qrToken: qData.qrToken, qrExpiresAt: qData.qrExpiresAt, ...(existing ? { alreadySubmitted: true } : {}) })
     })
   } catch (err) {
     console.error('[POST /api/public/questionnaires]', err)

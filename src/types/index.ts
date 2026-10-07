@@ -82,6 +82,8 @@ export interface Customer {
   totalDives: number
   healthNotes: string
   guideNotes: string
+  /** 問診再送時の来店回数二重加算を防ぐための冪等性キー */
+  lastQuestionnaireId?: string
 }
 
 export interface WeatherDay {
