@@ -167,6 +167,51 @@ const nullableBool = (v: unknown) =>
 const number = (v: unknown) =>
   v === null || v === undefined || v === '' ? null : Number(v)
 
+const QUESTIONNAIRE_ALIAS_GROUPS = [
+  ['hypertension', 'highBloodPressure'],
+  ['conditionDetails', 'conditionDetail', 'conditionNote'],
+  ['sleepCategory', 'sleepDuration'],
+  ['lastDivePeriod', 'lastDiveExperience'],
+  ['consentAt', 'consentedAt'],
+  ['doctorClearance', 'doctorDivingPermit'],
+  ['staffCheckStatus', 'staffReviewStatus'],
+  ['staffCheckNote', 'staffReviewNotes'],
+  ['cCardType', 'cCardStatus'],
+]
+
+const populatedValue = (value: unknown) =>
+  value !== undefined && value !== null && text(value).trim() !== ''
+const migrationBoolean = (value: unknown): boolean => {
+  const normalized = text(value).trim()
+  if (normalized === 'TRUE' || normalized === 'true') return true
+  if (normalized === 'FALSE' || normalized === 'false') return false
+  throw new Error('問診の高血圧・Cカード有無のboolean形式が不正です')
+}
+
+/** 移行前だけに使用する。通常の読取・更新契約は変更しない。 */
+export function assertQuestionnaireAliases(v: RecordValue): void {
+  if (populatedValue(v.hasCCard)) migrationBoolean(v.hasCCard)
+  for (const fields of QUESTIONNAIRE_ALIAS_GROUPS) {
+    const values = fields
+      .filter((field) => populatedValue(v[field]))
+      .map((field) => {
+        if (fields[0] === 'hypertension') return migrationBoolean(v[field])
+        const value = text(v[field]).trim()
+        return fields[0] === 'sleepCategory' && value === '4〜6時間'
+          ? '4時間以上6時間未満'
+          : value
+      })
+    if (new Set(values).size > 1) {
+      // 健康情報・個人情報の値をエラーやログに含めない。
+      throw new Error(`問診の別名項目が矛盾しています: ${fields.join(' / ')}`)
+    }
+  }
+  if (populatedValue(v.cCardStatus) && populatedValue(v.hasCCard) &&
+    migrationBoolean(v.hasCCard) !== (text(v.cCardStatus).trim() !== '未取得')) {
+    throw new Error('問診の別名項目が矛盾しています: hasCCard / cCardStatus')
+  }
+}
+
 export function normalizeReservation(v: RecordValue): Reservation {
   if (!text(v.id)) throw new Error('予約IDのない既存行は自動変換できません')
   const courseId =
@@ -270,6 +315,30 @@ export function normalizeQuestionnaire(v: RecordValue): QuestionnaireData {
     q.cCardType = text(v.cCardStatus)
   }
   return { ...v, ...q } as unknown as QuestionnaireData
+}
+
+/** 空の追加列より、値が残っている旧名列を優先して移行する。 */
+export function normalizeQuestionnaireForMigration(
+  v: RecordValue,
+): QuestionnaireData {
+  assertQuestionnaireAliases(v)
+  const resolved = { ...v }
+  for (const fields of QUESTIONNAIRE_ALIAS_GROUPS) {
+    const populated = fields.find((field) => populatedValue(v[field]))
+    if (populated) {
+      resolved[fields[0]] = fields[0] === 'hypertension'
+        ? migrationBoolean(v[populated])
+        : v[populated]
+    }
+  }
+  // normalizeQuestionnaireの旧cCardStatus変換で空列が既存資格を上書きしない。
+  // 矛盾検査後は既に解決したcCardTypeを使用する。
+  delete resolved.cCardStatus
+  if (populatedValue(v.hasCCard))
+    resolved.hasCCard = migrationBoolean(v.hasCCard)
+  else if (populatedValue(v.cCardStatus))
+    resolved.hasCCard = text(v.cCardStatus).trim() !== '未取得'
+  return normalizeQuestionnaire(resolved)
 }
 export function normalizeCustomer(v: RecordValue): Customer {
   return {

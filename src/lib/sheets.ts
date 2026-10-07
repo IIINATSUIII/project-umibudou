@@ -9,6 +9,8 @@ import type {
 import {
   HEADERS as STORE_HEADERS,
   assertKnownHeaders,
+  assertQuestionnaireAliases,
+  normalizeQuestionnaireForMigration,
   normalizeRecord,
   type StoreKind,
   type RecordValue,
@@ -544,29 +546,63 @@ export async function initializeSheets() {
       spreadsheetId: spreadsheetId(),
       fields: 'sheets.properties',
     })
+    // 問診の矛盾は予約など他シートの移行・バックアップを始める前に止める。
+    // 追加済みの現行ヘッダーにも旧名列が残り得るため、already_current前に検査する。
+    const questionnaireProperties = metadata.data.sheets?.find(
+      (s) => s.properties?.title === names.QUESTIONNAIRES,
+    )?.properties
+    const questionnaireValues = questionnaireProperties
+      ? await getSheetValues(names.QUESTIONNAIRES)
+      : []
+    const questionnaireHeaders = (questionnaireValues[0] ?? []).map((h) => h.trim())
+    while (questionnaireHeaders[questionnaireHeaders.length - 1] === '')
+      questionnaireHeaders.pop()
+    if (questionnaireHeaders.length)
+      assertKnownHeaders('QUESTIONNAIRES', questionnaireHeaders)
+    questionnaireValues.slice(1).forEach((row, index) => {
+      if (!row.some((value) => value !== '')) return
+      if (row.slice(questionnaireHeaders.length).some((value) => value != null && value !== ''))
+        throw new Error(`問診票 ${index + 2}行: ヘッダーのない列に値があります`)
+      try {
+        assertQuestionnaireAliases(record(questionnaireHeaders, row))
+      } catch (error) {
+        throw new Error(`問診票 ${index + 2}行: ${(error as Error).message}`)
+      }
+    })
     const results = []
     for (const kind of Object.keys(names) as StoreKind[]) {
       const properties = metadata.data.sheets?.find(
         (s) => s.properties?.title === names[kind]
       )?.properties
-      const values = properties ? await getSheetValues(names[kind]) : []
+      const values = kind === 'QUESTIONNAIRES'
+        ? questionnaireValues
+        : properties
+          ? await getSheetValues(names[kind])
+          : []
       const headers = (values[0] ?? []).map((h) => h.trim())
       while (headers[headers.length - 1] === '') headers.pop()
       const populated = values.slice(1).some((r) => r.some((v) => v !== ''))
       if (populated && !headers.length)
         throw new Error(`${kind}にヘッダーなしの既存データがあります`)
       if (headers.length) assertKnownHeaders(kind, headers)
-      if (HEADERS[kind].every((h) => headers.includes(h))) {
+      const legacyCardColumn = kind === 'QUESTIONNAIRES' && headers.includes('cCardStatus')
+      if (HEADERS[kind].every((h) => headers.includes(h)) && !legacyCardColumn) {
         results.push({ kind, status: 'already_current' })
         continue
       }
-      const extra = headers.filter((h) => !HEADERS[kind].includes(h))
+      // cCardStatusは現行の有無・種別へ移す。旧列を残すと通常読取時に
+      // 空の旧区分が資格を再度上書きするため、バックアップ側に保存する。
+      const extra = headers.filter((h) =>
+        !HEADERS[kind].includes(h) && !(legacyCardColumn && h === 'cCardStatus'),
+      )
       const target = [...HEADERS[kind], ...extra]
       const rows = values.slice(1).filter((r) => r.some((v) => v !== ''))
       const normalized = rows.map((row) =>
         (kind === 'RESERVATIONS'
           ? reservationFromRow(headers, row)
-          : normalizeRecord(kind, record(headers, row))) as unknown as RecordValue
+          : kind === 'QUESTIONNAIRES'
+            ? normalizeQuestionnaireForMigration(record(headers, row))
+            : normalizeRecord(kind, record(headers, row))) as unknown as RecordValue
       )
       if (new Set(normalized.map((r) => r.id)).size !== normalized.length)
         throw new Error(`${kind}に重複IDがあります`)
@@ -629,7 +665,7 @@ export async function initializeSheets() {
               startRowIndex: 0,
               endRowIndex: Math.max(output.length, values.length),
               startColumnIndex: 0,
-              endColumnIndex: target.length,
+              endColumnIndex: Math.max(target.length, headers.length),
             },
             rows: output.map((row) => ({
               values: row.map((v) => ({
