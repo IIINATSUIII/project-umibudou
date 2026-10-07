@@ -6,6 +6,7 @@ import Link from 'next/link'
 import Navigation from '@/components/Navigation'
 import { useAuth } from '@/lib/authContext'
 import { fetchCustomers } from '@/lib/api'
+import { matchesCustomer } from '@/lib/customerSearch'
 import {
   C_CARD_FILTER_ALL,
   C_CARD_FILTER_NONE,
@@ -16,7 +17,6 @@ import {
   cCardFilterOptions,
   formatLastVisitAgo,
   matchesCCardFilter,
-  matchesCustomerQuery,
   matchesLastVisitRange,
   sortCustomers,
 } from '@/lib/customer'
@@ -61,6 +61,8 @@ function CustomersView() {
   const [lastVisitRange, setLastVisitRange] = useState<LastVisitRange>(
     () => pickFromUrl(searchParams.get('range'), LAST_VISIT_RANGES, 'all')
   )
+  // 期間とは別に、特定の来店日をピンポイントで指定する絞り込み
+  const [lastVisitDate, setLastVisitDate] = useState(() => searchParams.get('date') ?? '')
   const [sort, setSort] = useState<CustomerSort>(
     () => pickFromUrl(searchParams.get('sort'), CUSTOMER_SORTS, DEFAULT_SORT)
   )
@@ -73,7 +75,9 @@ function CustomersView() {
   }, [user, router])
 
   // 条件を変えたら先頭から見せ直す
-  useEffect(() => { setVisibleCount(PAGE_SIZE) }, [search, cCard, lastVisitRange, sort])
+  useEffect(() => {
+    setVisibleCount(PAGE_SIZE)
+  }, [search, cCard, lastVisitRange, lastVisitDate, sort])
 
   // 現在の検索条件をURLへ反映する。初期値と同じ項目は付けずURLを短く保つ
   useEffect(() => {
@@ -81,6 +85,7 @@ function CustomersView() {
     if (search.trim()) params.set('q', search)
     if (cCard !== C_CARD_FILTER_ALL) params.set('ccard', cCard)
     if (lastVisitRange !== 'all') params.set('range', lastVisitRange)
+    if (lastVisitDate) params.set('date', lastVisitDate)
     if (sort !== DEFAULT_SORT) params.set('sort', sort)
     const qs = params.toString()
 
@@ -90,7 +95,7 @@ function CustomersView() {
       router.replace(qs ? `/customers?${qs}` : '/customers', { scroll: false })
     }, URL_SYNC_DELAY)
     return () => clearTimeout(timer)
-  }, [search, cCard, lastVisitRange, sort, router])
+  }, [search, cCard, lastVisitRange, lastVisitDate, sort, router])
 
   // Cカード種別の選択肢は実データから生成する（既存値が自由記述のため）
   const cCardOptions = useMemo(() => cCardFilterOptions(customers), [customers])
@@ -104,20 +109,25 @@ function CustomersView() {
   const filtered = useMemo(() => {
     const today = new Date()
     const matched = customers.filter((c) =>
-      matchesCustomerQuery(c, search) &&
+      matchesCustomer(c, search) &&
       matchesCCardFilter(c, cCard) &&
-      matchesLastVisitRange(c, lastVisitRange, today)
+      matchesLastVisitRange(c, lastVisitRange, today) &&
+      (!lastVisitDate || c.lastVisit === lastVisitDate)
     )
     return sortCustomers(matched, sort)
-  }, [customers, search, cCard, lastVisitRange, sort])
+  }, [customers, search, cCard, lastVisitRange, lastVisitDate, sort])
 
   const isFiltered =
-    !!search.trim() || cCard !== C_CARD_FILTER_ALL || lastVisitRange !== 'all'
+    !!search.trim() ||
+    cCard !== C_CARD_FILTER_ALL ||
+    lastVisitRange !== 'all' ||
+    !!lastVisitDate
 
   function clearFilters() {
     setSearch('')
     setCCard(C_CARD_FILTER_ALL)
     setLastVisitRange('all')
+    setLastVisitDate('')
   }
 
   if (loading) return <LoadingScreen />
@@ -163,13 +173,21 @@ function CustomersView() {
             <select
               value={lastVisitRange}
               onChange={(e) => setLastVisitRange(e.target.value as LastVisitRange)}
-              aria-label="最終来店日で絞り込み"
+              aria-label="最終来店日の期間で絞り込み"
               className={SELECT_CLASS}
             >
               {LAST_VISIT_RANGES.map((r) => (
                 <option key={r} value={r}>{LAST_VISIT_RANGE_LABELS[r]}</option>
               ))}
             </select>
+
+            <input
+              type="date"
+              value={lastVisitDate}
+              onChange={(e) => setLastVisitDate(e.target.value)}
+              aria-label="最終来店日を指定して絞り込み"
+              className={SELECT_CLASS}
+            />
 
             <select
               value={sort}
@@ -195,7 +213,7 @@ function CustomersView() {
 
         {filtered.length === 0 ? (
           <p className="text-center text-gray-400 py-12 text-sm">
-            {isFiltered ? '条件に一致する顧客がいません' : '顧客が登録されていません'}
+            {isFiltered ? '条件に一致する顧客が見つかりません' : '顧客が登録されていません'}
           </p>
         ) : (
           <>
