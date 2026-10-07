@@ -66,10 +66,15 @@ function toDateString(d: Date): string {
   return `${d.getFullYear()}-${m}-${day}`
 }
 
-/** 基準日から nヶ月前の日付を YYYY-MM-DD で返す */
+/**
+ * 基準日から nヶ月前の日付を YYYY-MM-DD で返す。
+ * 該当日が無い月（5/31 の3ヶ月前の 2/31 など）は、その月の末日に丸める。
+ * （setMonth だけだと 2/31 → 3/3 のように翌月へ繰り上がり、境界が数日ずれる）
+ */
 function monthsBefore(base: Date, months: number): string {
-  const d = new Date(base)
-  d.setMonth(d.getMonth() - months)
+  const d = new Date(base.getFullYear(), base.getMonth() - months, 1)
+  const lastDay = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate()
+  d.setDate(Math.min(base.getDate(), lastDay))
   return toDateString(d)
 }
 
