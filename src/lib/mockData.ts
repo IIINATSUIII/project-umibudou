@@ -1,69 +1,109 @@
 import type { Reservation, Customer, QuestionnaireData } from '@/types'
+import { CONFIRMED_STATUS_ID, DEFAULT_STATUS_ID } from './masters'
 
 // ─── 予約データ ────────────────────────────────────────────
 const today = new Date().toISOString().slice(0, 10)
 const tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0, 10)
+const now = new Date().toISOString()
 
 export const MOCK_RESERVATIONS: Reservation[] = [
   {
-    id: 'R001',
-    date: today,
-    time: '09:00',
-    course: '体験ダイビング',
+    id: `R-${today.replace(/-/g, '')}-001`,
+    createdAt: now,
+    updatedAt: now,
+    customerId: 'C002',
     guestName: '田中 花子',
-    guestCount: 2,
-    phone: '090-1234-5678',
-    channel: 'hp',
-    status: 'confirmed',
-    questionnaireId: 'Q001',
-    notes: 'カップル。写真希望あり',
-  },
-  {
-    id: 'R002',
-    date: today,
-    time: '13:00',
-    course: 'ファンダイビング（2本）',
-    guestName: '鈴木 太郎',
-    guestCount: 1,
-    phone: '080-9876-5432',
-    channel: 'phone',
-    status: 'confirmed',
-    notes: 'AOW 総本数150本',
-  },
-  {
-    id: 'R003',
-    date: today,
-    time: '09:30',
-    course: '体験ダイビング',
-    guestName: '山田 家族',
-    guestCount: 3,
-    phone: '070-1111-2222',
-    channel: 'ota',
-    status: 'pending',
-  },
-  {
-    id: 'R004',
-    date: tomorrow,
+    guestPhone: '090-1234-5678',
+    guestEmail: 'tanaka@example.com',
+    diveDate: today,
     time: '09:00',
-    course: 'ナイトダイビング',
-    guestName: '佐藤 一郎',
+    legacyTime: '09:00',
+    timeSlot: 'morning',
+    courseId: 'CRS-001',
+    courseName: '体験ダイビング',
     guestCount: 2,
-    phone: '090-3333-4444',
-    channel: 'sns',
-    status: 'confirmed',
+    status: CONFIRMED_STATUS_ID,
+    staffId: 'STF-001',
+    staffName: '外間 健',
+    channel: 'hp',
+    questionnaireCompleted: true,
+    questionnaireId: 'Q001',
+    staffNote: 'カップル。写真希望あり',
+  },
+  {
+    id: `R-${today.replace(/-/g, '')}-002`,
+    createdAt: now,
+    updatedAt: now,
+    customerId: 'C001',
+    guestName: '鈴木 太郎',
+    guestPhone: '080-9876-5432',
+    guestEmail: '',
+    diveDate: today,
+    time: '13:00',
+    legacyTime: '13:00',
+    timeSlot: 'afternoon',
+    courseId: 'CRS-002',
+    courseName: 'ファンダイビング（2本）',
+    guestCount: 1,
+    status: CONFIRMED_STATUS_ID,
+    staffId: 'STF-001',
+    staffName: '外間 健',
+    channel: 'phone',
+    questionnaireCompleted: false,
+    staffNote: 'AOW 総本数150本',
+  },
+  {
+    id: `R-${today.replace(/-/g, '')}-003`,
+    createdAt: now,
+    updatedAt: now,
+    guestName: '山田 家族',
+    guestPhone: '070-1111-2222',
+    guestEmail: '',
+    diveDate: today,
+    time: '09:30',
+    legacyTime: '09:30',
+    timeSlot: 'morning',
+    courseId: 'CRS-001',
+    courseName: '体験ダイビング',
+    guestCount: 3,
+    status: DEFAULT_STATUS_ID,
+    channel: 'ota',
+    questionnaireCompleted: false,
+  },
+  {
+    id: `R-${tomorrow.replace(/-/g, '')}-001`,
+    createdAt: now,
+    updatedAt: now,
+    customerId: 'C001',
+    guestName: '佐藤 一郎',
+    guestPhone: '090-3333-4444',
+    guestEmail: '',
+    diveDate: tomorrow,
+    time: '09:00',
+    legacyTime: '09:00',
+    timeSlot: 'morning',
+    courseId: 'CRS-004',
+    courseName: 'ナイトダイビング',
+    guestCount: 2,
+    status: CONFIRMED_STATUS_ID,
+    staffId: 'STF-002',
+    staffName: '知念 美咲',
+    channel: 'email',
+    legacyChannel: 'sns',
+    questionnaireCompleted: true,
     questionnaireId: 'Q002',
   },
 ]
+const RES_ID = {
+  R1: MOCK_RESERVATIONS[0].id,
+  R4: MOCK_RESERVATIONS[3].id,
+}
 
 // ─── 問診票データ ───────────────────────────────────────────
 export const MOCK_QUESTIONNAIRES: QuestionnaireData[] = [
   {
     id: 'Q001',
-    postalCode: '150-0001',
-    email: 'hanako@example.com',
-    highBloodPressure: false,
-    medicalCertificate: false,
-    reservationId: 'R001',
+    reservationId: RES_ID.R1,
     submittedAt: new Date().toISOString(),
     lastName: '田中',
     firstName: '花子',
@@ -102,7 +142,7 @@ export const MOCK_QUESTIONNAIRES: QuestionnaireData[] = [
   },
   {
     id: 'Q002',
-    reservationId: 'R004',
+    reservationId: RES_ID.R4,
     submittedAt: new Date(Date.now() - 3600000).toISOString(),
     lastName: '佐藤',
     firstName: '一郎',
@@ -142,6 +182,11 @@ export const MOCK_QUESTIONNAIRES: QuestionnaireData[] = [
 ]
 
 // ─── 顧客台帳データ ─────────────────────────────────────────
+// 検索・絞り込み（SC-07）の確認用に、Cカード種別・最終来店日・電話番号の
+// 表記・来店回数がばらけるようにしてある。最終来店日は実行日からの相対で生成する。
+const daysAgo = (n: number) =>
+  new Date(Date.now() - n * 86400000).toISOString().slice(0, 10)
+
 export const MOCK_CUSTOMERS: Customer[] = [
   {
     id: 'C001',
@@ -151,7 +196,7 @@ export const MOCK_CUSTOMERS: Customer[] = [
     firstNameKana: 'イチロウ',
     phone: '090-3333-4444',
     email: 'sato@example.com',
-    lastVisit: '2026-06-20',
+    lastVisit: daysAgo(80),
     visitCount: 5,
     hasCCard: true,
     cCardType: 'AOW',
@@ -183,7 +228,7 @@ export const MOCK_CUSTOMERS: Customer[] = [
     firstNameKana: 'ケンタ',
     phone: '080-7777-8888',
     email: '',
-    lastVisit: '2026-05-05',
+    lastVisit: daysAgo(126),
     visitCount: 12,
     hasCCard: true,
     cCardType: 'Rescue Diver',
@@ -191,35 +236,182 @@ export const MOCK_CUSTOMERS: Customer[] = [
     healthNotes: '特になし',
     guideNotes: '常連。深場好き。マンタシーズンには必ず来店。リクエストはいつも久米島。',
   },
+  {
+    id: 'C004',
+    lastName: '比嘉',
+    firstName: '美咲',
+    lastNameKana: 'ヒガ',
+    firstNameKana: 'ミサキ',
+    phone: '098-866-2211',
+    email: 'higa.misaki@example.com',
+    lastVisit: daysAgo(3),
+    visitCount: 3,
+    hasCCard: true,
+    cCardType: 'OW',
+    totalDives: 18,
+    healthNotes: '',
+    guideNotes: '地元在住。平日午後の枠を好む。中性浮力の練習中。',
+  },
+  {
+    id: 'C005',
+    lastName: '宮城',
+    firstName: '大輔',
+    lastNameKana: 'ミヤギ',
+    firstNameKana: 'ダイスケ',
+    phone: '090-5555-0102',
+    email: 'miyagi@example.com',
+    lastVisit: daysAgo(12),
+    visitCount: 48,
+    hasCCard: true,
+    cCardType: 'DM',
+    totalDives: 620,
+    healthNotes: '',
+    guideNotes: '元スタッフ。人手が足りない日はヘルプに入ってくれる。',
+  },
+  {
+    id: 'C006',
+    lastName: '新垣',
+    firstName: '結子',
+    lastNameKana: 'アラカキ',
+    firstNameKana: 'ユイコ',
+    phone: '080-2244-6688',
+    email: '',
+    lastVisit: daysAgo(45),
+    visitCount: 2,
+    hasCCard: false,
+    cCardType: '',
+    totalDives: 0,
+    healthNotes: '軽度の喘息。吸入薬を携行。',
+    guideNotes: '体験ダイビングのみ。水面休息を長めに取ると安心する様子。',
+  },
+  {
+    id: 'C007',
+    lastName: '鈴木',
+    firstName: '太郎',
+    lastNameKana: 'スズキ',
+    firstNameKana: 'タロウ',
+    // ハイフンなしで登録された行（検索の正規化確認用）
+    phone: '08098765432',
+    email: 'suzuki@example.com',
+    lastVisit: daysAgo(200),
+    visitCount: 4,
+    hasCCard: true,
+    cCardType: 'OW',
+    totalDives: 25,
+    healthNotes: '',
+    guideNotes: '毎年夏に来沖。次回はダイビング本数を増やしたいとのこと。',
+  },
+  {
+    id: 'C008',
+    lastName: '渡辺',
+    firstName: 'さくら',
+    lastNameKana: 'ワタナベ',
+    firstNameKana: 'サクラ',
+    phone: '070-1122-3355',
+    email: 'watanabe.sakura@example.com',
+    lastVisit: daysAgo(310),
+    visitCount: 7,
+    hasCCard: true,
+    cCardType: 'AOW',
+    totalDives: 92,
+    healthNotes: '',
+    guideNotes: 'ウミウシ探しが好き。マクロ用のカメラを持参する。',
+  },
+  {
+    id: 'C009',
+    lastName: '金城',
+    firstName: '剛',
+    lastNameKana: 'キンジョウ',
+    firstNameKana: 'ツヨシ',
+    phone: '090-8080-1234',
+    email: 'kinjo@example.com',
+    lastVisit: daysAgo(21),
+    visitCount: 220,
+    hasCCard: true,
+    cCardType: 'Inst',
+    totalDives: 2400,
+    healthNotes: '',
+    guideNotes: '同業のインストラクター。合同開催の相談あり。',
+  },
+  {
+    id: 'C010',
+    lastName: '高橋',
+    firstName: '悠人',
+    lastNameKana: 'タカハシ',
+    firstNameKana: 'ユウト',
+    phone: '080-4545-7676',
+    email: 'takahashi@example.com',
+    lastVisit: daysAgo(400),
+    visitCount: 1,
+    hasCCard: false,
+    cCardType: '',
+    totalDives: 0,
+    healthNotes: '',
+    guideNotes: '社員旅行で来店。次回はグループでの再訪を検討中と話していた。',
+  },
+  {
+    id: 'C011',
+    lastName: '大城',
+    firstName: '音々',
+    lastNameKana: 'オオシロ',
+    firstNameKana: 'ネネ',
+    phone: '098-988-3030',
+    email: 'oshiro@example.com',
+    lastVisit: daysAgo(550),
+    visitCount: 2,
+    hasCCard: true,
+    cCardType: 'OW',
+    totalDives: 11,
+    healthNotes: '',
+    guideNotes: 'Cカード取得後そのまま。フォローの連絡先候補。',
+  },
+  {
+    id: 'C012',
+    lastName: '伊藤',
+    firstName: '拓海',
+    lastNameKana: 'イトウ',
+    firstNameKana: 'タクミ',
+    phone: '090-6161-2929',
+    email: 'ito.takumi@example.com',
+    lastVisit: daysAgo(730),
+    visitCount: 9,
+    hasCCard: true,
+    cCardType: 'AOW',
+    totalDives: 130,
+    healthNotes: '',
+    guideNotes: '以前は年2回ペースで来店。しばらく来沖なし。',
+  },
+  {
+    id: 'C013',
+    lastName: '上原',
+    firstName: '千尋',
+    lastNameKana: 'ウエハラ',
+    firstNameKana: 'チヒロ',
+    phone: '090-7373-8484',
+    email: 'uehara@example.com',
+    lastVisit: daysAgo(65),
+    visitCount: 15,
+    hasCCard: true,
+    cCardType: 'Rescue Diver',
+    totalDives: 410,
+    healthNotes: '',
+    guideNotes: 'ナイトダイブのリクエストが多い。器材は自前。',
+  },
+  {
+    id: 'C014',
+    lastName: '中村',
+    firstName: '陽菜',
+    lastNameKana: 'ナカムラ',
+    firstNameKana: 'ヒナ',
+    phone: '080-9090-1010',
+    email: 'nakamura.hina@example.com',
+    // 予約のみで来店実績がまだない顧客
+    lastVisit: '',
+    visitCount: 0,
+    hasCCard: false,
+    cCardType: '',
+    totalDives: 0,
+    healthNotes: '',
+    guideNotes: '',
+  },
 ]
-
-// ─── localStorage との同期ユーティリティ ──────────────────────
-export function getReservations(): Reservation[] {
-  if (typeof window === 'undefined') return MOCK_RESERVATIONS
-  const stored = localStorage.getItem('reservations')
-  return stored ? JSON.parse(stored) : MOCK_RESERVATIONS
-}
-
-export function saveReservations(data: Reservation[]) {
-  localStorage.setItem('reservations', JSON.stringify(data))
-}
-
-export function getQuestionnaires(): QuestionnaireData[] {
-  if (typeof window === 'undefined') return MOCK_QUESTIONNAIRES
-  const stored = localStorage.getItem('questionnaires')
-  return stored ? JSON.parse(stored) : MOCK_QUESTIONNAIRES
-}
-
-export function saveQuestionnaires(data: QuestionnaireData[]) {
-  localStorage.setItem('questionnaires', JSON.stringify(data))
-}
-
-export function getCustomers(): Customer[] {
-  if (typeof window === 'undefined') return MOCK_CUSTOMERS
-  const stored = localStorage.getItem('customers')
-  return stored ? JSON.parse(stored) : MOCK_CUSTOMERS
-}
-
-export function saveCustomers(data: Customer[]) {
-  localStorage.setItem('customers', JSON.stringify(data))
-}

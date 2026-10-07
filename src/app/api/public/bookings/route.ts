@@ -1,52 +1,154 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { createReservation, generateReservationId } from '@/lib/reservations'
 import { store } from '@/lib/dataStore'
-import type { Reservation } from '@/types'
+import { DEFAULT_STATUS_ID, getCourseName } from '@/lib/masters'
+import { validateNewReservationInput, ReservationValidationError } from '@/lib/reservationValidation'
+import { normalizeReservationInput } from '@/lib/reservationNormalization'
+import { generateQuestionnaireToken, getQuestionnaireExpiry } from '@/lib/questionnaireToken'
+import { StoreBusyError, withStoreWriteLock } from '@/lib/storeLock'
+import type { ReservationInput, ReservationTimeSlot } from '@/types'
+import { MSG } from '@/lib/messages'
+import { RateLimitedError } from '@/lib/withRetry'
 
-/**
- * POST /api/public/bookings — 客側予約申し込み（ログイン不要）
- * 「仮押さえ（pending）の新規作成」のみ許可。
- * id / status / channel はサーバー側で強制し、閲覧・更新は一切できない。
- */
+export const runtime = 'nodejs'
+
+const TIME_SLOTS: ReservationTimeSlot[] = ['morning', 'afternoon', 'full', 'unspecified']
+
+function isDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
+  const parsed = new Date(`${value}T00:00:00.000Z`)
+  return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value
+}
+
+function firstString(values: unknown[], trim = false): string {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim() !== '') return trim ? value.trim() : value
+  }
+  return ''
+}
+
+/** POST /api/public/bookings — public booking request; old date/course aliases remain accepted. */
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json()
+    const body: unknown = await req.json().catch(() => null)
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return NextResponse.json({ error: '入力内容を確認してください' }, { status: 400 })
+    }
+    const values = body as Record<string, unknown>
+    const diveDate = firstString([values.diveDate, values.date], true)
+    const exactTime = firstString([values.time], true)
+    const courseName = firstString([values.courseName, values.course], true)
+    const guestName = firstString([values.guestName], true)
+    const guestPhone = firstString([values.guestPhone, values.phone], true)
+    const guestEmail = firstString([values.guestEmail], true)
+    const staffNote = firstString([values.staffNote, values.notes])
+    const courseId = firstString([values.courseId], true)
+    const guestCount = Number(values.guestCount)
+    const timeSlot = values.timeSlot === undefined || values.timeSlot === null || values.timeSlot === ''
+      ? 'unspecified'
+      : values.timeSlot
 
-    const date = String(body.date ?? '')
-    const time = String(body.time ?? '')
-    const course = String(body.course ?? '').slice(0, 50)
-    const guestName = String(body.guestName ?? '').trim().slice(0, 50)
-    const guestCount = Number(body.guestCount)
-    const phone = String(body.phone ?? '').trim().slice(0, 20)
-    const notes = String(body.notes ?? '').slice(0, 500)
+    const isNewForm = Boolean(courseId && guestEmail)
+    const validated = isNewForm
+      ? validateNewReservationInput({
+          ...values,
+          diveDate,
+          guestName,
+          guestPhone,
+          guestEmail,
+          courseId,
+          guestCount,
+          timeSlot,
+          channel: 'hp',
+          status: DEFAULT_STATUS_ID,
+        }, { allowOta: false, allowPastDate: false })
+      : undefined
 
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(date))
+    // Use the shared reservation service for the current form contract. The legacy
+    // alias path below remains for clients that still submit date/course/phone.
+    if (validated?.ok && !exactTime) {
+      const saved = await createReservation({
+        ...validated.data,
+        channel: 'hp',
+        status: DEFAULT_STATUS_ID,
+      })
+      return NextResponse.json({
+        ok: true,
+        id: saved.id,
+        questionnaireToken: saved.questionnaireToken,
+        questionnaireTokenExpiresAt: saved.questionnaireTokenExpiresAt,
+      })
+    }
+
+    if (validated && !validated.ok) {
+      return NextResponse.json({
+        error: 'VALIDATION_ERROR',
+        message: validated.message,
+        fields: validated.fields,
+      }, { status: 400 })
+    }
+
+    if (!isDate(diveDate))
       return NextResponse.json({ error: '日付が不正です' }, { status: 400 })
-    if (date < new Date().toISOString().slice(0, 10))
+    if (diveDate < new Date().toISOString().slice(0, 10))
       return NextResponse.json({ error: '過去の日付は指定できません' }, { status: 400 })
-    if (!/^\d{2}:\d{2}$/.test(time))
+    if (exactTime && !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(exactTime))
       return NextResponse.json({ error: '時間が不正です' }, { status: 400 })
-    if (!course || !guestName || !phone)
+    if (!courseName && !(validated?.ok && getCourseName(validated.data.courseId)))
+      return NextResponse.json({ error: 'コースを選択してください' }, { status: 400 })
+    if (!guestName || guestName.length > 50 || !guestPhone || guestPhone.length > 20)
       return NextResponse.json({ error: '必須項目が未入力です' }, { status: 400 })
+    if (typeof timeSlot !== 'string' || !TIME_SLOTS.includes(timeSlot as ReservationTimeSlot))
+      return NextResponse.json({ error: '時間帯が不正です' }, { status: 400 })
+    if (staffNote.length > 500 || guestEmail.length > 254 || (guestEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(guestEmail)))
+      return NextResponse.json({ error: '入力内容を確認してください' }, { status: 400 })
     if (!Number.isInteger(guestCount) || guestCount < 1 || guestCount > 20)
       return NextResponse.json({ error: '人数は1〜20名で指定してください' }, { status: 400 })
 
-    const reservation: Reservation = {
-      id: `R${Date.now()}`,
-      date,
-      time,
-      course,
+    const now = new Date().toISOString()
+    const input: ReservationInput = {
+      id: await generateReservationId(diveDate),
+      createdAt: now,
+      updatedAt: now,
+      diveDate,
+      ...(exactTime ? { time: exactTime, legacyTime: exactTime } : {}),
+      timeSlot: timeSlot as ReservationTimeSlot,
+      ...(courseId ? { courseId } : {}),
+      courseName: courseName || (validated?.ok ? getCourseName(validated.data.courseId) : ''),
       guestName,
+      guestPhone,
+      ...(guestEmail ? { guestEmail } : {}),
       guestCount,
-      phone,
       channel: 'hp',
-      status: 'pending', // スタッフ承認制：確定は店側画面で行う
-      notes,
+      status: DEFAULT_STATUS_ID,
+      questionnaireCompleted: false,
+      questionnaireToken: generateQuestionnaireToken(),
+      questionnaireTokenExpiresAt: getQuestionnaireExpiry(diveDate),
+      staffNote,
     }
-    await store.addReservation(reservation)
-    // 完了画面でQR生成・予約番号表示に使うため id を返す
-    return NextResponse.json({ ok: true, id: reservation.id })
+    const reservation = normalizeReservationInput(input)
+    const saved = await withStoreWriteLock(() => store.addReservation(reservation))
+    return NextResponse.json({
+      ok: true,
+      id: saved.id,
+      questionnaireToken: saved.questionnaireToken,
+      questionnaireTokenExpiresAt: saved.questionnaireTokenExpiresAt,
+    })
   } catch (err) {
     console.error('[POST /api/public/bookings]', err)
+    if (err instanceof ReservationValidationError) {
+      return NextResponse.json({
+        error: 'VALIDATION_ERROR',
+        message: err.message,
+        fields: err.fields,
+      }, { status: 400 })
+    }
+    if (err instanceof RateLimitedError) {
+      return NextResponse.json({ error: MSG.RATE_LIMITED }, { status: 503 })
+    }
+    if (err instanceof StoreBusyError) {
+      return NextResponse.json({ error: '保存処理中です。時間をおいて再度お試しください。' }, { status: 503 })
+    }
     return NextResponse.json({ error: 'Failed to create booking' }, { status: 500 })
   }
 }

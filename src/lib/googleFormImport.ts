@@ -3,9 +3,12 @@
  * Google Forms API や GAS は使わず、同じスプレッドシートの回答タブを読む。
  */
 
+import { generateQuestionnaireToken,getQuestionnaireExpiry } from './questionnaireToken'
+import { withStoreWriteLock } from './storeLock'
 import { createHash } from 'crypto'
 import { USE_SHEETS, store } from './dataStore'
 import { getSheetValues } from './sheets'
+import { ISSUE_5_RESERVATION_STATUS } from './reservationStatus'
 import type { Reservation } from '@/types'
 
 type ReservationField = 'date' | 'time' | 'course' | 'guestName' | 'guestCount' | 'phone' | 'notes'
@@ -212,17 +215,24 @@ async function importGoogleFormBookingsOnce(): Promise<GoogleFormImportResult> {
       continue
     }
 
+    const now = new Date().toISOString()
     const reservation: Reservation = {
       id,
-      date: date as string,
+      diveDate: date as string,
       time: time as string,
-      course: course.slice(0, 50),
+      legacyTime: time as string,
+      timeSlot: 'unspecified',
+      courseName: course,
       guestName: guestName.slice(0, 50),
       guestCount: guestCount as number,
-      phone: phone.slice(0, 20),
+      guestPhone: phone.slice(0, 20),
       channel: 'google_form',
-      status: 'pending',
-      notes: cell(row, columns.notes).slice(0, 500),
+      status: ISSUE_5_RESERVATION_STATUS.requested,
+      staffNote: cell(row, columns.notes).slice(0, 500),
+      createdAt: now,
+      updatedAt: now,
+      questionnaireToken: generateQuestionnaireToken(),
+      questionnaireTokenExpiresAt: getQuestionnaireExpiry(date as string),
     }
     try {
       await store.addReservation(reservation)
@@ -241,8 +251,9 @@ async function importGoogleFormBookingsOnce(): Promise<GoogleFormImportResult> {
 
 /** 同一プロセス内の同時リクエストによる二重取込を防ぐ */
 export function importGoogleFormBookings(): Promise<GoogleFormImportResult> {
+  if (!process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || !process.env.GOOGLE_PRIVATE_KEY || !process.env.GOOGLE_SPREADSHEET_ID) return importGoogleFormBookingsOnce()
   if (!importInFlight) {
-    importInFlight = importGoogleFormBookingsOnce().finally(() => {
+    importInFlight = withStoreWriteLock(()=>importGoogleFormBookingsOnce()).finally(() => {
       importInFlight = null
     })
   }

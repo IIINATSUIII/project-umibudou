@@ -9,7 +9,7 @@ export default function RootPage() {
   const router = useRouter()
 
   useEffect(() => {
-    if (user === undefined) return // Firebase初期化中は待つ
+    if (user === undefined) return // 認証状態の初期取得中は待つ
     router.replace(user ? '/dashboard' : '/login')
   }, [user, router])
 

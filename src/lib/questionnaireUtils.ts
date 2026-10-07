@@ -16,7 +16,7 @@ function normalizeText(value: string): string {
 }
 
 function normalizePhone(value: string): string {
-  return value.replace(/\D/g, '')
+  return value.normalize('NFKC').replace(/\D/g, '')
 }
 
 /** ID・予約ID・QRトークン・氏名（漢字/カナ）・電話番号による部分検索。 */
@@ -53,9 +53,8 @@ export function matchesQuestionnaire(
 /** 旧形式の C001 と新形式 C-0001 の両方を見て次の顧客IDを採番する。 */
 export function nextCustomerId(customerIds: string[]): string {
   const maxId = customerIds.reduce((max, id) => {
-    // Pre-schema releases used C + Date.now(). Those IDs remain valid, but are not sequence numbers.
-    const match = id.match(/^C-(\d+)$|^C(\d{1,4})$/i)
-    return match ? Math.max(max, Number(match[1] ?? match[2])) : max
+    const match = id.match(/^C-?(\d+)$/i)
+    return match ? Math.max(max, Number(match[1])) : max
   }, 0)
 
   if (maxId >= 9999) throw new Error('Customer ID limit reached (C-9999)')
