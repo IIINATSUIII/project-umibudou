@@ -78,6 +78,46 @@ describe('matchesLastVisitRange', () => {
     expect(matchesLastVisitRange(c, 'within1y', TODAY)).toBe(false)
     expect(matchesLastVisitRange(c, 'over1y', TODAY)).toBe(false)
   })
+
+  describe('月末の境界（存在しない日付に繰り上がらない）', () => {
+    // 5/31 の3ヶ月前は 2/31 が無いので 2/28（月末）が境界。3/3 になってはいけない
+    it.each([
+      ['2026-02-28', true],
+      ['2026-02-27', false],
+      ['2026-03-01', true],
+      ['2026-03-03', true],
+    ] as const)('今日が5/31のとき 3ヶ月以内 / 最終来店%s → %s', (lastVisit, expected) => {
+      const today = new Date(2026, 4, 31)
+      expect(matchesLastVisitRange(fakeCustomer({ lastVisit }), 'within3m', today)).toBe(expected)
+    })
+
+    it('今日が8/31のとき 6ヶ月以内の境界は 2/28', () => {
+      const today = new Date(2026, 7, 31)
+      expect(matchesLastVisitRange(fakeCustomer({ lastVisit: '2026-02-28' }), 'within6m', today)).toBe(true)
+      expect(matchesLastVisitRange(fakeCustomer({ lastVisit: '2026-02-27' }), 'within6m', today)).toBe(false)
+    })
+
+    it('うるう日（2/29）の1年前は翌年3/1ではなく 2/28 を境界にする', () => {
+      const today = new Date(2028, 1, 29)
+      expect(matchesLastVisitRange(fakeCustomer({ lastVisit: '2027-02-28' }), 'within1y', today)).toBe(true)
+      expect(matchesLastVisitRange(fakeCustomer({ lastVisit: '2027-02-27' }), 'within1y', today)).toBe(false)
+      // 1年以内と1年以上は、同じ日がどちらにも入らず・どちらからも漏れない
+      expect(matchesLastVisitRange(fakeCustomer({ lastVisit: '2027-02-28' }), 'over1y', today)).toBe(false)
+      expect(matchesLastVisitRange(fakeCustomer({ lastVisit: '2027-02-27' }), 'over1y', today)).toBe(true)
+    })
+
+    it('月末でない日は従来どおり（今日が10/7 → 3ヶ月前は7/7）', () => {
+      const today = new Date(2026, 9, 7)
+      expect(matchesLastVisitRange(fakeCustomer({ lastVisit: '2026-07-07' }), 'within3m', today)).toBe(true)
+      expect(matchesLastVisitRange(fakeCustomer({ lastVisit: '2026-07-06' }), 'within3m', today)).toBe(false)
+    })
+
+    it('年をまたぐ場合も正しい（今日が1/31 → 3ヶ月前は前年10/31）', () => {
+      const today = new Date(2026, 0, 31)
+      expect(matchesLastVisitRange(fakeCustomer({ lastVisit: '2025-10-31' }), 'within3m', today)).toBe(true)
+      expect(matchesLastVisitRange(fakeCustomer({ lastVisit: '2025-10-30' }), 'within3m', today)).toBe(false)
+    })
+  })
 })
 
 describe('formatLastVisitAgo', () => {
