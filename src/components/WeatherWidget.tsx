@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { fetchWeather } from '@/lib/weather'
+import { fetchWeather, WEATHER_ERROR_MESSAGE } from '@/lib/weather'
 import type { WeatherDay } from '@/types'
 
 export default function WeatherWidget() {
@@ -23,6 +23,17 @@ export default function WeatherWidget() {
     )
   }
 
+  const isError = days.every((d) => d.weather === WEATHER_ERROR_MESSAGE)
+
+  if (isError) {
+    return (
+      <div className="bg-white rounded-xl border border-gray-200 p-4">
+        <h2 className="text-sm font-semibold text-gray-500 mb-2">🌊 沖縄海況（気象庁）</h2>
+        <p className="text-sm text-red-500">⚠️ {WEATHER_ERROR_MESSAGE}</p>
+      </div>
+    )
+  }
+
   return (
     <div className="bg-white rounded-xl border border-gray-200 p-4">
       <h2 className="text-sm font-semibold text-gray-500 mb-3">🌊 沖縄海況（気象庁）</h2>
@@ -37,6 +48,7 @@ export default function WeatherWidget() {
               {d.weather.length > 12 ? d.weather.slice(0, 12) + '…' : d.weather}
             </div>
             <div className="text-xs text-gray-500">波 {d.wave}</div>
+            <div className="text-xs text-gray-500">{d.tempHigh}° / {d.tempLow}°</div>
           </div>
         ))}
       </div>

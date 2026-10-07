@@ -89,15 +89,18 @@ POST /api/auth  { email, password }
 GOOGLE_SERVICE_ACCOUNT_EMAIL=your-sa@your-project.iam.gserviceaccount.com
 GOOGLE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
 GOOGLE_SPREADSHEET_ID=1ABC...  # スプレッドシート URL に含まれる ID
+GOOGLE_DATASTORE_LOCK_PROJECT_ID=your-lock-project
 ```
 
-### スプレッドシートの初期化・ヘッダー更新
+Sheetsへの書き込みはFirestoreの分散ロックを使用します。同じスプレッドシートを利用する全インスタンスで同じロックプロジェクトを指定してください。設定方法と障害復旧は [レビュー修正・移行手順](docs/reviews/2026-10-06-review-fixes.md) を参照してください。
+
+### スプレッドシートの初期化・移行
 
 ```
-http://localhost:3000/api/setup
+POST http://localhost:3000/api/setup
 ```
 
-にアクセスすると「予約」「問診票」「顧客台帳」シートの不足ヘッダーを既存データの右端へ追加します。初回セットアップ時と、スキーマ更新で列を追加した後に実行してください。既存ヘッダー・既存データ行は上書きしません。予約データでは `diveDate` を日付の正準フィールドとして扱い、旧 `date` / `course` / `phone` / `notes` 列もヘッダー名で読み替えます。ステータスは旧文字列と `STS-01`〜`STS-06` を保存値のまま扱います。既存予約にはスタッフが予約一覧を開いた際に問診URL用トークンを発行します。更新前に保存した予約QRは問診ページを開けないため、新しい問診URLを参加者へ共有してください。
+スタッフとしてログインしたセッションでPOSTすると、「予約」「問診票」「顧客台帳」「名簿」を初期化・移行します。既存シートは複製してバックアップし、ヘッダー名を使って全行を移行します。予約データでは `diveDate` を日付の正準フィールドとして扱い、旧 `date` / `course` / `phone` / `notes` 列も読み替えます。ステータスは旧文字列と `STS-01`〜`STS-06` を保存値のまま扱います。既存予約にはスタッフが予約一覧を開いた際に問診URL用トークンを発行します。移行後は旧スキーマへの書き込みが拒否されます。GETではデータを変更しません。更新前に保存した予約QRは問診ページを開けないため、新しい問診URLを参加者へ共有してください。運用開始前に [レビュー修正・移行手順](docs/reviews/2026-10-06-review-fixes.md) を確認してください。
 
 **本番環境では実行後に `src/app/api/setup/route.ts` を削除するか、アクセスを制限してください。**
 
@@ -105,7 +108,7 @@ http://localhost:3000/api/setup
 
 Google Formの回答先を、`GOOGLE_SPREADSHEET_ID` で指定した同じスプレッドシートに設定し、回答タブ名を `.env.local` の `GOOGLE_FORM_RESPONSES_SHEET` に指定します（既定値は `フォームの回答 1`）。回答先を別ファイルにする場合は、フォーム回答ファイルのIDを `GOOGLE_FORM_SPREADSHEET_ID` に指定してください。
 
-スタッフがダッシュボードまたは予約一覧を開くと、回答タブの新しい行を自動的に読み取り、`予約` シートへ `pending（仮押さえ）` として追加します。回答行から作った固定IDで重複取込を防ぎ、スタッフが「確定する」を押すと `confirmed（確定）` に更新されます。フォームの見出しが標準名（希望日・希望時間・コース・お名前・人数・電話番号・備考）と異なる場合は、`GOOGLE_FORM_HEADER_MAP` に対応関係をJSONで指定してください。
+スタッフがダッシュボードまたは予約一覧を開くと、回答タブの新しい行を自動的に読み取り、`予約` シートへ `STS-01（予約受付）` として追加します。回答行から作った固定IDで重複取込を防ぎ、スタッフが「確定する」を押すと `STS-03（確定）` に更新されます。フォームの見出しが標準名（希望日・希望時間・コース・お名前・人数・電話番号・備考）と異なる場合は、`GOOGLE_FORM_HEADER_MAP` に対応関係をJSONで指定してください。
 
 この方式はスタッフ画面の予約一覧取得時に同期するため、サーバー側の常駐ジョブやGASは不要ですが、スタッフ画面を開いていない間は次回の一覧取得時に取り込まれます。
 
@@ -153,7 +156,7 @@ src/
 │   │   ├── reservations/route.ts   ← 予約 CRUD（Google Sheets）
 │   │   ├── questionnaires/route.ts ← 問診票 CRUD
 │   │   ├── customers/route.ts      ← 顧客台帳 CRUD
-│   │   └── setup/route.ts          ← 初回ヘッダー書き込み（本番では削除）
+│   │   └── setup/route.ts          ← バックアップ付きスキーマ移行（POST）
 │   ├── login/                      ← ログイン画面
 │   ├── dashboard/                  ← 予約サマリー + 海況
 │   ├── reservations/               ← 予約一覧・登録

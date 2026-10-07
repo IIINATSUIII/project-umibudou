@@ -54,7 +54,12 @@ export function isConfirmedReservationStatus(status: string): boolean {
 
 export function isCancelledReservationStatus(status: string): boolean {
   const normalized = status.trim().toLowerCase()
-  return status === ISSUE_5_RESERVATION_STATUS.cancelled || /^cancel(?:l?ed)?(?:$|[\s_-])/.test(normalized)
+  return normalized === ISSUE_5_RESERVATION_STATUS.cancelled.toLowerCase() || /^cancel(?:l?ed)?(?:$|[\s_-])/.test(normalized)
+}
+
+export function isQuestionnaireReservationAllowed(status: string): boolean {
+  return !isCancelledReservationStatus(status) &&
+    status.trim().toUpperCase() !== ISSUE_5_RESERVATION_STATUS.refunded
 }
 
 export function isCancellableReservationStatus(status: string): boolean {

@@ -4,7 +4,7 @@
  * Sheets-if-configured, otherwise local JSON.
  */
 
-import type { Customer, QuestionnaireData, QuestionnaireFormData, Reservation, ReservationInput } from '@/types'
+import type { Customer, QuestionnaireData, QuestionnaireFormData, Reservation, ReservationInput, RosterEntry } from '@/types'
 import * as sheets from './sheets'
 import * as local from './localStore'
 import * as postgres from './postgresStore'
@@ -13,6 +13,12 @@ export { DataStoreError } from './dataStoreErrors'
 export interface PublicQuestionnaireSubmission {
   reservationId: string
   reservationToken: string
+  submissionId: string
+  formData: QuestionnaireFormData
+}
+
+export interface StaffQuestionnaireSubmission {
+  reservationId: string
   submissionId: string
   formData: QuestionnaireFormData
 }
@@ -40,10 +46,15 @@ export interface DataStore {
   getQuestionnaireById(id: string): Promise<QuestionnaireData | undefined>
   updateQuestionnaire(id: string, data: Partial<QuestionnaireData>): Promise<QuestionnaireData>
   getCustomers(): Promise<Customer[]>
+  searchCustomers(query: string): Promise<Customer[]>
   addCustomer(data: Customer): Promise<void>
   updateCustomer(id: string, data: Partial<Customer>): Promise<void>
+  getRoster(): Promise<RosterEntry[]>
+  addRoster(data: RosterEntry): Promise<void | RosterEntry>
   /** PostgreSQL provides cross-instance transactional implementations; legacy stores use their existing flow. */
   submitPublicQuestionnaire?(input: PublicQuestionnaireSubmission): Promise<PublicQuestionnaireSubmissionResult>
+  /** Staff submissions use the same atomic identity review and linking flow without guest-link expiry checks. */
+  submitStaffQuestionnaire?(input: StaffQuestionnaireSubmission): Promise<PublicQuestionnaireSubmissionResult>
   resolveQuestionnaireForCustomer?(questionnaireId: string, customerId: string): Promise<QuestionnaireResolutionResult>
 }
 

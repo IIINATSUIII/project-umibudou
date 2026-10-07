@@ -29,6 +29,9 @@ export interface Reservation {
   questionnaireToken?: string
   questionnaireTokenExpiresAt?: string
   questionnaireCompleted?: boolean
+  /** Main's normalized storage alias; `time` remains accepted for legacy callers. */
+  legacyTime?: string
+  legacyChannel?: string
   divePoint?: string
   staffNote?: string
 }
@@ -39,6 +42,27 @@ export type ReservationInput = Partial<Reservation> & {
   course?: string
   phone?: string
   notes?: string
+}
+
+/** コースマスタ（Courses シート） */
+export interface Course {
+  id: string    // コースID: "CRS-" + 連番3桁
+  name: string
+  type: string
+}
+
+/** スタッフマスタ（Staff シート） */
+export interface Staff {
+  id: string    // スタッフID: "STF-" + 連番3桁
+  name: string
+  isAdmin: boolean
+}
+
+/** ステータスマスタ（Status シート） */
+export interface StatusDef {
+  id: string    // ステータスID: "STS-" + 連番2桁
+  name: string
+  color: string // 条件付き書式の表示色（#RRGGBB）
 }
 
 export interface QuestionnaireData {
@@ -55,7 +79,7 @@ export interface QuestionnaireData {
   lastNameKana: string
   firstNameKana: string
   birthDate: string
-  gender: 'male' | 'female' | 'other'
+  gender: 'male' | 'female' | 'other' | 'unanswered'
   postalCode?: string
   address: string
   phone: string
@@ -66,6 +90,8 @@ export interface QuestionnaireData {
   // 健康状態
   heartDisease: boolean
   highBloodPressure?: boolean
+  hypertension?: boolean
+  medicalCertificate?: boolean
   respiratoryDisease: boolean
   earDisease: boolean
   epilepsy: boolean
@@ -76,7 +102,8 @@ export interface QuestionnaireData {
   medicationName: string
   latexAllergy: boolean
   // 当日体調
-  sleepHours: number
+  sleepHours: number | null
+  sleepCategory?: string
   alcoholLastNight: boolean
   alcoholToday: boolean
   condition: 'good' | 'normal' | 'bad'
@@ -88,7 +115,8 @@ export interface QuestionnaireData {
   cCardType: string
   cCardOrg: string
   lastDiveDate: string
-  totalDives: number
+  lastDivePeriod?: string
+  totalDives: number | null
   // 同意
   agreeRisk: boolean
   agreeMedical: boolean
@@ -100,6 +128,11 @@ export interface QuestionnaireData {
   doctorDivingPermit?: string
   staffReviewStatus?: string
   staffReviewNotes?: string
+  doctorClearance?: '持参あり' | 'なし' | ''
+  staffCheckStatus?: '未確認' | '要対応' | '確認済'
+  staffCheckNote?: string
+  qrIssuedAt?: string
+  submissionState?: 'pending' | 'complete'
 }
 
 /** 検索候補に表示し、健康情報を含めない一覧用データ */
@@ -124,6 +157,11 @@ export type QuestionnaireFormData = Omit<
   | 'doctorDivingPermit'
   | 'staffReviewStatus'
   | 'staffReviewNotes'
+  | 'doctorClearance'
+  | 'staffCheckStatus'
+  | 'staffCheckNote'
+  | 'qrIssuedAt'
+  | 'submissionState'
 >
 
 export interface Customer {
@@ -138,10 +176,11 @@ export interface Customer {
   visitCount: number
   hasCCard: boolean
   cCardType: string
-  totalDives: number
+  totalDives: number | null
   healthNotes: string
   guideNotes: string
   registeredAt?: string
+  createdAt?: string
   updatedAt?: string
   /** 同一予約の再送で来店回数を重複加算しないための処理済み予約ID一覧 */
   countedReservationIds?: string
@@ -157,7 +196,7 @@ export interface Customer {
   cCardOrg?: string
   lastDiveDate?: string
   lastDivePeriod?: string
-  dmConsent?: string
+  dmConsent?: string | boolean
 }
 
 export interface WeatherDay {
@@ -166,4 +205,27 @@ export interface WeatherDay {
   wind: string
   wave: string
   icon: string
+  tempHigh?: string
+  tempLow?: string
+}
+
+export interface RosterEntry {
+  id: string
+  diveDate: string
+  reservationId: string
+  questionnaireId: string
+  customerId: string
+  name: string
+  nameKana: string
+  birthDate: string
+  age: number
+  gender: string
+  address: string
+  phone: string
+  emergencyContact: string
+  emergencyPhone: string
+  course: string
+  staffName: string
+  checkedInAt: string
+  checkInMethod: 'QR読取' | '手動照合'
 }

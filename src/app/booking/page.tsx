@@ -2,22 +2,18 @@
 
 import { useState } from 'react'
 import { QRCodeCanvas } from 'qrcode.react'
+import { COURSES } from '@/lib/masters'
+import type { Reservation } from '@/types'
 
-const COURSES = [
-  '体験ダイビング',
-  'ファンダイビング（2本）',
-  'ファンダイビング（3本）',
-  'ナイトダイビング',
-  'シュノーケリング',
-  'その他',
+const TIME_SLOTS: [Reservation['timeSlot'], string][] = [
+  ['morning', '午前'], ['afternoon', '午後'], ['full', '1日'], ['unspecified', '指定なし'],
 ]
 
 export default function BookingPage() {
   const [form, setForm] = useState({
-    diveDate: new Date(Date.now() + 86400000).toISOString().slice(0, 10),
-    time: '09:00',
-    timeSlot: 'unspecified' as const,
-    courseName: '体験ダイビング',
+    diveDate: new Date(Date.now() + 86400000).toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' }),
+    timeSlot: 'morning' as Reservation['timeSlot'],
+    courseId: COURSES[0].id,
     guestName: '',
     guestCount: 1,
     guestPhone: '',
@@ -26,33 +22,43 @@ export default function BookingPage() {
   })
   const [sending, setSending] = useState(false)
   const [done, setDone] = useState(false)
-  const [resId, setResId] = useState('')
   const [questionnaireToken, setQuestionnaireToken] = useState('')
+  const [resId, setResId] = useState('')
   const [error, setError] = useState('')
 
   function set<K extends keyof typeof form>(key: K, value: typeof form[K]) {
     setForm((f) => ({ ...f, [key]: value }))
   }
 
+  const courseName = COURSES.find((c) => c.id === form.courseId)?.name ?? ''
+  const timeSlotLabel = TIME_SLOTS.find(([v]) => v === form.timeSlot)?.[1] ?? ''
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setError('')
     setSending(true)
-    const res = await fetch('/api/public/bookings', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(form),
-    })
-    setSending(false)
-    if (res.ok) {
-      const data = await res.json()
-      setResId(data.id)
+    try {
+      const res = await fetch('/api/public/bookings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(form),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setError(data.message ?? data.error ?? '送信に失敗しました。時間をおいて再度お試しください。')
+        return
+      }
+      if (typeof data.id !== 'string' || typeof data.questionnaireToken !== 'string' || !data.questionnaireToken) {
+        throw new Error('問診票URLを取得できませんでした')
+      }
       setQuestionnaireToken(data.questionnaireToken)
+      setResId(data.id)
       setDone(true)
       window.scrollTo(0, 0)
-    } else {
-      const data = await res.json().catch(() => ({}))
-      setError(data.error ?? '送信に失敗しました。時間をおいて再度お試しください。')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '送信に失敗しました。時間をおいて再度お試しください。')
+    } finally {
+      setSending(false)
     }
   }
 
@@ -67,7 +73,7 @@ export default function BookingPage() {
 
   if (done) {
     // QRには問診票入力ページのURLを埋め込む（当日スタッフが読み取る／事前入力にも使える）
-    const qrUrl = `${window.location.origin}/questionnaire/${resId}?token=${encodeURIComponent(questionnaireToken)}`
+    const qrUrl = `${window.location.origin}/questionnaire/${questionnaireToken}`
     return (
       <div className="min-h-screen bg-gradient-to-b from-ocean-700 to-ocean-500 flex items-center justify-center p-4">
         <div className="w-full max-w-md bg-white rounded-2xl shadow-xl p-8 text-center">
@@ -85,26 +91,20 @@ export default function BookingPage() {
               <QRCodeCanvas id="booking-qr" value={qrUrl} size={180} includeMargin />
             </div>
             <div className="text-left text-sm text-gray-700 mt-4 space-y-1">
-              <p>📅 {form.diveDate} {form.time}</p>
-              <p>🤿 {form.courseName}</p>
+              <p>📅 {form.diveDate}（{timeSlotLabel}）</p>
+              <p>🤿 {courseName}</p>
               <p>👤 {form.guestName} 様（{form.guestCount}名）</p>
             </div>
             <p className="text-xs text-gray-500 mt-4 leading-relaxed">
               このQRはあなたの予約ページ（問診票入力）につながります。
-              スクリーンショットまたは下のボタンで保存し、当日スタッフにご提示ください。
+              問診の送信後に表示される受付用QRを、当日スタッフにご提示ください。
               問診票は事前のご入力も可能です。
             </p>
+            <a href={qrUrl} className="mt-4 block text-sm font-medium text-ocean-600 underline">問診票に進む</a>
             <button onClick={downloadQr}
               className="mt-4 w-full bg-ocean-600 text-white py-2.5 rounded-lg text-sm font-medium hover:bg-ocean-700 transition-colors">
               ⬇ QRコードを保存する
             </button>
-            <div className="mt-5 border-t border-gray-200 pt-4 text-left">
-              <p className="text-xs font-semibold text-gray-700">LINEメニューから受付QRを再表示する予約確認コード</p>
-              <p className="mt-1 break-all rounded-lg bg-white px-3 py-2 font-mono text-xs text-gray-700">{questionnaireToken}</p>
-              <p className="mt-2 text-xs leading-relaxed text-gray-500">
-                予約番号と一緒に保管してください。このコードは受付QRを表示するためのものです。他の人には共有しないでください。
-              </p>
-            </div>
           </div>
 
           <p className="text-xs text-gray-400 mt-6">
@@ -135,16 +135,18 @@ export default function BookingPage() {
                 onChange={(e) => set('diveDate', e.target.value)} required className={inp} />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">希望時間 *</label>
-              <input type="time" value={form.time}
-                onChange={(e) => set('time', e.target.value)} required className={inp} />
+              <label className="block text-sm font-medium text-gray-700 mb-1">希望時間帯 *</label>
+              <select value={form.timeSlot}
+                onChange={(e) => set('timeSlot', e.target.value as Reservation['timeSlot'])} className={inp}>
+                {TIME_SLOTS.map(([v, label]) => <option key={v} value={v}>{label}</option>)}
+              </select>
             </div>
           </div>
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">コース *</label>
-            <select value={form.courseName} onChange={(e) => set('courseName', e.target.value)} className={inp}>
-              {COURSES.map((c) => <option key={c}>{c}</option>)}
+            <select value={form.courseId} onChange={(e) => set('courseId', e.target.value)} className={inp}>
+              {COURSES.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
           </div>
 
@@ -170,17 +172,17 @@ export default function BookingPage() {
           </div>
 
           <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">メールアドレス *</label>
+            <input type="email" value={form.guestEmail}
+              onChange={(e) => set('guestEmail', e.target.value)}
+              placeholder="guest@example.com" required className={inp} />
+          </div>
+
+          <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">ご要望・メモ</label>
             <textarea value={form.staffNote} onChange={(e) => set('staffNote', e.target.value)}
               placeholder="ライセンスの有無、送迎希望など" rows={3}
               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ocean-500 resize-none" />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">メールアドレス（任意）</label>
-            <input type="email" value={form.guestEmail}
-              onChange={(e) => set('guestEmail', e.target.value)}
-              placeholder="example@example.com" className={inp} />
           </div>
 
           {error && (

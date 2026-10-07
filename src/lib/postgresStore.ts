@@ -8,16 +8,24 @@ import type {
   QuestionnaireFormData,
   Reservation,
   ReservationInput,
+  RosterEntry,
 } from '@/types'
 import { matchesQuestionnaire, nextCustomerId, nextQuestionnaireId } from './questionnaireUtils'
+import { matchesCustomer } from './customerSearch'
 import { normalizeReservationInput, normalizeReservationPatch } from './reservationNormalization'
 import { createReservationQuestionnaireToken, questionnaireTokenExpiryForDiveDate } from './reservationQuestionnaireToken'
+import { isQuestionnaireReservationAllowed } from './reservationStatus'
 import { query, withTransaction } from './db'
 import { DataStoreError } from './dataStoreErrors'
-import type { PublicQuestionnaireSubmission, PublicQuestionnaireSubmissionResult, QuestionnaireResolutionResult } from './dataStore'
+import type {
+  PublicQuestionnaireSubmission,
+  PublicQuestionnaireSubmissionResult,
+  QuestionnaireResolutionResult,
+  StaffQuestionnaireSubmission,
+} from './dataStore'
 
 type Row = QueryResultRow
-type EntityType = 'customer' | 'reservation' | 'questionnaire'
+type EntityType = 'customer' | 'reservation' | 'questionnaire' | 'roster'
 
 const RESERVATION_FIELDS: (keyof Reservation)[] = [
   'id', 'createdAt', 'updatedAt', 'customerId', 'guestName', 'guestPhone', 'guestEmail',
@@ -31,9 +39,10 @@ const QUESTIONNAIRE_FIELDS: (keyof QuestionnaireData)[] = [
   'lastName', 'firstName', 'lastNameKana', 'firstNameKana', 'birthDate', 'gender',
   'postalCode', 'address', 'phone', 'email', 'emergencyName', 'emergencyRelation', 'emergencyPhone',
   'heartDisease', 'highBloodPressure', 'respiratoryDisease', 'earDisease', 'epilepsy', 'diabetes',
-  'pregnant', 'panicDisorder', 'medication', 'medicationName', 'latexAllergy', 'sleepHours',
+  'pregnant', 'panicDisorder', 'medication', 'medicationName', 'latexAllergy', 'sleepHours', 'sleepCategory',
   'alcoholLastNight', 'alcoholToday', 'condition', 'conditionDetails', 'flightWithin48h',
-  'hasCCard', 'cCardType', 'cCardOrg', 'lastDiveDate', 'totalDives',
+  'hasCCard', 'cCardType', 'cCardOrg', 'lastDiveDate', 'lastDivePeriod', 'totalDives',
+  'medicalCertificate', 'doctorClearance', 'staffCheckStatus', 'staffCheckNote', 'submissionState',
   'agreeRisk', 'agreeMedical', 'agreePhoto', 'consentAt', 'qrToken', 'qrExpiresAt', 'qrUsed',
   'doctorDivingPermit', 'staffReviewStatus', 'staffReviewNotes',
 ]
@@ -158,6 +167,12 @@ function numberValue(row: Row, key: string, fallback = 0): number {
   return Number.isFinite(value) ? value : fallback
 }
 
+function nullableNumberValue(row: Row, key: string): number | null {
+  if (row[key] === null || row[key] === undefined || row[key] === '') return null
+  const value = Number(row[key])
+  return Number.isFinite(value) ? value : null
+}
+
 function mapReservation(row: Row): Reservation {
   return {
     id: stringValue(row, 'id'),
@@ -218,7 +233,8 @@ function mapQuestionnaire(row: Row): QuestionnaireData {
     medication: booleanValue(row, 'medication'),
     medicationName: stringValue(row, 'medication_name'),
     latexAllergy: booleanValue(row, 'latex_allergy'),
-    sleepHours: numberValue(row, 'sleep_hours'),
+    sleepHours: nullableNumberValue(row, 'sleep_hours'),
+    sleepCategory: optionalString(row, 'sleep_category'),
     alcoholLastNight: booleanValue(row, 'alcohol_last_night'),
     alcoholToday: booleanValue(row, 'alcohol_today'),
     condition: stringValue(row, 'condition') as QuestionnaireData['condition'],
@@ -228,7 +244,8 @@ function mapQuestionnaire(row: Row): QuestionnaireData {
     cCardType: stringValue(row, 'c_card_type'),
     cCardOrg: stringValue(row, 'c_card_org'),
     lastDiveDate: stringValue(row, 'last_dive_date'),
-    totalDives: numberValue(row, 'total_dives'),
+    lastDivePeriod: optionalString(row, 'last_dive_period'),
+    totalDives: nullableNumberValue(row, 'total_dives'),
     agreeRisk: booleanValue(row, 'agree_risk'),
     agreeMedical: booleanValue(row, 'agree_medical'),
     agreePhoto: booleanValue(row, 'agree_photo'),
@@ -237,8 +254,13 @@ function mapQuestionnaire(row: Row): QuestionnaireData {
     qrExpiresAt: dateTimeString(row, 'qr_expires_at'),
     qrUsed: booleanValue(row, 'qr_used'),
     doctorDivingPermit: optionalString(row, 'doctor_diving_permit'),
+    doctorClearance: optionalString(row, 'doctor_clearance') as QuestionnaireData['doctorClearance'],
+    medicalCertificate: booleanValue(row, 'medical_certificate'),
     staffReviewStatus: optionalString(row, 'staff_review_status'),
     staffReviewNotes: optionalString(row, 'staff_review_notes'),
+    staffCheckStatus: optionalString(row, 'staff_check_status') as QuestionnaireData['staffCheckStatus'],
+    staffCheckNote: optionalString(row, 'staff_check_note'),
+    submissionState: optionalString(row, 'submission_state') as QuestionnaireData['submissionState'],
   }
 }
 
@@ -255,7 +277,7 @@ function mapCustomer(row: Row): Customer {
     visitCount: numberValue(row, 'visit_count'),
     hasCCard: booleanValue(row, 'has_c_card'),
     cCardType: stringValue(row, 'c_card_type'),
-    totalDives: numberValue(row, 'total_dives'),
+    totalDives: nullableNumberValue(row, 'total_dives'),
     healthNotes: stringValue(row, 'health_notes'),
     guideNotes: stringValue(row, 'guide_notes'),
     registeredAt: dateTimeString(row, 'registered_at'),
@@ -272,6 +294,29 @@ function mapCustomer(row: Row): Customer {
     lastDiveDate: optionalString(row, 'last_dive_date'),
     lastDivePeriod: optionalString(row, 'last_dive_period'),
     dmConsent: optionalString(row, 'dm_consent'),
+  }
+}
+
+function mapRosterEntry(row: Row): RosterEntry {
+  return {
+    id: stringValue(row, 'id'),
+    diveDate: stringValue(row, 'dive_date'),
+    reservationId: stringValue(row, 'reservation_id'),
+    questionnaireId: stringValue(row, 'questionnaire_id'),
+    customerId: optionalString(row, 'customer_id') ?? '',
+    name: stringValue(row, 'name'),
+    nameKana: stringValue(row, 'name_kana'),
+    birthDate: stringValue(row, 'birth_date'),
+    age: numberValue(row, 'age'),
+    gender: stringValue(row, 'gender'),
+    address: stringValue(row, 'address'),
+    phone: stringValue(row, 'phone'),
+    emergencyContact: stringValue(row, 'emergency_contact'),
+    emergencyPhone: stringValue(row, 'emergency_phone'),
+    course: stringValue(row, 'course'),
+    staffName: stringValue(row, 'staff_name'),
+    checkedInAt: dateTimeString(row, 'checked_in_at') ?? '',
+    checkInMethod: stringValue(row, 'check_in_method') as RosterEntry['checkInMethod'],
   }
 }
 
@@ -412,7 +457,7 @@ async function findPublicIdentityConflict(client: PoolClient, form: Questionnair
 }
 
 function questionnaireForInsert(
-  input: PublicQuestionnaireSubmission,
+  input: PublicQuestionnaireSubmission | StaffQuestionnaireSubmission,
   reservation: Reservation,
   customerId: string | undefined,
   requiresStaffReview: boolean,
@@ -428,15 +473,23 @@ function questionnaireForInsert(
     postalCode: input.formData.postalCode ?? '',
     highBloodPressure: input.formData.highBloodPressure ?? false,
     conditionDetails: input.formData.conditionDetails ?? '',
+    sleepHours: input.formData.sleepHours ?? null,
+    sleepCategory: input.formData.sleepCategory ?? '',
+    lastDivePeriod: input.formData.lastDivePeriod ?? input.formData.lastDiveDate,
+    medicalCertificate: input.formData.medicalCertificate ?? false,
     consentAt: submittedAt,
     qrToken: randomBytes(16).toString('base64url'),
     qrExpiresAt: questionnaireTokenExpiryForDiveDate(reservation.diveDate),
     qrUsed: false,
     doctorDivingPermit: '',
+    doctorClearance: '',
+    staffCheckStatus: '未確認',
+    staffCheckNote: '',
     staffReviewStatus: requiresStaffReview ? '要対応' : '未確認',
     staffReviewNotes: requiresStaffReview
       ? '既存顧客情報と一致しました。本人確認後に顧客台帳へ反映してください。'
       : '',
+    submissionState: 'complete',
   }
 }
 
@@ -472,7 +525,7 @@ async function createPublicCustomer(
     emergencyRelation: questionnaire.emergencyRelation,
     emergencyPhone: questionnaire.emergencyPhone,
     cCardOrg: questionnaire.cCardOrg,
-    lastDivePeriod: questionnaire.lastDiveDate,
+    lastDivePeriod: questionnaire.lastDivePeriod || questionnaire.lastDiveDate,
     dmConsent: '',
   }
   await insertEntity(client, 'customers', 'customer', customer, CUSTOMER_FIELDS as readonly string[])
@@ -524,7 +577,11 @@ export async function getQuestionnaires(): Promise<QuestionnaireData[]> {
 
 export async function addQuestionnaire(data: Omit<QuestionnaireData, 'id'>): Promise<QuestionnaireData> {
   return withTransaction(async (client) => {
-    const questionnaire: QuestionnaireData = { ...data, id: await allocateQuestionnaireId(client) }
+    const questionnaire: QuestionnaireData = {
+      submissionState: 'complete',
+      ...data,
+      id: await allocateQuestionnaireId(client),
+    }
     await insertEntity(client, 'questionnaires', 'questionnaire', questionnaire, QUESTIONNAIRE_FIELDS as readonly string[])
     await linkQuestionnaire(client, questionnaire)
     return questionnaire
@@ -559,6 +616,59 @@ export async function getCustomers(): Promise<Customer[]> {
   return result.rows.map(mapCustomer)
 }
 
+export async function searchCustomers(search: string): Promise<Customer[]> {
+  return (await getCustomers()).filter((customer) => matchesCustomer(customer, search))
+}
+
+export async function getRoster(): Promise<RosterEntry[]> {
+  const result = await query('SELECT * FROM roster_entries ORDER BY checked_in_at DESC, id')
+  return result.rows.map(mapRosterEntry)
+}
+
+export async function addRoster(data: RosterEntry): Promise<RosterEntry> {
+  return withTransaction(async (client) => {
+    const result = await client.query(
+      `INSERT INTO roster_entries (
+        id, dive_date, reservation_id, questionnaire_id, customer_id, name, name_kana,
+        birth_date, age, gender, address, phone, emergency_contact, emergency_phone,
+        course, staff_name, checked_in_at, check_in_method
+      ) VALUES (
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18
+      ) ON CONFLICT (questionnaire_id) DO NOTHING RETURNING *`,
+      [
+        data.id,
+        data.diveDate,
+        data.reservationId,
+        data.questionnaireId,
+        data.customerId || null,
+        data.name,
+        data.nameKana,
+        data.birthDate,
+        data.age,
+        data.gender,
+        data.address,
+        data.phone,
+        data.emergencyContact,
+        data.emergencyPhone,
+        data.course,
+        data.staffName,
+        data.checkedInAt,
+        data.checkInMethod,
+      ],
+    )
+    if (result.rows[0]) {
+      await enqueueSheets(client, 'roster', String(result.rows[0].id), 'upsert')
+      return mapRosterEntry(result.rows[0])
+    }
+    const existing = await client.query(
+      'SELECT * FROM roster_entries WHERE questionnaire_id = $1',
+      [data.questionnaireId],
+    )
+    if (!existing.rows[0]) throw new Error('Failed to save roster entry')
+    return mapRosterEntry(existing.rows[0])
+  })
+}
+
 export async function addCustomer(data: Customer): Promise<void> {
   await withTransaction(async (client) => {
     await insertEntity(client, 'customers', 'customer', data, CUSTOMER_FIELDS as readonly string[])
@@ -581,9 +691,10 @@ export async function updateCustomer(id: string, data: Partial<Customer>): Promi
   })
 }
 
-export async function submitPublicQuestionnaire(
-  input: PublicQuestionnaireSubmission,
+async function submitQuestionnaire(
+  input: PublicQuestionnaireSubmission | StaffQuestionnaireSubmission,
 ): Promise<PublicQuestionnaireSubmissionResult> {
+  const isPublicSubmission = 'reservationToken' in input
   return withTransaction(async (client) => {
     await client.query(
       "SELECT pg_advisory_xact_lock(hashtext('umibudou:questionnaire-submission'), hashtext($1))",
@@ -601,7 +712,15 @@ export async function submitPublicQuestionnaire(
     const reservationResult = await client.query('SELECT * FROM reservations WHERE id = $1 FOR UPDATE', [input.reservationId])
     if (!reservationResult.rows[0]) throw new DataStoreError('reservation_not_found')
     const reservation = mapReservation(reservationResult.rows[0])
-    if (!reservation.questionnaireToken || reservation.questionnaireToken !== input.reservationToken) {
+    // Recheck cancellation after acquiring the reservation row lock so a concurrent
+    // cancellation that committed after the API precheck cannot accept a new submission.
+    if (!isQuestionnaireReservationAllowed(reservation.status)) {
+      throw new DataStoreError('reservation_not_found')
+    }
+    if (
+      isPublicSubmission &&
+      (!reservation.questionnaireToken || reservation.questionnaireToken !== input.reservationToken)
+    ) {
       throw new DataStoreError('reservation_not_found')
     }
 
@@ -613,9 +732,11 @@ export async function submitPublicQuestionnaire(
         requiresStaffReview: prior.staffReviewStatus === '要対応',
       }
     }
-    const expiry = reservation.questionnaireTokenExpiresAt ? new Date(reservation.questionnaireTokenExpiresAt) : null
-    if (!expiry || Number.isNaN(expiry.getTime()) || expiry.getTime() <= Date.now()) {
-      throw new DataStoreError('questionnaire_expired')
+    if (isPublicSubmission) {
+      const expiry = reservation.questionnaireTokenExpiresAt ? new Date(reservation.questionnaireTokenExpiresAt) : null
+      if (!expiry || Number.isNaN(expiry.getTime()) || expiry.getTime() <= Date.now()) {
+        throw new DataStoreError('questionnaire_expired')
+      }
     }
 
     await lockCustomerIdentity(client, input.formData)
@@ -642,6 +763,18 @@ export async function submitPublicQuestionnaire(
       requiresStaffReview,
     }
   })
+}
+
+export async function submitPublicQuestionnaire(
+  input: PublicQuestionnaireSubmission,
+): Promise<PublicQuestionnaireSubmissionResult> {
+  return submitQuestionnaire(input)
+}
+
+export async function submitStaffQuestionnaire(
+  input: StaffQuestionnaireSubmission,
+): Promise<PublicQuestionnaireSubmissionResult> {
+  return submitQuestionnaire(input)
 }
 
 export async function resolveQuestionnaireForCustomer(
@@ -693,7 +826,7 @@ export async function resolveQuestionnaireForCustomer(
       cCardType: questionnaire.cCardType,
       cCardOrg: questionnaire.cCardOrg,
       totalDives: questionnaire.totalDives,
-      lastDivePeriod: questionnaire.lastDiveDate,
+      lastDivePeriod: questionnaire.lastDivePeriod || questionnaire.lastDiveDate,
       visitCount: customer.visitCount + (visitCounted ? 1 : 0),
       lastVisit: customer.lastVisit > visitDate ? customer.lastVisit : visitDate,
       updatedAt: new Date().toISOString(),
@@ -713,8 +846,15 @@ async function loadLatestSheetsProjection(
   entityType: EntityType,
   entityId: string,
   lock: boolean,
-): Promise<Customer | Reservation | QuestionnaireData | undefined> {
+): Promise<Customer | Reservation | QuestionnaireData | RosterEntry | undefined> {
   if (entityType === 'customer') return readCustomer(client, entityId, lock)
+  if (entityType === 'roster') {
+    const result = await client.query(
+      `SELECT * FROM roster_entries WHERE id = $1${lock ? ' FOR UPDATE' : ''}`,
+      [entityId],
+    )
+    return result.rows[0] ? mapRosterEntry(result.rows[0]) : undefined
+  }
   if (entityType === 'reservation') {
     const result = await client.query(
       `SELECT * FROM reservations WHERE id = $1${lock ? ' FOR UPDATE' : ''}`,
@@ -734,7 +874,7 @@ async function loadLatestSheetsProjection(
 export async function getLatestSheetsProjection(
   entityType: EntityType,
   entityId: string,
-): Promise<Customer | Reservation | QuestionnaireData | undefined> {
+): Promise<Customer | Reservation | QuestionnaireData | RosterEntry | undefined> {
   return withTransaction((client) => loadLatestSheetsProjection(client, entityType, entityId, false))
 }
 

@@ -1,19 +1,49 @@
-/**
- * Google Sheets API クライアント（サーバーサイド専用）
- * Next.js の API Route からのみ呼び出すこと。
- */
-
 import { google } from 'googleapis'
-import type { Reservation, ReservationInput, QuestionnaireData, Customer } from '@/types'
+import type {
+  Reservation,
+  ReservationInput,
+  QuestionnaireData,
+  Customer,
+  RosterEntry,
+} from '@/types'
+import {
+  HEADERS as STORE_HEADERS,
+  assertKnownHeaders,
+  normalizeRecord,
+  type StoreKind,
+  type RecordValue,
+} from './storeSchema'
+import { withStoreWriteLock } from './storeLock'
+import { matchesCustomer } from './customerSearch'
 import { matchesQuestionnaire, nextQuestionnaireId } from './questionnaireUtils'
 import { normalizeReservationInput, normalizeReservationPatch } from './reservationNormalization'
 import {
   createReservationQuestionnaireToken,
   questionnaireTokenExpiryForDiveDate,
 } from './reservationQuestionnaireToken'
+export const HEADERS = {
+  ...STORE_HEADERS,
+  RESERVATIONS: [...STORE_HEADERS.RESERVATIONS, 'questionnaireIds'],
+  QUESTIONNAIRES: [
+    ...STORE_HEADERS.QUESTIONNAIRES,
+    'highBloodPressure',
+    'doctorDivingPermit',
+    'staffReviewStatus',
+    'staffReviewNotes',
+    'submissionId',
+  ],
+  CUSTOMERS: [...STORE_HEADERS.CUSTOMERS, 'registeredAt', 'countedReservationIds'],
+}
 
-// ─── 認証・クライアント初期化 ─────────────────────────────────
-function getSheetsClient() {
+const names: Record<StoreKind, string> = {
+  RESERVATIONS: '予約',
+  QUESTIONNAIRES: '問診票',
+  CUSTOMERS: '顧客台帳',
+  ROSTER: '名簿',
+}
+const spreadsheetId = () => process.env.GOOGLE_SPREADSHEET_ID!
+const quote = (name: string) => `'${name.replace(/'/g, "''")}'`
+function client() {
   const auth = new google.auth.GoogleAuth({
     credentials: {
       client_email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
@@ -23,53 +53,13 @@ function getSheetsClient() {
   })
   return google.sheets({ version: 'v4', auth })
 }
-
-const SPREADSHEET_ID = process.env.GOOGLE_SPREADSHEET_ID!
-
 // ─── シート名定義 ────────────────────────────────────────────
-const SHEET = {
-  RESERVATIONS:   '予約',
-  QUESTIONNAIRES: '問診票',
-  CUSTOMERS:      '顧客台帳',
-} as const
+const SHEET = names
+
+const getSheetsClient = client
 
 function quoteSheetName(sheetName: string): string {
   return `'${sheetName.replace(/'/g, "''")}'`
-}
-
-// ─── ヘッダー行（スプレッドシート初期化用） ─────────────────────
-export const HEADERS = {
-  RESERVATIONS: [
-    'id','createdAt','updatedAt','customerId','guestName','guestPhone','guestEmail',
-    'diveDate','time','timeSlot','courseId','courseName','guestCount','status',
-    'staffId','staffName','channel','questionnaireId','questionnaireIds',
-    'questionnaireToken','questionnaireTokenExpiresAt','questionnaireCompleted','divePoint','staffNote',
-  ],
-  QUESTIONNAIRES: [
-    'id','reservationId','submittedAt',
-    'lastName','firstName','lastNameKana','firstNameKana',
-    'birthDate','gender','address','phone',
-    'emergencyName','emergencyRelation','emergencyPhone',
-    'heartDisease','respiratoryDisease','earDisease','epilepsy',
-    'diabetes','pregnant','panicDisorder','medication','medicationName','latexAllergy',
-    'sleepHours','alcoholLastNight','alcoholToday','condition',
-    'flightWithin48h',
-    'hasCCard','cCardType','cCardOrg','lastDiveDate','totalDives',
-    'agreeRisk','agreeMedical','agreePhoto',
-    // 既存データの列位置を維持するため、設計書の追加項目は末尾に追加する。
-    'customerId','postalCode','email','highBloodPressure','conditionDetails',
-    'consentAt','qrToken','qrExpiresAt','qrUsed','doctorDivingPermit',
-    'staffReviewStatus','staffReviewNotes','submissionId',
-  ],
-  CUSTOMERS: [
-    'id','lastName','firstName','lastNameKana','firstNameKana',
-    'phone','email','lastVisit','visitCount',
-    'hasCCard','cCardType','totalDives','healthNotes','guideNotes',
-    // 既存列の位置を保ちながら顧客自動登録に必要な設計項目を追加する。
-    'registeredAt','updatedAt','birthDate','gender','postalCode','address',
-    'emergencyName','emergencyRelation','emergencyPhone','cCardOrg','lastDiveDate','dmConsent',
-    'countedReservationIds','lastDivePeriod',
-  ],
 }
 
 // ─── 汎用ヘルパー ─────────────────────────────────────────────
@@ -97,6 +87,7 @@ const RESERVATION_HEADER_ALIASES: Record<string, keyof Reservation> = {
   course: 'courseName',
   phone: 'guestPhone',
   notes: 'staffNote',
+  time: 'legacyTime',
 }
 
 function canonicalHeader(sheetName: string, header: string): string {
@@ -105,6 +96,7 @@ function canonicalHeader(sheetName: string, header: string): string {
 
 function reservationFromRow(headers: string[], row: string[]): Reservation {
   const raw = rowToObj<Record<string, unknown>>(headers, row)
+  const current = normalizeRecord('RESERVATIONS', raw) as Reservation
   // New canonical columns can coexist with populated legacy columns. Keep the
   // legacy value when the appended canonical cell is still blank.
   for (const [legacy, canonical] of Object.entries(RESERVATION_HEADER_ALIASES)) {
@@ -115,7 +107,29 @@ function reservationFromRow(headers: string[], row: string[]): Reservation {
       legacyValue !== undefined && legacyValue !== null && String(legacyValue).trim() !== ''
     ) raw[canonical] = legacyValue
   }
-  return normalizeReservationInput(raw as ReservationInput)
+  const time = String(raw.time || raw.legacyTime || current.legacyTime || '')
+  const issue11 = normalizeReservationInput({
+    ...raw,
+    id: raw.id || current.id,
+    diveDate: raw.diveDate || raw.date || current.diveDate,
+    guestPhone: raw.guestPhone || raw.phone || current.guestPhone,
+    courseName: raw.courseName || raw.course || current.courseName,
+    staffNote: raw.staffNote || raw.notes || current.staffNote,
+    time,
+  } as ReservationInput)
+  return {
+    ...current,
+    ...issue11,
+    // Keep main's status/time-slot normalization, but do not infer a course ID
+    // from free text and retain the exact legacy time for Issue #11 callers.
+    status: current.status,
+    timeSlot: current.timeSlot,
+    guestCount: current.guestCount,
+    courseId: raw.courseId ? String(raw.courseId) : undefined,
+    time: time || undefined,
+    legacyTime: time || undefined,
+    legacyChannel: String(raw.legacyChannel || raw.channel || current.legacyChannel || '') || undefined,
+  }
 }
 
 /** オブジェクト → 実シートの列順に変換。予約の旧列名はcanonical fieldへ対応させる。 */
@@ -137,8 +151,8 @@ interface SheetTable {
 async function getSheetTable(sheetName: string, timeoutMs?: number): Promise<SheetTable> {
   const sheets = getSheetsClient()
   const params = {
-    spreadsheetId: SPREADSHEET_ID,
-    range: `${quoteSheetName(sheetName)}!A1:AZ`,
+    spreadsheetId: spreadsheetId(),
+    range: quoteSheetName(sheetName),
   }
   const res = timeoutMs
     ? await sheets.spreadsheets.values.get(params, { timeout: timeoutMs })
@@ -147,19 +161,17 @@ async function getSheetTable(sheetName: string, timeoutMs?: number): Promise<She
   return { headers: values[0] ?? [], rows: values.slice(1) }
 }
 
-/** 指定シートをヘッダー行込みで取得する（外部取込用） */
+/** Googleフォーム取込も同じ読取ヘルパーを使用する。 */
 export async function getSheetValues(
   sheetName: string,
-  spreadsheetId: string = SPREADSHEET_ID
+  id = spreadsheetId()
 ): Promise<string[][]> {
-  const sheets = getSheetsClient()
-  const res = await sheets.spreadsheets.values.get({
-    spreadsheetId,
-    range: `${quoteSheetName(sheetName)}!A:AZ`,
+  const r = await client().spreadsheets.values.get({
+    spreadsheetId: id,
+    range: quote(sheetName),
   })
-  return (res.data.values ?? []) as string[][]
+  return (r.data.values ?? []).map((row) => row.map((v) => String(v ?? '')))
 }
-
 /** オブジェクトを実ヘッダー順で末尾に追加する。 */
 async function appendObject(sheetName: string, data: Record<string, unknown>, timeoutMs?: number): Promise<void> {
   const { headers } = await getSheetTable(sheetName, timeoutMs)
@@ -175,7 +187,7 @@ async function appendObject(sheetName: string, data: Record<string, unknown>, ti
 
   const sheets = getSheetsClient()
   const params = {
-    spreadsheetId: SPREADSHEET_ID,
+    spreadsheetId: spreadsheetId(),
     range: `${quoteSheetName(sheetName)}!A1`,
     valueInputOption: 'RAW',
     requestBody: { values: [objToRow(sheetName, headers, data)] },
@@ -232,14 +244,14 @@ async function updateRowById(
   if (updates.length === 0) return
 
   const params = {
-    spreadsheetId: SPREADSHEET_ID,
+    spreadsheetId: spreadsheetId(),
     requestBody: { valueInputOption: 'RAW', data: updates },
   }
   if (timeoutMs) await sheets.spreadsheets.values.batchUpdate(params, { timeout: timeoutMs })
   else await sheets.spreadsheets.values.batchUpdate(params)
 }
 
-export type SheetsProjectionEntity = 'customer' | 'reservation' | 'questionnaire'
+export type SheetsProjectionEntity = 'customer' | 'reservation' | 'questionnaire' | 'roster'
 
 export function isSheetsConfigured(): boolean {
   return Boolean(
@@ -262,93 +274,140 @@ export async function upsertSheetProjection(
     customer: { sheetName: SHEET.CUSTOMERS, headers: HEADERS.CUSTOMERS },
     reservation: { sheetName: SHEET.RESERVATIONS, headers: HEADERS.RESERVATIONS },
     questionnaire: { sheetName: SHEET.QUESTIONNAIRES, headers: HEADERS.QUESTIONNAIRES },
+    roster: { sheetName: SHEET.ROSTER, headers: HEADERS.ROSTER },
   }[entityType]
+  const kind = {
+    customer: 'CUSTOMERS',
+    reservation: 'RESERVATIONS',
+    questionnaire: 'QUESTIONNAIRES',
+    roster: 'ROSTER',
+  }[entityType] as StoreKind
   const id = typeof payload.id === 'string' ? payload.id : ''
   if (!id) throw new Error('Projection payload is missing an ID')
 
   const projection: Record<string, unknown> = { id }
+  const projectionAliases: Record<string, string> = {
+    legacyTime: 'time',
+    registeredAt: 'createdAt',
+    highBloodPressure: 'hypertension',
+    doctorDivingPermit: 'doctorClearance',
+    staffReviewStatus: 'staffCheckStatus',
+    staffReviewNotes: 'staffCheckNote',
+  }
   for (const header of config.headers) {
     const key = canonicalHeader(config.sheetName, header)
-    projection[key] = payload[key] === undefined || payload[key] === null ? '' : payload[key]
+    const value = payload[key] ?? payload[header] ?? payload[projectionAliases[header]]
+    projection[key] = value === undefined || value === null ? '' : value
   }
 
-  const { headers, rows } = await getSheetTable(config.sheetName, options.timeoutMs)
-  const idColumn = headers.indexOf('id')
-  if (idColumn === -1) throw new Error(`ID header is missing in ${config.sheetName}`)
-  const matches = rows.filter((row) => row[idColumn] === id)
-  if (matches.length > 1) throw new Error(`Duplicate ID rows exist in ${config.sheetName}`)
-  if (matches.length === 1) {
-    await updateRowById(config.sheetName, id, projection, options.timeoutMs)
-  } else {
-    await appendObject(config.sheetName, projection, options.timeoutMs)
-  }
+  await withStoreWriteLock(async () => {
+    // Fail closed on an unmigrated sheet before applying an outbox projection.
+    await snapshot(kind, true)
+    const { headers, rows } = await getSheetTable(config.sheetName, options.timeoutMs)
+    const idColumn = headers.indexOf('id')
+    if (idColumn === -1) throw new Error(`ID header is missing in ${config.sheetName}`)
+    const matches = rows.filter((row) => row[idColumn] === id)
+    if (matches.length > 1) throw new Error(`Duplicate ID rows exist in ${config.sheetName}`)
+    if (matches.length === 1) {
+      await updateRowById(config.sheetName, id, projection, options.timeoutMs)
+    } else {
+      await appendObject(config.sheetName, projection, options.timeoutMs)
+    }
+  })
 }
 
 // ─── 予約 ─────────────────────────────────────────────────────
 
 export async function getReservations(): Promise<Reservation[]> {
-  const { headers, rows } = await getSheetTable(SHEET.RESERVATIONS)
-  return rows.filter((row) => row.some((cell) => cell !== '')).map((row) => reservationFromRow(headers, row))
+  return read<Reservation>('RESERVATIONS')
 }
 
 export async function addReservation(data: ReservationInput): Promise<Reservation> {
   const normalized = normalizeReservationInput(data)
   const reservation = {
     ...normalized,
+    legacyTime: normalized.legacyTime ?? normalized.time,
+    legacyChannel: normalized.legacyChannel ?? normalized.channel,
     questionnaireToken: normalized.questionnaireToken ?? createReservationQuestionnaireToken(),
     questionnaireTokenExpiresAt: normalized.questionnaireTokenExpiresAt ??
       questionnaireTokenExpiryForDiveDate(normalized.diveDate),
   }
-  await appendObject(SHEET.RESERVATIONS, reservation as unknown as Record<string, unknown>)
+  await add('RESERVATIONS', reservation)
   return reservation
 }
 
 export async function updateReservation(id: string, data: ReservationInput): Promise<void> {
-  const all = await getReservations()
-  const existing = all.find((r) => r.id === id)
-  if (!existing) throw new Error(`Reservation ${id} not found`)
-  const patch = normalizeReservationPatch(data)
-  const updated = { ...existing, ...patch }
-  if (patch.diveDate !== undefined && patch.questionnaireTokenExpiresAt == null) {
-    updated.questionnaireTokenExpiresAt = questionnaireTokenExpiryForDiveDate(updated.diveDate)
-  }
-  const persistedPatch = { ...patch }
-  if (patch.diveDate !== undefined && patch.questionnaireTokenExpiresAt == null) {
-    persistedPatch.questionnaireTokenExpiresAt = updated.questionnaireTokenExpiresAt
-  }
-  await updateRowById(SHEET.RESERVATIONS, id, persistedPatch as Record<string, unknown>)
+  return withStoreWriteLock(async () => {
+    const all = await getReservations()
+    const existing = all.find((reservation) => reservation.id === id)
+    if (!existing) throw new Error(`Reservation ${id} not found`)
+    const patch = normalizeReservationPatch(data)
+    if (patch.time !== undefined && patch.legacyTime === undefined) {
+      patch.legacyTime = patch.time
+    }
+    const updated = { ...existing, ...patch }
+    if (patch.diveDate !== undefined && patch.questionnaireTokenExpiresAt == null) {
+      updated.questionnaireTokenExpiresAt = questionnaireTokenExpiryForDiveDate(updated.diveDate)
+    }
+    const persistedPatch = { ...patch }
+    delete persistedPatch.time
+    if (patch.diveDate !== undefined && patch.questionnaireTokenExpiresAt == null) {
+      persistedPatch.questionnaireTokenExpiresAt = updated.questionnaireTokenExpiresAt
+    }
+    await update<Reservation>('RESERVATIONS', id, persistedPatch)
+  })
 }
 
 // ─── 問診票 ───────────────────────────────────────────────────
 
 export async function getQuestionnaires(): Promise<QuestionnaireData[]> {
-  const { headers, rows } = await getSheetTable(SHEET.QUESTIONNAIRES)
-  return rows.filter((row) => row.some((cell) => cell !== '')).map((row) => rowToObj<QuestionnaireData>(headers, row))
+  return read<QuestionnaireData>('QUESTIONNAIRES')
 }
 
-let questionnaireWriteQueue: Promise<void> = Promise.resolve()
-
 export async function addQuestionnaire(
-  data: Omit<QuestionnaireData, 'id'>
+  data: QuestionnaireData | Omit<QuestionnaireData, 'id'>
 ): Promise<QuestionnaireData> {
   let saved: QuestionnaireData | undefined
   const write = async () => {
-    const all = await getQuestionnaires()
-    saved = { ...data, id: nextQuestionnaireId(all) }
-    await appendObject(SHEET.QUESTIONNAIRES, saved as unknown as Record<string, unknown>)
+    const providedId = 'id' in data ? data.id : undefined
+    const all = providedId ? [] : await getQuestionnaires()
+    saved = { ...data, id: providedId ?? nextQuestionnaireId(all) }
+    await add('QUESTIONNAIRES', saved)
   }
-  const pending = questionnaireWriteQueue.then(write, write)
-  questionnaireWriteQueue = pending.then(() => undefined, () => undefined)
-  await pending
+  await withStoreWriteLock(write)
   if (!saved) throw new Error('Failed to create questionnaire')
   return saved
 }
 
-export async function searchQuestionnaires(query: string): Promise<QuestionnaireData[]> {
-  const all = await getQuestionnaires()
-  return all.filter((questionnaire) => matchesQuestionnaire(questionnaire, query))
+const record = (headers: string[], row: string[]) =>
+  Object.fromEntries(headers.map((h, i) => [h, row[i] ?? '']))
+const cell = (v: unknown) => (v === undefined || v === null ? '' : String(v))
+async function snapshot(kind: StoreKind, write = false) {
+  const values = await getSheetValues(names[kind])
+  const headers = (values[0] ?? []).map((h) => h.trim())
+  while (headers[headers.length - 1] === '') headers.pop()
+  assertKnownHeaders(kind, headers)
+  if (write && !HEADERS[kind].every((h) => headers.includes(h)))
+    throw new Error(
+      `${kind}は旧スキーマです。POST /api/setup で移行してください`
+    )
+  const rows = values
+    .slice(1)
+    .map((r, i) => ({ raw: r, index: i + 2 }))
+    .filter((r) => r.raw.some((v) => v !== ''))
+  const data = rows.map((r) =>
+    kind === 'RESERVATIONS'
+      ? reservationFromRow(headers, r.raw)
+      : normalizeRecord(kind, record(headers, r.raw))
+  )
+  const ids = data.map((v) => v.id)
+  if (new Set(ids).size !== ids.length)
+    throw new Error(`${kind}に重複IDがあります`)
+  return { headers, rows, data }
 }
-
+async function read<T>(kind: StoreKind): Promise<T[]> {
+  return (await snapshot(kind)).data as T[]
+}
 export async function getQuestionnaireById(id: string): Promise<QuestionnaireData | undefined> {
   const all = await getQuestionnaires()
   return all.find((questionnaire) => questionnaire.id === id)
@@ -358,38 +417,40 @@ export async function updateQuestionnaire(
   id: string,
   data: Partial<QuestionnaireData>
 ): Promise<QuestionnaireData> {
-  const all = await getQuestionnaires()
-  const existing = all.find((questionnaire) => questionnaire.id === id)
-  if (!existing) throw new Error(`Questionnaire ${id} not found`)
-  const updated = { ...existing, ...data }
-  await updateRowById(SHEET.QUESTIONNAIRES, id, data as Record<string, unknown>)
-  return updated
+  return withStoreWriteLock(async () => {
+    const all = await getQuestionnaires()
+    const existing = all.find((questionnaire) => questionnaire.id === id)
+    if (!existing) throw new Error(`Questionnaire ${id} not found`)
+    await update<QuestionnaireData>('QUESTIONNAIRES', id, data)
+    return { ...existing, ...data }
+  })
 }
 
 // ─── 顧客台帳 ─────────────────────────────────────────────────
 
 export async function getCustomers(): Promise<Customer[]> {
-  const { headers, rows } = await getSheetTable(SHEET.CUSTOMERS)
-  return rows.filter((row) => row.some((cell) => cell !== '')).map((row) => rowToObj<Customer>(headers, row))
+  return read<Customer>('CUSTOMERS')
 }
 
 export async function addCustomer(data: Customer): Promise<void> {
-  await appendObject(SHEET.CUSTOMERS, data as unknown as Record<string, unknown>)
+  await add('CUSTOMERS', data)
 }
 
 export async function updateCustomer(id: string, data: Partial<Customer>): Promise<void> {
-  const all = await getCustomers()
-  const existing = all.find((c) => c.id === id)
-  if (!existing) throw new Error(`Customer ${id} not found`)
-  await updateRowById(SHEET.CUSTOMERS, id, data as Record<string, unknown>)
+  return withStoreWriteLock(async () => {
+    const all = await getCustomers()
+    const existing = all.find((customer) => customer.id === id)
+    if (!existing) throw new Error(`Customer ${id} not found`)
+    await update<Customer>('CUSTOMERS', id, data)
+  })
 }
 
-// ─── スプレッドシート初期化（初回セットアップ用） ────────────────
+// ─── 追記のみの旧セットアップ処理（互換用） ─────────────────────
 /**
  * 不足ヘッダーだけを既存データの右端へ追加する。既存ヘッダーと既存行は変更しない。
  * 初回セットアップ時またはスキーマ更新後に実行（/api/setup エンドポイント経由）。
  */
-export async function initializeSheets(): Promise<void> {
+export async function initializeSheetsByAppendingMissingHeaders(): Promise<void> {
   for (const [sheetName, headers] of [
     [SHEET.RESERVATIONS, HEADERS.RESERVATIONS],
     [SHEET.QUESTIONNAIRES, HEADERS.QUESTIONNAIRES],
@@ -404,10 +465,181 @@ export async function initializeSheets(): Promise<void> {
     const end = columnName(existingWidth + missingHeaders.length - 1)
     const sheets = getSheetsClient()
     await sheets.spreadsheets.values.update({
-      spreadsheetId: SPREADSHEET_ID,
+      spreadsheetId: spreadsheetId(),
       range: `${quoteSheetName(sheetName)}!${start}1:${end}1`,
       valueInputOption: 'RAW',
       requestBody: { values: [missingHeaders as string[]] },
     })
   }
+}
+
+async function add<T extends { id: string }>(kind: StoreKind, v: T) {
+  return withStoreWriteLock(async () => {
+    const s = await snapshot(kind, true)
+    if (s.data.some((r) => r.id === v.id))
+      throw new Error(`ID ${v.id} は登録済みです`)
+    await client().spreadsheets.values.append({
+      spreadsheetId: spreadsheetId(),
+      range: `${quote(names[kind])}!A1`,
+      valueInputOption: 'RAW',
+      insertDataOption: 'INSERT_ROWS',
+      requestBody: {
+        values: [s.headers.map((h) => cell((v as unknown as RecordValue)[h]))],
+      },
+    })
+  })
+}
+function column(index: number) {
+  let result = ''
+  for (let n = index + 1; n > 0; n = Math.floor((n - 1) / 26))
+    result = String.fromCharCode(65 + ((n - 1) % 26)) + result
+  return result
+}
+async function update<T>(kind: StoreKind, id: string, delta: Partial<T>) {
+  return withStoreWriteLock(async () => {
+    const s = await snapshot(kind, true)
+    const index = s.data.findIndex((r) => r.id === id)
+    if (index < 0) throw new Error(`${kind} ${id} not found`)
+    // 変更したセルだけ書く。未知の列や別スタッフの別項目を全行書込で失わない。
+    const data = Object.entries(delta)
+      .filter(([h]) => h !== 'id')
+      .map(([h, v]) => {
+        const col = s.headers.indexOf(h)
+        if (col < 0) throw new Error(`未定義列 ${h}`)
+        return {
+          range: `${quote(names[kind])}!${column(col)}${s.rows[index].index}`,
+          values: [[cell(v)]],
+        }
+      })
+    if (data.length)
+      await client().spreadsheets.values.batchUpdate({
+        spreadsheetId: spreadsheetId(),
+        requestBody: { valueInputOption: 'RAW', data },
+      })
+  })
+}
+export const searchQuestionnaires = async (q: string) =>
+  (await getQuestionnaires()).filter((v) => matchesQuestionnaire(v, q))
+export const searchCustomers = async (q: string) =>
+  (await getCustomers()).filter((v) => matchesCustomer(v, q))
+export const getRoster = () => read<RosterEntry>('ROSTER')
+export const addRoster = (v: RosterEntry) => add('ROSTER', v)
+
+/** バックアップの複製後、一回の原子的batchUpdateで列名と全行を移行する。 */
+export async function initializeSheets() {
+  return withStoreWriteLock(async () => {
+    const sheets = client()
+    const metadata = await sheets.spreadsheets.get({
+      spreadsheetId: spreadsheetId(),
+      fields: 'sheets.properties',
+    })
+    const results = []
+    for (const kind of Object.keys(names) as StoreKind[]) {
+      const properties = metadata.data.sheets?.find(
+        (s) => s.properties?.title === names[kind]
+      )?.properties
+      const values = properties ? await getSheetValues(names[kind]) : []
+      const headers = (values[0] ?? []).map((h) => h.trim())
+      while (headers[headers.length - 1] === '') headers.pop()
+      const populated = values.slice(1).some((r) => r.some((v) => v !== ''))
+      if (populated && !headers.length)
+        throw new Error(`${kind}にヘッダーなしの既存データがあります`)
+      if (headers.length) assertKnownHeaders(kind, headers)
+      if (HEADERS[kind].every((h) => headers.includes(h))) {
+        results.push({ kind, status: 'already_current' })
+        continue
+      }
+      const extra = headers.filter((h) => !HEADERS[kind].includes(h))
+      const target = [...HEADERS[kind], ...extra]
+      const rows = values.slice(1).filter((r) => r.some((v) => v !== ''))
+      const normalized = rows.map((row) =>
+        (kind === 'RESERVATIONS'
+          ? reservationFromRow(headers, row)
+          : normalizeRecord(kind, record(headers, row))) as unknown as RecordValue
+      )
+      if (new Set(normalized.map((r) => r.id)).size !== normalized.length)
+        throw new Error(`${kind}に重複IDがあります`)
+      let sheetId = properties?.sheetId
+      let backup: string | undefined
+      if (sheetId == null) {
+        const added = await sheets.spreadsheets.batchUpdate({
+          spreadsheetId: spreadsheetId(),
+          requestBody: {
+            requests: [{ addSheet: { properties: { title: names[kind] } } }],
+          },
+        })
+        sheetId =
+          added.data.replies?.[0].addSheet?.properties?.sheetId ?? undefined
+      } else if (populated) {
+        backup = `${names[kind]}_backup_${Date.now()}_${kind}`
+        await sheets.spreadsheets.batchUpdate({
+          spreadsheetId: spreadsheetId(),
+          requestBody: {
+            requests: [
+              {
+                duplicateSheet: {
+                  sourceSheetId: sheetId,
+                  newSheetName: backup,
+                },
+              },
+            ],
+          },
+        })
+      }
+      if (sheetId == null) throw new Error('シートIDを取得できません')
+      const output = [
+        target,
+        ...normalized.map((v) => target.map((h) => cell(v[h]))),
+      ]
+      // 行位置変更による参照消失を避け、IDを保持する。空行の圧縮は移行時だけ行う。
+      const requests = [
+        {
+          updateSheetProperties: {
+            properties: {
+              sheetId,
+              gridProperties: {
+                columnCount: Math.max(
+                  target.length,
+                  properties?.gridProperties?.columnCount ?? 26
+                ),
+                rowCount: Math.max(
+                  output.length,
+                  properties?.gridProperties?.rowCount ?? 1000
+                ),
+              },
+            },
+            fields: 'gridProperties.columnCount,gridProperties.rowCount',
+          },
+        },
+        {
+          updateCells: {
+            range: {
+              sheetId,
+              startRowIndex: 0,
+              endRowIndex: Math.max(output.length, values.length),
+              startColumnIndex: 0,
+              endColumnIndex: target.length,
+            },
+            rows: output.map((row) => ({
+              values: row.map((v) => ({
+                userEnteredValue: { stringValue: v },
+              })),
+            })),
+            fields: 'userEnteredValue',
+          },
+        },
+      ]
+      await sheets.spreadsheets.batchUpdate({
+        spreadsheetId: spreadsheetId(),
+        requestBody: { requests },
+      })
+      results.push({
+        kind,
+        status: populated ? 'migrated' : 'initialized',
+        rowCount: rows.length,
+        backup,
+      })
+    }
+    return results
+  })
 }

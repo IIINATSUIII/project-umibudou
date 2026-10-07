@@ -3,6 +3,11 @@ import { randomBytes } from 'crypto'
 import { DataStoreError, store, USE_POSTGRES } from '@/lib/dataStore'
 import type { QuestionnaireData, QuestionnaireFormData, Customer } from '@/types'
 import { nextCustomerId } from '@/lib/questionnaireUtils'
+import { findReservationByQuestionnaireToken } from '@/lib/questionnaireToken'
+import { isQuestionnaireReservationAllowed } from '@/lib/reservationStatus'
+import { completedQuestionnairesForReservation, hasAllGuestQuestionnaires } from '@/lib/questionnaireCompletion'
+import { validateSubmission } from '@/lib/questionnaireSubmission'
+import { normalizeQuestionnaireExperience } from '@/lib/questionnaireExperience'
 
 export const runtime = 'nodejs'
 
@@ -56,8 +61,10 @@ function healthNotes(questionnaire: QuestionnaireData): string {
 
 const LAST_DIVE_OPTIONS = ['1ヶ月以内', '半年以内', '1年以内', '1年以上', '初めて']
 
-function successResponse(questionnaire: QuestionnaireData): NextResponse {
-  return NextResponse.json({
+export const dynamic = 'force-dynamic'
+
+function successPayload(questionnaire: QuestionnaireData) {
+  return {
     ok: true,
     questionnaireId: questionnaire.id,
     qrToken: questionnaire.qrToken,
@@ -66,6 +73,12 @@ function successResponse(questionnaire: QuestionnaireData): NextResponse {
     firstName: questionnaire.firstName,
     lastNameKana: questionnaire.lastNameKana,
     firstNameKana: questionnaire.firstNameKana,
+  }
+}
+
+function successResponse(questionnaire: QuestionnaireData): NextResponse {
+  return NextResponse.json(successPayload(questionnaire), {
+    headers: { 'Cache-Control': 'no-store' },
   })
 }
 
@@ -98,6 +111,39 @@ export async function POST(req: NextRequest) {
   return response ?? NextResponse.json({ error: 'Failed to save questionnaire' }, { status: 500 })
 }
 
+/** Newer questionnaire pages use the opaque reservation access token. */
+export async function GET(req: NextRequest) {
+  try {
+    const token = req.nextUrl.searchParams.get('accessToken') || ''
+    const reservation = findReservationByQuestionnaireToken(
+      await store.getReservations(),
+      token,
+    )
+    if (!reservation) {
+      return NextResponse.json(
+        { error: '予約URLが無効、または期限切れです' },
+        { status: 404, headers: { 'Cache-Control': 'no-store' } },
+      )
+    }
+    const questionnaires = await store.getQuestionnaires()
+    const completedQuestionnaires = completedQuestionnairesForReservation(reservation, questionnaires)
+      .sort((a, b) => b.submittedAt.localeCompare(a.submittedAt))
+    const questionnaire = completedQuestionnaires[0]
+    const submitted = hasAllGuestQuestionnaires(reservation, questionnaires)
+    return NextResponse.json(
+      submitted && questionnaire
+        ? { ...successPayload(questionnaire), submitted: true }
+        : { submitted: false },
+      { headers: { 'Cache-Control': 'no-store' } },
+    )
+  } catch {
+    return NextResponse.json(
+      { error: '送信状態を確認できませんでした' },
+      { status: 500, headers: { 'Cache-Control': 'no-store' } },
+    )
+  }
+}
+
 async function handlePost(req: NextRequest): Promise<NextResponse> {
   try {
     const body: unknown = await req.json()
@@ -105,8 +151,9 @@ async function handlePost(req: NextRequest): Promise<NextResponse> {
       return NextResponse.json({ error: '入力内容を確認してください' }, { status: 400 })
     }
     const values = body as Record<string, unknown>
+    const accessToken = stringValue(values.accessToken)
     const reservationId = stringValue(values.reservationId)
-    const reservationToken = stringValue(values.reservationToken)
+    const reservationToken = stringValue(values.reservationToken) || accessToken
     const submissionId = stringValue(values.submissionId)
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(submissionId)) {
       return NextResponse.json({ error: '送信IDが不正です。ページを再読み込みしてください' }, { status: 400 })
@@ -114,8 +161,16 @@ async function handlePost(req: NextRequest): Promise<NextResponse> {
 
     // 実在する予約に対する提出のみ受け付ける
     const reservations = await store.getReservations()
-    const reservation = reservations.find((r) => r.id === reservationId)
-    if (!reservation || !reservation.questionnaireToken || reservationToken !== reservation.questionnaireToken) {
+    const reservation = accessToken
+      ? reservations.find((r) => r.questionnaireToken === accessToken)
+      : reservations.find((r) => r.id === reservationId)
+    const resolvedReservationId = reservation?.id ?? reservationId
+    if (
+      !reservation ||
+      !isQuestionnaireReservationAllowed(reservation.status) ||
+      !reservation.questionnaireToken ||
+      reservationToken !== reservation.questionnaireToken
+    ) {
       return NextResponse.json({ error: '予約が見つかりません' }, { status: 404 })
     }
 
@@ -123,7 +178,7 @@ async function handlePost(req: NextRequest): Promise<NextResponse> {
     const priorQuestionnaire = questionnaires.find(
       (questionnaire) => questionnaire.submissionId === submissionId
     )
-    if (priorQuestionnaire && priorQuestionnaire.reservationId !== reservationId) {
+    if (priorQuestionnaire && priorQuestionnaire.reservationId !== resolvedReservationId) {
       return NextResponse.json({ error: '送信IDは別の予約で使用済みです' }, { status: 409 })
     }
 
@@ -142,11 +197,23 @@ async function handlePost(req: NextRequest): Promise<NextResponse> {
       }
     }
 
+    const modernForm = values.sleepCategory !== undefined || values.lastDivePeriod !== undefined
+    const experience = modernForm
+      ? normalizeQuestionnaireExperience(values)
+      : undefined
     const gender = values.gender
     const condition = values.condition
     const sleepHours = Number(values.sleepHours)
     const totalDives = Number(values.totalDives)
-    if (
+    if (modernForm) {
+      const errors = validateSubmission(values)
+      if (Object.keys(errors).length) {
+        return NextResponse.json(
+          { error: '入力内容を確認してください', errors },
+          { status: 400 },
+        )
+      }
+    } else if (
       !['male', 'female', 'other'].includes(String(gender)) ||
       !['good', 'normal', 'bad'].includes(String(condition)) ||
       !Number.isInteger(sleepHours) || sleepHours < 1 || sleepHours > 12 ||
@@ -170,7 +237,9 @@ async function handlePost(req: NextRequest): Promise<NextResponse> {
       emergencyRelation: stringValue(values.emergencyRelation),
       emergencyPhone: stringValue(values.emergencyPhone),
       heartDisease: values.heartDisease === true,
-      highBloodPressure: values.highBloodPressure === true,
+      highBloodPressure: values.highBloodPressure === true || values.hypertension === true,
+      hypertension: values.hypertension === true || values.highBloodPressure === true,
+      medicalCertificate: values.medicalCertificate === true,
       respiratoryDisease: values.respiratoryDisease === true,
       earDisease: values.earDisease === true,
       epilepsy: values.epilepsy === true,
@@ -180,22 +249,26 @@ async function handlePost(req: NextRequest): Promise<NextResponse> {
       medication: values.medication === true,
       medicationName: stringValue(values.medicationName),
       latexAllergy: values.latexAllergy === true,
-      sleepHours,
+      sleepHours: modernForm ? null : sleepHours,
+      sleepCategory: stringValue(values.sleepCategory),
       alcoholLastNight: values.alcoholLastNight === true,
       alcoholToday: values.alcoholToday === true,
       condition: condition as QuestionnaireFormData['condition'],
-      conditionDetails: stringValue(values.conditionDetails),
+      conditionDetails: stringValue(experience?.conditionDetails ?? values.conditionDetails),
       flightWithin48h: values.flightWithin48h === true,
       hasCCard: values.hasCCard === true,
       cCardType: stringValue(values.cCardType),
-      cCardOrg: stringValue(values.cCardOrg),
-      lastDiveDate: stringValue(values.lastDiveDate),
-      totalDives,
+      cCardOrg: stringValue(experience?.cCardOrg ?? values.cCardOrg),
+      lastDiveDate: modernForm ? '' : stringValue(values.lastDiveDate),
+      lastDivePeriod: stringValue(values.lastDivePeriod) || stringValue(values.lastDiveDate),
+      totalDives: modernForm
+        ? (typeof values.totalDives === 'number' ? values.totalDives : null)
+        : totalDives,
       agreeRisk: values.agreeRisk === true,
       agreeMedical: values.agreeMedical === true,
       agreePhoto: values.agreePhoto === true,
     }
-    if (
+    if (!modernForm && (
       !formData.lastName || !formData.firstName || !formData.birthDate ||
       !formData.lastNameKana || !formData.firstNameKana || !formData.email ||
       !formData.address || !formData.phone || !formData.emergencyName ||
@@ -209,7 +282,7 @@ async function handlePost(req: NextRequest): Promise<NextResponse> {
       !isValidPhone(formData.phone) ||
       !isValidPhone(formData.emergencyPhone) ||
       (formData.conditionDetails?.length ?? 0) > 500
-    ) {
+    )) {
       return NextResponse.json({ error: '必須項目を入力し、必要な同意を選択してください' }, { status: 400 })
     }
 
@@ -229,7 +302,7 @@ async function handlePost(req: NextRequest): Promise<NextResponse> {
       }
       try {
         const result = await store.submitPublicQuestionnaire({
-          reservationId,
+          reservationId: resolvedReservationId,
           reservationToken,
           submissionId,
           formData,
@@ -283,7 +356,7 @@ async function handlePost(req: NextRequest): Promise<NextResponse> {
         : priorQuestionnaire
       : await store.addQuestionnaire({
           ...formData,
-          reservationId,
+          reservationId: resolvedReservationId,
           customerId,
           submissionId,
           submittedAt,
@@ -291,6 +364,7 @@ async function handlePost(req: NextRequest): Promise<NextResponse> {
           qrToken: randomBytes(16).toString('base64url'),
           qrExpiresAt: qrExpiryForDiveDate(reservation.diveDate),
           qrUsed: false,
+          submissionState: 'pending',
           doctorDivingPermit: '',
           staffReviewStatus: emailIdentityConflict ? '要対応' : '未確認',
           staffReviewNotes: emailIdentityConflict
@@ -314,7 +388,7 @@ async function handlePost(req: NextRequest): Promise<NextResponse> {
         email: source.email ?? '',
         lastVisit: today,
         visitCount: 1,
-        countedReservationIds: JSON.stringify([reservationId]),
+        countedReservationIds: JSON.stringify([resolvedReservationId]),
         hasCCard: qData.hasCCard,
         cCardType: qData.cCardType,
         totalDives: qData.totalDives,
@@ -330,13 +404,13 @@ async function handlePost(req: NextRequest): Promise<NextResponse> {
         emergencyRelation: qData.emergencyRelation,
         emergencyPhone: qData.emergencyPhone,
         cCardOrg: qData.cCardOrg,
-        lastDivePeriod: qData.lastDiveDate,
+        lastDivePeriod: qData.lastDivePeriod || qData.lastDiveDate,
         dmConsent: '',
       }
       await store.addCustomer(newCustomer)
     } else {
       const countedIds = countedReservationIds(existing, questionnaires)
-      const alreadyCounted = countedIds.includes(reservationId)
+      const alreadyCounted = countedIds.includes(resolvedReservationId)
       await store.updateCustomer(existing.id, {
         lastName: qData.lastName,
         firstName: qData.firstName,
@@ -356,10 +430,10 @@ async function handlePost(req: NextRequest): Promise<NextResponse> {
         cCardType: qData.cCardType,
         cCardOrg: qData.cCardOrg,
         totalDives: qData.totalDives,
-        lastDivePeriod: qData.lastDiveDate,
+        lastDivePeriod: qData.lastDivePeriod || qData.lastDiveDate,
         visitCount: alreadyCounted ? existing.visitCount : existing.visitCount + 1,
         countedReservationIds: JSON.stringify(
-          alreadyCounted ? countedIds : [...countedIds, reservationId]
+          alreadyCounted ? countedIds : [...countedIds, resolvedReservationId]
         ),
         lastVisit: existing.lastVisit > today ? existing.lastVisit : today,
         updatedAt: submittedAt,
@@ -369,16 +443,21 @@ async function handlePost(req: NextRequest): Promise<NextResponse> {
     // 予約に全参加者の問診票IDを保持し、従来画面向けの単一IDも最新票へ更新する。
     const questionnaireIds = new Set<string>(
       [reservation.questionnaireId, ...(reservation.questionnaireIds ?? '').split('|'),
-        ...questionnaires.filter((questionnaire) => questionnaire.reservationId === reservationId).map((questionnaire) => questionnaire.id),
+        ...questionnaires.filter((questionnaire) => questionnaire.reservationId === resolvedReservationId).map((questionnaire) => questionnaire.id),
         qData.id]
         .filter((value): value is string => Boolean(value))
     )
-    await store.updateReservation(reservationId, {
+    await store.updateReservation(resolvedReservationId, {
       questionnaireId: qData.id,
       questionnaireIds: Array.from(questionnaireIds).join('|'),
+      questionnaireCompleted: true,
     })
 
-    return successResponse(qData)
+    const completed = await store.updateQuestionnaire(qData.id, {
+      submissionState: 'complete',
+    })
+
+    return successResponse(completed)
   } catch (err) {
     console.error('[POST /api/public/questionnaires]', err)
     return NextResponse.json({ error: 'Failed to save questionnaire' }, { status: 500 })

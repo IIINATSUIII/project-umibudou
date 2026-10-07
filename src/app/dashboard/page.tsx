@@ -4,44 +4,72 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import Navigation from '@/components/Navigation'
+import WindyWidget from '@/components/WindyWidget'
 import WeatherWidget from '@/components/WeatherWidget'
 import { useAuth } from '@/lib/authContext'
-import { fetchReservations, patchReservation } from '@/lib/api'
+import { fetchReservations, fetchQuestionnaires, patchReservation, ApiRequestError } from '@/lib/api'
+import { getStatusName } from '@/lib/masters'
 import {
   confirmedReservationStatus,
   isPendingReservationStatus,
   reservationStatusLabel,
   reservationStatusStyle,
 } from '@/lib/reservationStatus'
-import type { Reservation } from '@/types'
+import QuestionnaireUrlButton from '@/components/QuestionnaireUrlButton'
+import type { Reservation, QuestionnaireData } from '@/types'
 
-const CHANNEL_LABELS: Record<string, string> = {
-  hp: 'HP', email: 'メール', phone: '電話', ota: 'OTA', sns: 'SNS', google_form: 'Googleフォーム',
+const CHANNEL_LABELS: Record<Reservation['channel'], string> = {
+  hp: 'HP', email: 'メール', phone: '電話', ota: 'OTA', sns:'SNS',google_form:'Googleフォーム',
 }
-const TIME_SLOT_LABELS: Record<string, string> = {
-  morning: '午前', afternoon: '午後', full: '終日', unspecified: '時間未定',
+const TIME_SLOT_LABELS: Record<Reservation['timeSlot'], string> = {
+  morning: '午前', afternoon: '午後', full: '1日', unspecified: '指定なし',
+}
+const TIME_SLOT_ORDER: Record<Reservation['timeSlot'], number> = {
+  morning: 0, afternoon: 1, full: 2, unspecified: 3,
 }
 
 function displayTime(reservation: Reservation): string {
   return reservation.time || TIME_SLOT_LABELS[reservation.timeSlot] || reservation.timeSlot
 }
 
+function questionnaireIdFor(reservation: Reservation, questionnaires: QuestionnaireData[]): string | undefined {
+  const parsedIds = (() => {
+    try {
+      const value: unknown = JSON.parse(reservation.questionnaireIds ?? '[]')
+      return Array.isArray(value) ? value.filter((id): id is string => typeof id === 'string') : []
+    } catch {
+      return []
+    }
+  })()
+  return questionnaires.find((q) => q.reservationId === reservation.id)?.id ??
+    reservation.questionnaireId ?? parsedIds[0]
+}
+
+function statusLabel(status: string): string {
+  return status.startsWith('STS-') ? getStatusName(status) : reservationStatusLabel(status)
+}
+
 export default function DashboardPage() {
   const user = useAuth()
   const router = useRouter()
   const [reservations, setReservations] = useState<Reservation[]>([])
+  const [actionError,setActionError]=useState('')
+  const [questionnaires, setQuestionnaires] = useState<QuestionnaireData[]>([])
   const [loading, setLoading] = useState(true)
 
-  const today    = new Date().toISOString().slice(0, 10)
-  const tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0, 10)
+  const today    = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' })
+  const tomorrowDate = new Date()
+  tomorrowDate.setDate(tomorrowDate.getDate() + 1)
+  const tomorrow = tomorrowDate.toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' })
 
   useEffect(() => {
     if (user === undefined) return
     if (!user) { router.push('/login'); return }
-    const load = () => fetchReservations().then((data) => {
-      setReservations(data)
+    const load = () => Promise.all([fetchReservations(), fetchQuestionnaires()]).then(([res, qs]) => {
+      setReservations(res)
+      setQuestionnaires(qs)
       setLoading(false)
-    })
+    }).catch(() => { setActionError('データを読み込めませんでした。更新して再度お試しください。'); setLoading(false) })
     load()
     // 客側フォームからの申し込みを自動反映（10秒ごと＋ウィンドウ復帰時）
     const iv = setInterval(load, 10000)
@@ -51,27 +79,38 @@ export default function DashboardPage() {
 
   async function handleConfirm(id: string) {
     const reservation = reservations.find((item) => item.id === id)
-    const status = reservation ? confirmedReservationStatus(reservation) : 'STS-03'
-    await patchReservation(id, { status })
-    setReservations((prev) =>
-      prev.map((r) => r.id === id ? { ...r, status } : r)
-    )
+    if (!reservation) return
+    try {
+      const status = confirmedReservationStatus(reservation)
+      const updatedAt = await patchReservation(id, { status }, reservation.updatedAt ?? '')
+      setReservations((prev) => prev.map((r) => r.id === id ? { ...r, status, updatedAt } : r))
+      setActionError('')
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : '保存できませんでした')
+      if (err instanceof ApiRequestError && err.status === 409) setReservations(await fetchReservations())
+    }
   }
 
-  const todayRes    = reservations.filter((r) => r.diveDate === today)
-  const tomorrowRes = reservations.filter((r) => r.diveDate === tomorrow)
+  const byTimeSlot = (a: Reservation, b: Reservation) =>
+    TIME_SLOT_ORDER[a.timeSlot] - TIME_SLOT_ORDER[b.timeSlot] ||
+    (a.time ?? '').localeCompare(b.time ?? '')
+  const todayRes    = reservations.filter((r) => r.diveDate === today).sort(byTimeSlot)
+  const tomorrowRes = reservations.filter((r) => r.diveDate === tomorrow).sort(byTimeSlot)
   // 未確定の申し込みは日付に関係なくすべて表示する（客側フォームからの申し込みを見逃さないため）
   const pendingRes = reservations
     .filter((r) => isPendingReservationStatus(r.status))
-    .sort((a, b) => a.diveDate.localeCompare(b.diveDate) || (a.time ?? '').localeCompare(b.time ?? ''))
+    .sort((a, b) => a.diveDate.localeCompare(b.diveDate) || byTimeSlot(a, b))
   const totalGuests = todayRes.reduce((s, r) => s + r.guestCount, 0)
-  const withQr      = todayRes.filter((r) => r.questionnaireId || r.questionnaireIds).length
+  const withQr = todayRes.filter((r) =>
+    r.questionnaireCompleted || r.questionnaireId || r.questionnaireIds || questionnaireIdFor(r, questionnaires)
+  ).length
 
   if (loading) return <LoadingScreen />
 
   return (
     <div className="min-h-screen">
       <Navigation />
+      {actionError && <p role="alert" className="p-4 text-red-700">{actionError}</p>}
       <main className="max-w-5xl mx-auto px-4 py-6 pb-20 md:pb-6 space-y-6">
 
         {pendingRes.length > 0 && (
@@ -118,6 +157,7 @@ export default function DashboardPage() {
         </div>
 
         <WeatherWidget />
+        <WindyWidget />
 
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
           <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
@@ -131,40 +171,33 @@ export default function DashboardPage() {
             <p className="text-center text-gray-400 py-8 text-sm">今日の予約はありません</p>
           ) : (
             <div className="divide-y divide-gray-50">
-              {todayRes.map((r) => (
-                <div key={r.id} className="px-4 py-3 flex items-center gap-3">
-                  <div className="text-sm font-mono font-semibold text-ocean-600 w-12">{displayTime(r)}</div>
-                  <div className="flex-1 min-w-0">
-                    <div className="font-medium text-gray-800 text-sm">{r.guestName}（{r.guestCount}名）</div>
-                    <div className="text-xs text-gray-500">{r.courseName}</div>
+              {todayRes.map((r) => {
+                const questionnaireId = questionnaireIdFor(r, questionnaires)
+                return (
+                  <div key={r.id} className="px-4 py-3 flex items-center gap-3">
+                    <div className="text-sm font-mono font-semibold text-ocean-600 w-12">{displayTime(r)}</div>
+                    <div className="flex-1 min-w-0">
+                      <div className="font-medium text-gray-800 text-sm">{r.guestName}（{r.guestCount}名）</div>
+                      <div className="text-xs text-gray-500">{r.courseName}</div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded">
+                        {CHANNEL_LABELS[r.channel]}
+                      </span>
+                      <span className={`text-xs px-2 py-0.5 rounded ${reservationStatusStyle(r.status)}`}>
+                        {statusLabel(r.status)}
+                      </span>
+                      {questionnaireId && (
+                        <Link href={`/questionnaire/scan?id=${questionnaireId}`}
+                          className="text-xs bg-teal-50 text-teal-700 border border-teal-200 px-2 py-0.5 rounded hover:bg-teal-100">
+                          📋 問診確認
+                        </Link>
+                      )}
+                      <QuestionnaireUrlButton reservationId={r.id} onError={setActionError} />
+                    </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded">
-                      {CHANNEL_LABELS[r.channel]}
-                    </span>
-                    <span className={`text-xs px-2 py-0.5 rounded ${reservationStatusStyle(r.status)}`}>
-                      {reservationStatusLabel(r.status)}
-                    </span>
-                    {r.questionnaireId || r.questionnaireIds ? (
-                      <Link href={`/questionnaire/scan?id=${r.id}`}
-                        className="text-xs bg-teal-50 text-teal-700 border border-teal-200 px-2 py-0.5 rounded hover:bg-teal-100">
-                        📋 問診確認
-                      </Link>
-                    ) : (
-                      <Link href={`/questionnaire/${r.id}?token=${encodeURIComponent(r.questionnaireToken ?? '')}`}
-                        className="text-xs bg-orange-50 text-orange-700 border border-orange-200 px-2 py-0.5 rounded hover:bg-orange-100">
-                        📝 問診未提出
-                      </Link>
-                    )}
-                    {r.questionnaireId && (
-                      <Link href={`/questionnaire/${r.id}?token=${encodeURIComponent(r.questionnaireToken ?? '')}`}
-                        className="text-xs text-ocean-700 border border-ocean-200 px-2 py-0.5 rounded hover:bg-ocean-50">
-                        📝 追加参加者
-                      </Link>
-                    )}
-                  </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
           )}
         </div>
@@ -183,7 +216,7 @@ export default function DashboardPage() {
                     <div className="text-xs text-gray-400">{r.courseName}</div>
                   </div>
                   <span className={`text-xs px-2 py-0.5 rounded ${reservationStatusStyle(r.status)}`}>
-                    {reservationStatusLabel(r.status)}
+                    {statusLabel(r.status)}
                   </span>
                 </div>
               ))}

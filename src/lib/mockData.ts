@@ -1,69 +1,109 @@
 import type { Reservation, Customer, QuestionnaireData } from '@/types'
+import { CONFIRMED_STATUS_ID, DEFAULT_STATUS_ID } from './masters'
 
 // ─── 予約データ ────────────────────────────────────────────
 const today = new Date().toISOString().slice(0, 10)
 const tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0, 10)
+const now = new Date().toISOString()
 
 export const MOCK_RESERVATIONS: Reservation[] = [
   {
-    id: 'R001',
+    id: `R-${today.replace(/-/g, '')}-001`,
+    createdAt: now,
+    updatedAt: now,
+    customerId: 'C002',
+    guestName: '田中 花子',
+    guestPhone: '090-1234-5678',
+    guestEmail: 'tanaka@example.com',
     diveDate: today,
     time: '09:00',
-    timeSlot: 'unspecified',
+    legacyTime: '09:00',
+    timeSlot: 'morning',
+    courseId: 'CRS-001',
     courseName: '体験ダイビング',
-    guestName: '田中 花子',
     guestCount: 2,
-    guestPhone: '090-1234-5678',
+    status: CONFIRMED_STATUS_ID,
+    staffId: 'STF-001',
+    staffName: '外間 健',
     channel: 'hp',
-    status: 'confirmed',
+    questionnaireCompleted: true,
     questionnaireId: 'Q001',
     staffNote: 'カップル。写真希望あり',
   },
   {
-    id: 'R002',
+    id: `R-${today.replace(/-/g, '')}-002`,
+    createdAt: now,
+    updatedAt: now,
+    customerId: 'C001',
+    guestName: '鈴木 太郎',
+    guestPhone: '080-9876-5432',
+    guestEmail: '',
     diveDate: today,
     time: '13:00',
-    timeSlot: 'unspecified',
+    legacyTime: '13:00',
+    timeSlot: 'afternoon',
+    courseId: 'CRS-002',
     courseName: 'ファンダイビング（2本）',
-    guestName: '鈴木 太郎',
     guestCount: 1,
-    guestPhone: '080-9876-5432',
+    status: CONFIRMED_STATUS_ID,
+    staffId: 'STF-001',
+    staffName: '外間 健',
     channel: 'phone',
-    status: 'confirmed',
+    questionnaireCompleted: false,
     staffNote: 'AOW 総本数150本',
   },
   {
-    id: 'R003',
+    id: `R-${today.replace(/-/g, '')}-003`,
+    createdAt: now,
+    updatedAt: now,
+    guestName: '山田 家族',
+    guestPhone: '070-1111-2222',
+    guestEmail: '',
     diveDate: today,
     time: '09:30',
-    timeSlot: 'unspecified',
+    legacyTime: '09:30',
+    timeSlot: 'morning',
+    courseId: 'CRS-001',
     courseName: '体験ダイビング',
-    guestName: '山田 家族',
     guestCount: 3,
-    guestPhone: '070-1111-2222',
+    status: DEFAULT_STATUS_ID,
     channel: 'ota',
-    status: 'pending',
+    questionnaireCompleted: false,
   },
   {
-    id: 'R004',
+    id: `R-${tomorrow.replace(/-/g, '')}-001`,
+    createdAt: now,
+    updatedAt: now,
+    customerId: 'C001',
+    guestName: '佐藤 一郎',
+    guestPhone: '090-3333-4444',
+    guestEmail: '',
     diveDate: tomorrow,
     time: '09:00',
-    timeSlot: 'unspecified',
+    legacyTime: '09:00',
+    timeSlot: 'morning',
+    courseId: 'CRS-004',
     courseName: 'ナイトダイビング',
-    guestName: '佐藤 一郎',
     guestCount: 2,
-    guestPhone: '090-3333-4444',
-    channel: 'sns',
-    status: 'confirmed',
+    status: CONFIRMED_STATUS_ID,
+    staffId: 'STF-002',
+    staffName: '知念 美咲',
+    channel: 'email',
+    legacyChannel: 'sns',
+    questionnaireCompleted: true,
     questionnaireId: 'Q002',
   },
 ]
+const RES_ID = {
+  R1: MOCK_RESERVATIONS[0].id,
+  R4: MOCK_RESERVATIONS[3].id,
+}
 
 // ─── 問診票データ ───────────────────────────────────────────
 export const MOCK_QUESTIONNAIRES: QuestionnaireData[] = [
   {
     id: 'Q001',
-    reservationId: 'R001',
+    reservationId: RES_ID.R1,
     submittedAt: new Date().toISOString(),
     lastName: '田中',
     firstName: '花子',
@@ -102,7 +142,7 @@ export const MOCK_QUESTIONNAIRES: QuestionnaireData[] = [
   },
   {
     id: 'Q002',
-    reservationId: 'R004',
+    reservationId: RES_ID.R4,
     submittedAt: new Date(Date.now() - 3600000).toISOString(),
     lastName: '佐藤',
     firstName: '一郎',
@@ -192,34 +232,3 @@ export const MOCK_CUSTOMERS: Customer[] = [
     guideNotes: '常連。深場好き。マンタシーズンには必ず来店。リクエストはいつも久米島。',
   },
 ]
-
-// ─── localStorage との同期ユーティリティ ──────────────────────
-export function getReservations(): Reservation[] {
-  if (typeof window === 'undefined') return MOCK_RESERVATIONS
-  const stored = localStorage.getItem('reservations')
-  return stored ? JSON.parse(stored) : MOCK_RESERVATIONS
-}
-
-export function saveReservations(data: Reservation[]) {
-  localStorage.setItem('reservations', JSON.stringify(data))
-}
-
-export function getQuestionnaires(): QuestionnaireData[] {
-  if (typeof window === 'undefined') return MOCK_QUESTIONNAIRES
-  const stored = localStorage.getItem('questionnaires')
-  return stored ? JSON.parse(stored) : MOCK_QUESTIONNAIRES
-}
-
-export function saveQuestionnaires(data: QuestionnaireData[]) {
-  localStorage.setItem('questionnaires', JSON.stringify(data))
-}
-
-export function getCustomers(): Customer[] {
-  if (typeof window === 'undefined') return MOCK_CUSTOMERS
-  const stored = localStorage.getItem('customers')
-  return stored ? JSON.parse(stored) : MOCK_CUSTOMERS
-}
-
-export function saveCustomers(data: Customer[]) {
-  localStorage.setItem('customers', JSON.stringify(data))
-}

@@ -24,10 +24,12 @@ const QUESTIONNAIRE_COLUMNS = [
   'last_name_kana', 'first_name_kana', 'birth_date', 'gender', 'postal_code', 'address', 'phone', 'email',
   'emergency_name', 'emergency_relation', 'emergency_phone', 'heart_disease', 'high_blood_pressure',
   'respiratory_disease', 'ear_disease', 'epilepsy', 'diabetes', 'pregnant', 'panic_disorder', 'medication',
-  'medication_name', 'latex_allergy', 'sleep_hours', 'alcohol_last_night', 'alcohol_today', 'condition',
-  'condition_details', 'flight_within_48h', 'has_c_card', 'c_card_type', 'c_card_org', 'last_dive_date',
+  'medication_name', 'latex_allergy', 'sleep_hours', 'sleep_category', 'alcohol_last_night', 'alcohol_today',
+  'condition', 'condition_details', 'flight_within_48h', 'has_c_card', 'c_card_type', 'c_card_org', 'last_dive_date',
+  'last_dive_period',
   'total_dives', 'agree_risk', 'agree_medical', 'agree_photo', 'consent_at', 'qr_token', 'qr_expires_at',
-  'qr_used', 'doctor_diving_permit', 'staff_review_status', 'staff_review_notes', 'raw_legacy',
+  'qr_used', 'doctor_diving_permit', 'staff_review_status', 'staff_review_notes', 'medical_certificate',
+  'doctor_clearance', 'staff_check_status', 'staff_check_note', 'submission_state', 'raw_legacy',
 ]
 const CUSTOMER_COLUMNS = [
   'id', 'last_name', 'first_name', 'last_name_kana', 'first_name_kana', 'phone', 'email', 'last_visit',
@@ -246,6 +248,17 @@ export function buildRows(sourceRows, sourceKind, issues) {
       } else if (entity === 'questionnaires') {
         const timestamp = (field, required = false) => parseTimestamp(source[field], { entity, id, field, required }, issues)
         const bool = (field) => parseBoolean(source[field], { entity, id, field }, issues)
+        const sleepHours = parseNumber(source.sleepHours, 0, { entity, id, field: 'sleepHours' }, issues)
+        const hasLegacySleepHours = source.sleepHours !== null && source.sleepHours !== undefined && source.sleepHours !== ''
+        const sleepCategory = rawText(source.sleepCategory) || (
+          !hasLegacySleepHours ? ''
+            : sleepHours >= 6 ? '6時間以上'
+              : sleepHours >= 4 ? '4時間以上6時間未満'
+                : '4時間未満'
+        )
+        const totalDives = source.totalDives === null || source.totalDives === undefined || source.totalDives === ''
+          ? null
+          : parseNumber(source.totalDives, null, { entity, id, field: 'totalDives', integer: true }, issues)
         const row = {
           id,
           reservation_id: requiredText(source.reservationId, entity, id, 'reservationId', issues),
@@ -276,7 +289,8 @@ export function buildRows(sourceRows, sourceKind, issues) {
           medication: bool('medication'),
           medication_name: rawText(source.medicationName),
           latex_allergy: bool('latexAllergy'),
-          sleep_hours: parseNumber(source.sleepHours, 0, { entity, id, field: 'sleepHours' }, issues),
+          sleep_hours: sleepHours,
+          sleep_category: sleepCategory,
           alcohol_last_night: bool('alcoholLastNight'),
           alcohol_today: bool('alcoholToday'),
           condition: rawText(source.condition),
@@ -286,7 +300,8 @@ export function buildRows(sourceRows, sourceKind, issues) {
           c_card_type: rawText(source.cCardType),
           c_card_org: rawText(source.cCardOrg),
           last_dive_date: rawText(source.lastDiveDate),
-          total_dives: parseNumber(source.totalDives, 0, { entity, id, field: 'totalDives', integer: true }, issues),
+          last_dive_period: rawText(source.lastDivePeriod) || rawText(source.lastDiveDate),
+          total_dives: totalDives,
           agree_risk: bool('agreeRisk'),
           agree_medical: bool('agreeMedical'),
           agree_photo: bool('agreePhoto'),
@@ -297,6 +312,11 @@ export function buildRows(sourceRows, sourceKind, issues) {
           doctor_diving_permit: rawText(source.doctorDivingPermit),
           staff_review_status: rawText(source.staffReviewStatus),
           staff_review_notes: rawText(source.staffReviewNotes),
+          medical_certificate: bool('medicalCertificate'),
+          doctor_clearance: rawText(source.doctorClearance),
+          staff_check_status: rawText(source.staffCheckStatus) || '未確認',
+          staff_check_note: rawText(source.staffCheckNote),
+          submission_state: rawText(source.submissionState) || 'complete',
           raw_legacy: legacy,
         }
         rows.questionnaires.push(row)
@@ -592,6 +612,12 @@ async function ensureSchema(client) {
        AND column_name = 'raw_legacy'`,
   )
   if (columns.rowCount !== 3) throw new Error('The legacy JSON preservation migration is missing')
+  const sleepCategory = await client.query(
+    `SELECT 1 FROM information_schema.columns
+     WHERE table_schema = 'public' AND table_name = 'questionnaires'
+       AND column_name = 'sleep_category'`,
+  )
+  if (!sleepCategory.rowCount) throw new Error('The questionnaire sleep category migration is missing')
 }
 
 function insertBatchSql(table, columns, rows) {
