@@ -6,6 +6,7 @@ import type { Customer, QuestionnaireData, QuestionnaireFormData } from '@/types
 import { saveSubmission, SubmissionValidationError, validateSubmission } from '@/lib/questionnaireSubmission'
 import { normalizeQuestionnaireExperience } from '@/lib/questionnaireExperience'
 import { withStoreWriteLock } from '@/lib/storeLock'
+import { getQrError } from '@/lib/questionnaireToken'
 
 export const runtime = 'nodejs'
 
@@ -140,9 +141,11 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: '検索語が長すぎます' }, { status: 400 })
     }
     const matches = await store.searchQuestionnaires(query)
-    const qrMatch = matches.find((questionnaire) => questionnaire.qrToken === query)
-    if (qrMatch?.qrExpiresAt && new Date(qrMatch.qrExpiresAt).getTime() <= Date.now()) {
-      return NextResponse.json({ error: 'QR_EXPIRED' }, { status: 410 })
+    const qrMatch = matches.find(
+      (questionnaire) => questionnaire.qrToken === query
+    )
+    if (qrMatch && getQrError(qrMatch)) {
+      return NextResponse.json({ error: getQrError(qrMatch) }, { status: 410 })
     }
     return NextResponse.json(matches.map((questionnaire) => ({
       id: questionnaire.id,

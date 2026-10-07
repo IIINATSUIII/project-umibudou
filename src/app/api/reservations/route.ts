@@ -9,6 +9,7 @@ import {
   ReservationConflictError,
 } from '@/lib/reservations'
 import { CONFIRMED_STATUS_ID, STATUSES } from '@/lib/masters'
+import { MSG } from '@/lib/messages'
 import {
   validateNewReservationInput,
   ReservationValidationError,
@@ -56,7 +57,12 @@ export async function GET(req: NextRequest) {
     return NextResponse.json(date ? reservations.filter((r) => r.diveDate === date) : reservations)
   } catch (err) {
     console.error('[GET /api/reservations]', err)
-    return NextResponse.json({ error: 'Failed to fetch reservations' }, { status: 500 })
+    if (err instanceof RateLimitedError)
+      return NextResponse.json({ error: MSG.RATE_LIMITED }, { status: 503 })
+    return NextResponse.json(
+      { error: 'Failed to fetch reservations' },
+      { status: 500 }
+    )
   }
 }
 
@@ -139,7 +145,10 @@ export async function POST(req: NextRequest) {
     if (err instanceof ReservationValidationError) {
       return NextResponse.json({ error: 'VALIDATION_ERROR', message: err.message, fields: err.fields }, { status: 400 })
     }
-    if (err instanceof StoreBusyError || err instanceof RateLimitedError) {
+    if (err instanceof RateLimitedError) {
+      return NextResponse.json({ error: MSG.RATE_LIMITED }, { status: 503 })
+    }
+    if (err instanceof StoreBusyError) {
       return NextResponse.json({ error: '保存処理中です。時間をおいて再度お試しください。' }, { status: 503 })
     }
     console.error('[POST /api/reservations]', err)
@@ -162,6 +171,9 @@ export async function PATCH(req: NextRequest) {
     if (!expectedUpdatedAt) return NextResponse.json({ error: '読込時の更新日時が必要です' }, { status: 400 })
     const allowed = ['status', 'staffId', 'staffNote', 'divePoint', 'diveDate', 'date', 'time', 'timeSlot', 'courseId', 'courseName', 'course', 'guestName', 'guestPhone', 'phone', 'guestEmail', 'guestCount', 'notes']
     const rawDelta = Object.fromEntries(Object.entries(values).filter(([key]) => allowed.includes(key)))
+    if (Object.keys(rawDelta).length === 0) {
+      return NextResponse.json({ error: '更新項目がありません' }, { status: 400 })
+    }
     if (Object.entries(rawDelta).some(([key, value]) => key === 'guestCount'
       ? typeof value !== 'number' || !Number.isInteger(value) || value < 1 || value > 20
       : typeof value !== 'string')) {
@@ -188,7 +200,10 @@ export async function PATCH(req: NextRequest) {
     if (err instanceof ReservationConflictError) {
       return NextResponse.json({ error: err.message, conflict: true }, { status: 409 })
     }
-    if (err instanceof StoreBusyError || err instanceof RateLimitedError) {
+    if (err instanceof RateLimitedError) {
+      return NextResponse.json({ error: MSG.RATE_LIMITED }, { status: 503 })
+    }
+    if (err instanceof StoreBusyError) {
       return NextResponse.json({ error: '保存処理中です。時間をおいて再度お試しください。' }, { status: 503 })
     }
     return NextResponse.json({ error: 'Failed to update reservation' }, { status: 500 })

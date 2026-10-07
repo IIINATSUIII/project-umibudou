@@ -1,5 +1,5 @@
 import { nextUpdatedAt } from './updateVersion'
-import { randomUUID, randomBytes } from 'crypto'
+import { randomUUID } from 'crypto'
 import { store } from './dataStore'
 import { withStoreWriteLock } from './storeLock'
 import { HEADERS } from './storeSchema'
@@ -15,7 +15,7 @@ import {
   nextCustomerId,
   type CustomerSource,
 } from './customerRegistration'
-import { getQuestionnaireExpiry } from './questionnaireToken'
+import { getQuestionnaireExpiry, generateQrToken } from './questionnaireToken'
 import type { QuestionnaireData, Reservation, Customer } from '@/types'
 
 export function validateSubmission(value: unknown): Record<string, string> {
@@ -91,7 +91,7 @@ export async function saveSubmission(
         submittedAt,
         customerId: customer?.id || nextCustomerId(customers),
         consentAt: submittedAt,
-        qrToken: randomBytes(32).toString('base64url'),
+        qrToken: generateQrToken(),
         qrIssuedAt: submittedAt,
         qrExpiresAt: getQuestionnaireExpiry(reservation.diveDate),
         qrUsed: false,
@@ -105,7 +105,7 @@ export async function saveSubmission(
     // 元37列や途中保存の回答にも受付トークンを発行する。回答・問診IDは変更しない。
     if (!q.qrToken || !Number.isFinite(Date.parse(q.qrExpiresAt || ''))) {
       const qr = {
-        qrToken: q.qrToken || randomBytes(32).toString('base64url'),
+        qrToken: q.qrToken || generateQrToken(),
         qrIssuedAt: q.qrIssuedAt || new Date().toISOString(),
         qrExpiresAt: getQuestionnaireExpiry(reservation.diveDate),
       }

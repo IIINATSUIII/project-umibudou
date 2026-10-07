@@ -3,11 +3,14 @@ import { randomBytes } from 'crypto'
 import { DataStoreError, store, USE_POSTGRES } from '@/lib/dataStore'
 import type { QuestionnaireData, QuestionnaireFormData, Customer } from '@/types'
 import { nextCustomerId } from '@/lib/questionnaireUtils'
-import { findReservationByQuestionnaireToken } from '@/lib/questionnaireToken'
+import { findReservationByQuestionnaireToken, getQrError } from '@/lib/questionnaireToken'
 import { isQuestionnaireReservationAllowed } from '@/lib/reservationStatus'
 import { completedQuestionnairesForReservation, hasAllGuestQuestionnaires } from '@/lib/questionnaireCompletion'
 import { validateSubmission } from '@/lib/questionnaireSubmission'
 import { normalizeQuestionnaireExperience } from '@/lib/questionnaireExperience'
+import { StoreBusyError, withStoreWriteLock } from '@/lib/storeLock'
+import { MSG } from '@/lib/messages'
+import { RateLimitedError } from '@/lib/withRetry'
 
 export const runtime = 'nodejs'
 
@@ -93,22 +96,22 @@ function qrExpiryForDiveDate(diveDate: string): string {
   return expiry.toISOString()
 }
 
-/**
- * POST /api/public/questionnaires — 問診票提出（ログイン不要）
- * 提出に伴う「予約への紐付け」「顧客台帳への反映」はすべてサーバー側で行う。
- * 客側に顧客台帳を読ませない・予約を任意に書き換えさせないための境界。
- */
-let submissionQueue: Promise<void> = Promise.resolve()
-
 export async function POST(req: NextRequest) {
-  let response: NextResponse | null = null
-  const submit = async () => {
-    response = await handlePost(req)
+  if (USE_POSTGRES) return handlePost(req)
+  try {
+    // Legacy Sheets/JSON stores need the shared lock for the multi-write flow.
+    // PostgreSQL uses the cross-instance transaction in submitPublicQuestionnaire.
+    return await withStoreWriteLock(() => handlePost(req))
+  } catch (err) {
+    if (err instanceof StoreBusyError) {
+      return NextResponse.json({ error: err.message }, { status: 503, headers: { 'Cache-Control': 'no-store' } })
+    }
+    if (err instanceof RateLimitedError) {
+      return NextResponse.json({ error: MSG.RATE_LIMITED }, { status: 503, headers: { 'Cache-Control': 'no-store' } })
+    }
+    console.error('[POST /api/public/questionnaires]', err)
+    return NextResponse.json({ error: '保存結果を確認できません。時間をおいて再送してください' }, { status: 500 })
   }
-  const pending = submissionQueue.then(submit, submit)
-  submissionQueue = pending.then(() => undefined, () => undefined)
-  await pending
-  return response ?? NextResponse.json({ error: 'Failed to save questionnaire' }, { status: 500 })
 }
 
 /** Newer questionnaire pages use the opaque reservation access token. */
@@ -130,6 +133,12 @@ export async function GET(req: NextRequest) {
       .sort((a, b) => b.submittedAt.localeCompare(a.submittedAt))
     const questionnaire = completedQuestionnaires[0]
     const submitted = hasAllGuestQuestionnaires(reservation, questionnaires)
+    if (submitted && questionnaire && getQrError(questionnaire)) {
+      return NextResponse.json(
+        { error: '受付QRが使用済みまたは期限切れです' },
+        { status: 410, headers: { 'Cache-Control': 'no-store' } },
+      )
+    }
     return NextResponse.json(
       submitted && questionnaire
         ? { ...successPayload(questionnaire), submitted: true }
@@ -146,7 +155,7 @@ export async function GET(req: NextRequest) {
 
 async function handlePost(req: NextRequest): Promise<NextResponse> {
   try {
-    const body: unknown = await req.json()
+    const body: unknown = await req.json().catch(() => null)
     if (!body || typeof body !== 'object' || Array.isArray(body)) {
       return NextResponse.json({ error: '入力内容を確認してください' }, { status: 400 })
     }
@@ -180,6 +189,12 @@ async function handlePost(req: NextRequest): Promise<NextResponse> {
     )
     if (priorQuestionnaire && priorQuestionnaire.reservationId !== resolvedReservationId) {
       return NextResponse.json({ error: '送信IDは別の予約で使用済みです' }, { status: 409 })
+    }
+    if (priorQuestionnaire?.submissionState === 'complete' && getQrError(priorQuestionnaire)) {
+      return NextResponse.json(
+        { error: '受付QRが使用済みまたは期限切れです' },
+        { status: 410, headers: { 'Cache-Control': 'no-store' } },
+      )
     }
 
     // 同じ送信IDですでに保存済みの問診票は、部分失敗からの再開として期限後も処理する。
@@ -459,7 +474,16 @@ async function handlePost(req: NextRequest): Promise<NextResponse> {
 
     return successResponse(completed)
   } catch (err) {
+    if (err instanceof StoreBusyError) {
+      return NextResponse.json({ error: err.message }, { status: 503, headers: { 'Cache-Control': 'no-store' } })
+    }
+    if (err instanceof RateLimitedError) {
+      return NextResponse.json({ error: MSG.RATE_LIMITED }, { status: 503, headers: { 'Cache-Control': 'no-store' } })
+    }
     console.error('[POST /api/public/questionnaires]', err)
-    return NextResponse.json({ error: 'Failed to save questionnaire' }, { status: 500 })
+    return NextResponse.json(
+      { error: '保存結果を確認できません。時間をおいて再送してください' },
+      { status: 500, headers: { 'Cache-Control': 'no-store' } },
+    )
   }
 }

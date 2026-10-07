@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { createReservation } from '@/lib/reservations'
 import { store } from '@/lib/dataStore'
 import { DEFAULT_STATUS_ID, getCourseName } from '@/lib/masters'
 import { generateReservationId } from '@/lib/reservations'
@@ -7,6 +8,9 @@ import { normalizeReservationInput } from '@/lib/reservationNormalization'
 import { generateQuestionnaireToken, getQuestionnaireExpiry } from '@/lib/questionnaireToken'
 import { withStoreWriteLock } from '@/lib/storeLock'
 import type { ReservationInput, ReservationTimeSlot } from '@/types'
+import { MSG } from '@/lib/messages'
+import { RateLimitedError } from '@/lib/withRetry'
+import { ReservationValidationError } from '@/lib/reservationValidation'
 
 export const runtime = 'nodejs'
 
@@ -61,6 +65,22 @@ export async function POST(req: NextRequest) {
           status: DEFAULT_STATUS_ID,
         }, { allowOta: false, allowPastDate: false })
       : undefined
+
+    // Use the shared reservation service for the current form contract. The legacy
+    // alias path below remains for clients that still submit date/course/phone.
+    if (validated?.ok && !exactTime) {
+      const saved = await createReservation({
+        ...validated.data,
+        channel: 'hp',
+        status: DEFAULT_STATUS_ID,
+      })
+      return NextResponse.json({
+        ok: true,
+        id: saved.id,
+        questionnaireToken: saved.questionnaireToken,
+        questionnaireTokenExpiresAt: saved.questionnaireTokenExpiresAt,
+      })
+    }
 
     if (validated && !validated.ok) {
       return NextResponse.json({
@@ -118,6 +138,16 @@ export async function POST(req: NextRequest) {
     })
   } catch (err) {
     console.error('[POST /api/public/bookings]', err)
+    if (err instanceof ReservationValidationError) {
+      return NextResponse.json({
+        error: 'VALIDATION_ERROR',
+        message: err.message,
+        fields: err.fields,
+      }, { status: 400 })
+    }
+    if (err instanceof RateLimitedError) {
+      return NextResponse.json({ error: MSG.RATE_LIMITED }, { status: 503 })
+    }
     return NextResponse.json({ error: 'Failed to create booking' }, { status: 500 })
   }
 }

@@ -13,6 +13,8 @@ const PUBLIC_PATHS = [
 ]
 
 function isPublic(pathname: string): boolean {
+  // Staff-only scan must stay protected even though /questionnaire/[id] is public.
+  if (pathname === '/questionnaire/scan' || pathname.startsWith('/questionnaire/scan/')) return false
   // The handler still requires its own CRON_SECRET bearer token.
   if (pathname === '/api/cron/sheets-outbox') return true
   if (PUBLIC_PATHS.some((p) => pathname.startsWith(p))) return true
