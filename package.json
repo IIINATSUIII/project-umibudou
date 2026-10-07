@@ -12,19 +12,24 @@
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "setup": "bash scripts/setup.sh"
+    "setup": "bash scripts/setup.sh",
+    "db:migrate": "node scripts/db-migrate.mjs",
+    "db:import-legacy": "node scripts/migrate-legacy-to-postgres.mjs"
   },
   "dependencies": {
+    "@vercel/functions": "^2.2.13",
     "google-auth-library": "^9.11.0",
     "googleapis": "^140.0.0",
     "jose": "^5.6.3",
     "next": "14.2.5",
+    "pg": "^8.13.1",
     "qrcode.react": "^3.1.0",
     "react": "^18",
     "react-dom": "^18"
   },
   "devDependencies": {
     "@types/node": "^20",
+    "@types/pg": "^8.11.10",
     "@types/react": "^18",
     "@types/react-dom": "^18",
     "autoprefixer": "^10.0.1",

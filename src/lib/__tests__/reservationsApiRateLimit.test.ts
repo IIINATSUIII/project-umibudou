@@ -9,7 +9,11 @@ const mock = vi.hoisted(() => ({
   patchReservation: vi.fn(),
 }))
 vi.mock('@/lib/dataStore', () => ({ store: { getReservations: mock.getReservations } }))
-vi.mock('@/lib/googleFormImport', () => ({ importGoogleFormBookings: vi.fn() }))
+vi.mock('@/lib/session', () => ({
+  SESSION_COOKIE: 'odp_session',
+  verifySessionToken: async (token: string) => token === 'staff-session' ? { email: 'staff@example.com' } : null,
+}))
+vi.mock('@/lib/googleFormImport', () => ({ importGoogleFormBookings: async () => ({ errors: [] }) }))
 vi.mock('@/lib/reservations', () => ({
   createReservation: mock.createReservation,
   patchReservation: mock.patchReservation,
@@ -23,7 +27,7 @@ const url = 'http://localhost/api/reservations'
 const json = (method: string, body: unknown) =>
   new NextRequest(url, {
     method,
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', cookie: 'odp_session=staff-session' },
     body: JSON.stringify(body),
   })
 const validBooking = {
@@ -52,16 +56,17 @@ it('MSG-17の文言は設計書どおり', () => {
 it('GET: API制限が続く場合は503とMSG-17を返す(500にしない)', async () => {
   mock.getReservations.mockRejectedValue(limited())
 
-  const res = await GET(new NextRequest(url))
+  const res = await GET(new NextRequest(url, { headers: { cookie: 'odp_session=staff-session' } }))
 
   expect(res.status).toBe(503)
   expect(await res.json()).toEqual({ error: MSG.RATE_LIMITED })
+  expect(mock.getReservations).toHaveBeenCalledTimes(1)
 })
 
 it('GET: API制限以外の失敗は従来どおり500', async () => {
   mock.getReservations.mockRejectedValue(new Error('boom'))
 
-  expect((await GET(new NextRequest(url))).status).toBe(500)
+  expect((await GET(new NextRequest(url, { headers: { cookie: 'odp_session=staff-session' } }))).status).toBe(500)
 })
 
 it('POST(スタッフ登録): API制限が続く場合は503とMSG-17を返す', async () => {

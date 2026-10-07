@@ -59,10 +59,10 @@ export async function POST(req: NextRequest) {
         emergencyContact: `${q.emergencyName}（${q.emergencyRelation}）`, emergencyPhone: q.emergencyPhone,
         course: reservation.courseName, staffName: reservation.staffName || '', checkedInAt: new Date().toISOString(), checkInMethod: method,
       }
-      await store.addRoster(entry)
+      const savedEntry = await store.addRoster(entry)
       // 手動照合でも名簿に追加された問診は再受付不可とする。
       if (!q.qrUsed) await store.updateQuestionnaire(q.id, { qrUsed: true })
-      return { ok: true, entry }
+      return { ok: true, entry: savedEntry ?? entry }
     })
     if (result.error) {
       const errorMessage = result.error

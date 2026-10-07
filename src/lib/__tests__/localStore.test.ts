@@ -23,6 +23,9 @@ it('破損JSONをモックデータで上書きしない',async()=>{
 it('独立したロックインスタンスから並列追加しても行を失わない',async()=>{
   await fs.writeFile(path.join(directory,'reservations.json'),'[]')
   vi.resetModules();const other=await import('../localStore')
-  await Promise.all([addReservation({id:'R-a'} as Reservation),other.addReservation({id:'R-b'} as Reservation)])
+  await Promise.all([
+    addReservation({id:'R-a',diveDate:'2026-10-06'} as Reservation),
+    other.addReservation({id:'R-b',diveDate:'2026-10-06'} as Reservation),
+  ])
   expect((await getReservations()).map(r=>r.id).sort()).toEqual(['R-a','R-b'])
 })

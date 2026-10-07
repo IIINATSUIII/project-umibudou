@@ -39,7 +39,9 @@ describe('旧データと各PRの共通契約', () => {
     expect(findReservationByQuestionnaireToken([r],'R-001',now)).toBeUndefined()
     expect(findReservationByQuestionnaireToken([r],'secret',now)?.id).toBe('R-001')
     for(const expiry of ['', 'invalid', '2026-10-05T15:00:00Z']) expect(findReservationByQuestionnaireToken([{...r,questionnaireTokenExpiresAt:expiry}],'secret',now)).toBeUndefined()
-    expect(findReservationByQuestionnaireToken([{...r,status:'STS-04'}],'secret',now)).toBeUndefined()
+    for (const status of ['STS-04', 'canceled', 'cancelled', 'CANCELLED', 'STS-06']) {
+      expect(findReservationByQuestionnaireToken([{...r,status}],'secret',now)).toBeUndefined()
+    }
     expect(getQuestionnaireExpiry('2026-10-06')).toBe('2026-10-06T15:00:00.000Z')
   })
 })

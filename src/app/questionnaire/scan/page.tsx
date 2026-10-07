@@ -5,8 +5,8 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import StaffQuestionnaireCheck from '@/components/StaffQuestionnaireCheck'
 import Navigation from '@/components/Navigation'
 import { useAuth } from '@/lib/authContext'
-import { addRoster, fetchQuestionnaires, fetchReservations } from '@/lib/api'
-import type { QuestionnaireData, Reservation } from '@/types'
+import { addRoster, fetchCustomers, fetchQuestionnaireById, fetchQuestionnaires, fetchReservations } from '@/lib/api'
+import type { Customer, QuestionnaireData, Reservation } from '@/types'
 import { matchesQuestionnaire } from '@/lib/questionnaireUtils'
 
 const HEALTH_FLAGS: [keyof QuestionnaireData, string][] = [
@@ -17,6 +17,7 @@ const HEALTH_FLAGS: [keyof QuestionnaireData, string][] = [
   ['diabetes', '糖尿病'],
   ['pregnant', '妊娠中'],
   ['hypertension', '高血圧'],
+  ['highBloodPressure', '高血圧'],
   ['panicDisorder', 'パニック障害・閉所恐怖症'],
   ['medication', '服薬中'],
   ['latexAllergy', 'ラテックスアレルギー'],
@@ -43,6 +44,11 @@ function ScanContent() {
   const [questionnaires, setQuestionnaires] = useState<QuestionnaireData[]>([])
   const [reservations, setReservations] = useState<Reservation[]>([])
   const [result, setResult] = useState<QuestionnaireData | null>(null)
+  const [customers, setCustomers] = useState<Customer[]>([])
+  const [selectedCustomerId, setSelectedCustomerId] = useState('')
+  const [customerLoadError, setCustomerLoadError] = useState(false)
+  const [resolving, setResolving] = useState(false)
+  const [resolveError, setResolveError] = useState('')
   const [candidates, setCandidates] = useState<QuestionnaireData[]>([])
   const [error, setError] = useState('')
   const [cameraError, setCameraError] = useState('')
@@ -94,6 +100,9 @@ function ScanContent() {
       setCandidates([])
       setResult(null)
       setAdded(false)
+      setSelectedCustomerId('')
+      setResolveError('')
+      setCustomerLoadError(false)
       setError('')
       if (!q) return
       setCheckInMethod(method)
@@ -119,6 +128,10 @@ function ScanContent() {
         return
       }
       setResult(found)
+      setSelectedCustomerId(found.customerId ?? '')
+      if (found.staffReviewStatus === '要対応') {
+        void fetchCustomers().then(setCustomers).catch(() => setCustomerLoadError(true))
+      }
     },
     [questionnaires]
   )
@@ -237,6 +250,39 @@ function ScanContent() {
       setAdding(false)
     }
   }
+
+  async function resolveExistingCustomer() {
+    if (!result || result.staffReviewStatus !== '要対応' || !selectedCustomerId) return
+    const customer = customers.find((item) => item.id === selectedCustomerId)
+    if (!customer) {
+      setResolveError('顧客を選択してください。')
+      return
+    }
+    const guestName = `${result.lastName} ${result.firstName}`
+    const customerName = `${customer.lastName} ${customer.firstName}`
+    if (!window.confirm(
+      `${guestName} 様の問診票を、本人確認した顧客 ${customer.id}（${customerName}）へ反映します。健康情報と顧客プロフィールを更新し、この予約の来店回数を一度だけ加算します。よろしいですか？`
+    )) return
+
+    setResolving(true)
+    setResolveError('')
+    try {
+      const response = await fetch('/api/questionnaires', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ questionnaireId: result.id, customerId: customer.id }),
+      })
+      const data = await response.json() as { error?: string; questionnaire?: QuestionnaireData }
+      if (!response.ok) throw new Error(data.error ?? '顧客台帳への反映に失敗しました。')
+      const updated = data.questionnaire ?? await fetchQuestionnaireById(result.id)
+      setResult(updated)
+      setQuestionnaires((prev) => prev.map((q) => q.id === updated.id ? updated : q))
+    } catch (err) {
+      setResolveError(err instanceof Error ? err.message : '顧客台帳への反映に失敗しました。')
+    } finally {
+      setResolving(false)
+    }
+  }
   const reservation =
     result && reservations.find((r) => r.id === result.reservationId)
   const alerts = result
@@ -321,6 +367,43 @@ function ScanContent() {
         )}
         {result && (
           <section className="space-y-4">
+            {result.staffReviewStatus === '要対応' && (
+              <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 space-y-3">
+                <p className="text-sm text-amber-900">
+                  {result.staffReviewNotes || 'この問診票は本人確認が必要です。内容を確認してください。'}
+                </p>
+                <div>
+                  <label htmlFor="review-customer" className="block text-sm font-medium text-amber-950 mb-1">
+                    本人確認後、反映する顧客を選択
+                  </label>
+                  <select id="review-customer" value={selectedCustomerId}
+                    onChange={(e) => setSelectedCustomerId(e.target.value)}
+                    disabled={resolving || customerLoadError}
+                    className="w-full rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm text-gray-800">
+                    <option value="">顧客IDを選択してください</option>
+                    {customers.map((customer) => (
+                      <option key={customer.id} value={customer.id}>
+                        {customer.id} · {customer.lastName} {customer.firstName} · {customer.phone}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                {customerLoadError && (
+                  <p role="alert" className="text-sm text-red-700">顧客一覧を取得できませんでした。ページを再読み込みしてください。</p>
+                )}
+                {resolveError && <p role="alert" className="text-sm text-red-700">{resolveError}</p>}
+                <button onClick={() => void resolveExistingCustomer()}
+                  disabled={resolving || !selectedCustomerId || customerLoadError}
+                  className="w-full rounded-lg bg-amber-700 px-3 py-2 text-sm font-medium text-white hover:bg-amber-800 disabled:cursor-not-allowed disabled:opacity-50">
+                  {resolving ? '顧客台帳へ反映中…' : '本人確認して顧客台帳へ反映'}
+                </button>
+              </div>
+            )}
+            {result.staffReviewStatus === '確認済' && (
+              <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-sm text-green-800">
+                {result.staffReviewNotes || '本人確認済みで、顧客台帳へ反映されています。'}
+              </div>
+            )}
             {alerts.length > 0 && (
               <div className="bg-red-50 border-2 border-red-300 rounded-xl p-4">
                 <p className="font-bold text-red-700 mb-2">⚠️ 要注意項目</p>

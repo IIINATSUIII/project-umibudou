@@ -3,12 +3,12 @@
  * Google Forms API や GAS は使わず、同じスプレッドシートの回答タブを読む。
  */
 
-import { normalizeReservation } from './storeSchema'
 import { generateQuestionnaireToken,getQuestionnaireExpiry } from './questionnaireToken'
 import { withStoreWriteLock } from './storeLock'
 import { createHash } from 'crypto'
 import { USE_SHEETS, store } from './dataStore'
 import { getSheetValues } from './sheets'
+import { ISSUE_5_RESERVATION_STATUS } from './reservationStatus'
 import type { Reservation } from '@/types'
 
 type ReservationField = 'date' | 'time' | 'course' | 'guestName' | 'guestCount' | 'phone' | 'notes'
@@ -215,20 +215,25 @@ async function importGoogleFormBookingsOnce(): Promise<GoogleFormImportResult> {
       continue
     }
 
-    const reservation: Reservation = normalizeReservation({
+    const now = new Date().toISOString()
+    const reservation: Reservation = {
       id,
-      date: date as string,
+      diveDate: date as string,
       time: time as string,
-      course: course.slice(0, 50),
+      legacyTime: time as string,
+      timeSlot: 'unspecified',
+      courseName: course,
       guestName: guestName.slice(0, 50),
       guestCount: guestCount as number,
-      phone: phone.slice(0, 20),
+      guestPhone: phone.slice(0, 20),
       channel: 'google_form',
-      status: 'pending',
-      notes: cell(row, columns.notes).slice(0, 500),
-      createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),
-      questionnaireToken:generateQuestionnaireToken(),questionnaireTokenExpiresAt:getQuestionnaireExpiry(date as string),
-    })
+      status: ISSUE_5_RESERVATION_STATUS.requested,
+      staffNote: cell(row, columns.notes).slice(0, 500),
+      createdAt: now,
+      updatedAt: now,
+      questionnaireToken: generateQuestionnaireToken(),
+      questionnaireTokenExpiresAt: getQuestionnaireExpiry(date as string),
+    }
     try {
       await store.addReservation(reservation)
     } catch (err) {

@@ -7,7 +7,15 @@ import WeatherWidget from '@/components/WeatherWidget'
 import Navigation from '@/components/Navigation'
 import { useAuth } from '@/lib/authContext'
 import { fetchReservations, fetchQuestionnaires, patchReservation, ApiRequestError } from '@/lib/api'
-import { getStatusName, DEFAULT_STATUS_ID, CONFIRMED_STATUS_ID, CANCELLED_STATUS_ID } from '@/lib/masters'
+import { getStatusName } from '@/lib/masters'
+import {
+  cancelledReservationStatus,
+  confirmedReservationStatus,
+  isCancellableReservationStatus,
+  isPendingReservationStatus,
+  reservationStatusLabel,
+  reservationStatusStyle,
+} from '@/lib/reservationStatus'
 import QuestionnaireUrlButton from '@/components/QuestionnaireUrlButton'
 import type { Reservation, QuestionnaireData } from '@/types'
 
@@ -20,13 +28,12 @@ const TIME_SLOT_LABELS: Record<Reservation['timeSlot'], string> = {
 const TIME_SLOT_ORDER: Record<Reservation['timeSlot'], number> = {
   morning: 0, afternoon: 1, full: 2, unspecified: 3,
 }
-const STATUS_STYLES: Record<string, string> = {
-  'STS-01': 'bg-yellow-100 text-yellow-700',
-  'STS-02': 'bg-orange-100 text-orange-700',
-  'STS-03': 'bg-green-100 text-green-700',
-  'STS-04': 'bg-red-100 text-red-700',
-  'STS-05': 'bg-gray-200 text-gray-700',
-  'STS-06': 'bg-blue-100 text-blue-700',
+function displayTime(reservation: Reservation): string {
+  return reservation.time || TIME_SLOT_LABELS[reservation.timeSlot] || reservation.timeSlot
+}
+
+function statusLabel(status: string): string {
+  return status.startsWith('STS-') ? getStatusName(status) : reservationStatusLabel(status)
 }
 
 export default function ReservationsPage() {
@@ -68,28 +75,41 @@ export default function ReservationsPage() {
 
   const filtered = reservations
     .filter((r) => !dateFilter || r.diveDate === dateFilter)
-    .sort((a, b) =>
-      a.diveDate.localeCompare(b.diveDate) ||
-      TIME_SLOT_ORDER[a.timeSlot] - TIME_SLOT_ORDER[b.timeSlot]
-    )
+    .sort((a, b) => a.diveDate.localeCompare(b.diveDate) ||
+      TIME_SLOT_ORDER[a.timeSlot] - TIME_SLOT_ORDER[b.timeSlot] ||
+      (a.time ?? '').localeCompare(b.time ?? ''))
 
   async function handleCancel(id: string) {
-    try {
     if (!confirm('この予約をキャンセルしますか？')) return
-    const updatedAt = await patchReservation(id, { status: CANCELLED_STATUS_ID }, reservations.find(r=>r.id===id)?.updatedAt ?? '')
-    setReservations((prev) =>
-      prev.map((r) => r.id === id ? { ...r, status: CANCELLED_STATUS_ID, updatedAt } : r)
-    )
-    } catch(err) {setActionError(err instanceof Error?err.message:'保存できませんでした'); if(err instanceof ApiRequestError && err.status===409) setReservations(await fetchReservations())}
+    const reservation = reservations.find((item) => item.id === id)
+    if (!reservation || !isCancellableReservationStatus(reservation.status)) return
+    try {
+      const status = cancelledReservationStatus(reservation)
+      const updatedAt = await patchReservation(id, { status }, reservation.updatedAt ?? '')
+      setReservations((prev) => prev.map((r) => r.id === id ? { ...r, status, updatedAt } : r))
+      setActionError('')
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : '保存できませんでした')
+      if (err instanceof ApiRequestError && err.status === 409) {
+        try { setReservations(await fetchReservations()) } catch { /* keep the visible stale row */ }
+      }
+    }
   }
 
   async function handleConfirm(id: string) {
+    const reservation = reservations.find((item) => item.id === id)
+    if (!reservation || !isPendingReservationStatus(reservation.status)) return
     try {
-    const updatedAt = await patchReservation(id, { status: CONFIRMED_STATUS_ID }, reservations.find(r=>r.id===id)?.updatedAt ?? '')
-    setReservations((prev) =>
-      prev.map((r) => r.id === id ? { ...r, status: CONFIRMED_STATUS_ID, updatedAt } : r)
-    )
-    } catch(err) {setActionError(err instanceof Error?err.message:'保存できませんでした'); if(err instanceof ApiRequestError && err.status===409) setReservations(await fetchReservations())}
+      const status = confirmedReservationStatus(reservation)
+      const updatedAt = await patchReservation(id, { status }, reservation.updatedAt ?? '')
+      setReservations((prev) => prev.map((r) => r.id === id ? { ...r, status, updatedAt } : r))
+      setActionError('')
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : '保存できませんでした')
+      if (err instanceof ApiRequestError && err.status === 409) {
+        try { setReservations(await fetchReservations()) } catch { /* keep the visible stale row */ }
+      }
+    }
   }
 
   function handleCsvImport(e: React.ChangeEvent<HTMLInputElement>) {
@@ -156,35 +176,34 @@ export default function ReservationsPage() {
                             {r.diveDate.slice(5).replace('-', '/')}
                           </div>
                         )}
-                        <div className="text-sm font-mono font-bold text-ocean-600">{TIME_SLOT_LABELS[r.timeSlot]}</div>
+                        <div className="text-sm font-mono font-bold text-ocean-600">{displayTime(r)}</div>
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="flex flex-wrap items-center gap-2 mb-1">
                           <span className="font-semibold text-gray-800">{r.guestName}</span>
                           <span className="text-sm text-gray-500">{r.guestCount}名</span>
                           <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded">{CHANNEL_LABELS[r.channel]}</span>
-                          <span className={`text-xs px-2 py-0.5 rounded ${STATUS_STYLES[r.status]}`}>{getStatusName(r.status)}</span>
+                          <span className={`text-xs px-2 py-0.5 rounded ${reservationStatusStyle(r.status)}`}>{statusLabel(r.status)}</span>
                         </div>
                         <div className="text-sm text-gray-600">{r.courseName}</div>
                         <div className="text-xs text-gray-400 mt-0.5">📞 {r.guestPhone}</div>
                         {r.staffNote && <div className="text-xs text-gray-500 mt-1 bg-gray-50 rounded px-2 py-1">💬 {r.staffNote}</div>}
                       </div>
                       <div className="flex flex-col gap-1.5 shrink-0">
-                        {questionnaireId ? (
+                        {questionnaireId && (
                           <Link href={`/questionnaire/scan?id=${questionnaireId}`}
                             className="text-xs bg-teal-50 text-teal-700 border border-teal-200 px-2 py-1 rounded text-center hover:bg-teal-100">
                             📋 問診確認
                           </Link>
-                        ) : (
-                          <QuestionnaireUrlButton reservationId={r.id} onError={setActionError} />
                         )}
-                        {r.status === DEFAULT_STATUS_ID && (
+                        <QuestionnaireUrlButton reservationId={r.id} onError={setActionError} />
+                        {isPendingReservationStatus(r.status) && (
                           <button onClick={() => handleConfirm(r.id)}
                             className="text-xs bg-green-600 text-white px-2 py-1 rounded hover:bg-green-700">
                             ✓ 確定する
                           </button>
                         )}
-                        {r.status !== CANCELLED_STATUS_ID && (
+                        {isCancellableReservationStatus(r.status) && (
                           <button onClick={() => handleCancel(r.id)}
                             className="text-xs text-red-500 hover:text-red-700 px-2 py-1 border border-red-200 rounded hover:bg-red-50">
                             キャンセル

@@ -1,32 +1,47 @@
-/**
- * 予約一覧（Reservations シート）
- * 列定義は docs/03_基本設計書_DB設計編.md §3-2 に準拠。
- */
+export type ReservationTimeSlot = 'morning' | 'afternoon' | 'full' | 'unspecified'
+export type ReservationChannel = 'hp' | 'email' | 'phone' | 'ota' | 'sns' | 'google_form'
+
+/** 正準予約データ。旧API/シート名は ReservationInput の境界変換で吸収する。 */
 export interface Reservation {
-  id: string                  // 予約ID: "R-" + YYYYMMDD + 連番3桁
-  createdAt: string           // 登録日時（ISO datetime）
-  updatedAt: string           // 最終更新日時（排他制御の後勝ち検知に使用）
-  customerId?: string         // 顧客ID（顧客台帳を参照。問診送信後に紐づく）
-  guestName: string           // 代表者氏名
-  guestPhone: string          // 代表者電話番号
-  guestEmail: string          // 代表者メールアドレス
-  diveDate: string            // ダイブ日 YYYY-MM-DD
-  timeSlot: 'morning' | 'afternoon' | 'full' | 'unspecified' // 時間帯
-  courseId: string            // コースID（コースマスタを参照）
-  courseName: string          // コース名（表示用。コースマスタから転記）
-  guestCount: number          // 参加人数
-  status: string              // 予約ステータス（ステータスマスタのIDを参照）
-  staffId?: string            // 担当スタッフID（スタッフマスタを参照）
-  staffName?: string          // 担当スタッフ名（表示用。スタッフマスタから転記）
-  channel: 'hp' | 'email' | 'phone' | 'ota' | 'sns' | 'google_form' // 予約取込元
-  questionnaireToken?: string          // 問診票URL用トークン
-  questionnaireTokenExpiresAt?: string // 問診票URL有効期限（ダイブ日翌日0時まで）
-  questionnaireCompleted: boolean      // 問診完了フラグ
+  id: string
+  createdAt?: string
+  updatedAt?: string
+  customerId?: string
+  guestName: string
+  guestPhone: string
+  guestEmail?: string
+  /** ダイビング日 YYYY-MM-DD */
+  diveDate: string
+  /** 旧フォームが指定した正確な HH:MM。Issue #5 の時間帯とは別に保持する。 */
+  time?: string
+  timeSlot: ReservationTimeSlot
+  courseId?: string
+  /** 自由記述コース名。コースIDへ一意に解決できない場合も保持する。 */
+  courseName: string
+  guestCount: number
+  status: string
+  staffId?: string
+  staffName?: string
+  channel: ReservationChannel
   questionnaireId?: string
+  /** 同一予約の複数参加者の問診票IDを保持。区切り文字は | */
+  questionnaireIds?: string
+  questionnaireToken?: string
+  questionnaireTokenExpiresAt?: string
+  questionnaireCompleted?: boolean
+  /** Main's normalized storage alias; `time` remains accepted for legacy callers. */
   legacyTime?: string
   legacyChannel?: string
-  divePoint?: string          // ダイブポイント
-  staffNote?: string          // スタッフメモ／キャンセル理由
+  divePoint?: string
+  staffNote?: string
+}
+
+/** 旧 date/course/phone/notes 入力を許す移行期間中のAPI境界型。 */
+export type ReservationInput = Partial<Reservation> & {
+  date?: string
+  course?: string
+  phone?: string
+  notes?: string
 }
 
 /** コースマスタ（Courses シート） */
@@ -56,6 +71,8 @@ export interface QuestionnaireData {
   submittedAt: string
   /** 旧データには存在しないため、保存時に付与される項目は任意 */
   customerId?: string
+  /** 同じフォーム送信の再試行を識別するクライアント生成ID */
+  submissionId?: string
   // 基本情報
   lastName: string
   firstName: string
@@ -132,6 +149,7 @@ export type QuestionnaireFormData = Omit<
   | 'reservationId'
   | 'submittedAt'
   | 'customerId'
+  | 'submissionId'
   | 'consentAt'
   | 'qrToken'
   | 'qrExpiresAt'
@@ -164,7 +182,9 @@ export interface Customer {
   registeredAt?: string
   createdAt?: string
   updatedAt?: string
-  /** 問診票の再送で来店回数を重複加算しないための処理済みID一覧 */
+  /** 同一予約の再送で来店回数を重複加算しないための処理済み予約ID一覧 */
+  countedReservationIds?: string
+  /** 旧形式の処理済み問診ID一覧。読み取り時に予約IDへ変換する */
   countedQuestionnaireIds?: string
   birthDate?: string
   gender?: QuestionnaireData['gender'] | 'undisclosed'

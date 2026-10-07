@@ -73,6 +73,31 @@ const STEP_LABELS = [
   '同意事項',
   '完了',
 ]
+type PendingSubmission = { id: string; createdAt: number }
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+function readPendingSubmissions(key: string): PendingSubmission[] {
+  try {
+    const saved: unknown = JSON.parse(window.localStorage.getItem(key) ?? '[]')
+    if (!Array.isArray(saved)) return []
+    return saved.filter((item): item is PendingSubmission =>
+      !!item && typeof item === 'object' &&
+      typeof item.id === 'string' && UUID_PATTERN.test(item.id) &&
+      typeof item.createdAt === 'number' && Number.isFinite(item.createdAt) &&
+      item.createdAt >= 0 && item.createdAt <= 8_640_000_000_000_000
+    )
+  } catch {
+    return []
+  }
+}
+
+function writePendingSubmissions(key: string, pending: PendingSubmission[]) {
+  try {
+    window.localStorage.setItem(key, JSON.stringify(pending))
+  } catch {
+    // Pending IDs are only a recovery aid; storage limits must not block form entry.
+  }
+}
 
 const BLANK: FormData = {
   lastName: '',
@@ -126,6 +151,11 @@ export default function QuestionnairePage() {
   const [qrToken, setQrToken] = useState('')
   const [qrExpiresAt, setQrExpiresAt] = useState('')
   const submissionLock = useRef(false)
+  const initializedFor = useRef('')
+  const submissionStorageKey = `questionnaire-submission:${id}`
+  const pendingStorageKey = `questionnaire-pending-submissions:${id}`
+  const [submissionId, setSubmissionId] = useState('')
+  const [pendingSubmissions, setPendingSubmissions] = useState<PendingSubmission[]>([])
   const payload = {
     ...form,
     totalDives:
@@ -142,6 +172,47 @@ export default function QuestionnairePage() {
   const [submitError, setSubmitError] = useState('')
   const [checkingAccess, setCheckingAccess] = useState(true)
   const [accessError, setAccessError] = useState('')
+  useEffect(() => {
+    if (initializedFor.current !== submissionStorageKey) {
+      initializedFor.current = submissionStorageKey
+      let savedId = ''
+      try {
+        savedId = window.sessionStorage.getItem(submissionStorageKey) ?? ''
+      } catch {
+        // Continue with an in-memory ID when browser storage is unavailable.
+      }
+      const navigation = window.performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined
+      const nextId = navigation?.type === 'reload' && UUID_PATTERN.test(savedId)
+        ? savedId
+        : window.crypto.randomUUID()
+      try {
+        window.sessionStorage.setItem(submissionStorageKey, nextId)
+      } catch {
+        // The ID remains available in component state for this visit.
+      }
+      setSubmissionId(nextId)
+
+      let pending = readPendingSubmissions(pendingStorageKey)
+      try {
+        const legacyId = window.localStorage.getItem(submissionStorageKey) ?? ''
+        if (UUID_PATTERN.test(legacyId) && !pending.some((item) => item.id === legacyId)) {
+          pending = [...pending, { id: legacyId, createdAt: Date.now() }]
+          writePendingSubmissions(pendingStorageKey, pending)
+        }
+        window.localStorage.removeItem(submissionStorageKey)
+      } catch {
+        // Pending recovery is best effort and contains no questionnaire answers.
+      }
+      setPendingSubmissions(pending)
+    }
+
+    const syncPending = (event: StorageEvent) => {
+      if (event.key === pendingStorageKey) setPendingSubmissions(readPendingSubmissions(pendingStorageKey))
+    }
+    window.addEventListener('storage', syncPending)
+    return () => window.removeEventListener('storage', syncPending)
+  }, [pendingStorageKey, submissionStorageKey])
+
   useEffect(() => {
     if (!focusField) return
     const element = document.getElementById(focusField)
@@ -185,6 +256,16 @@ export default function QuestionnairePage() {
     return false
   }
   function set<K extends keyof typeof form>(key: K, value: (typeof form)[K]) {
+    if (submitError) {
+      const nextId = window.crypto.randomUUID()
+      try {
+        window.sessionStorage.setItem(submissionStorageKey, nextId)
+      } catch {
+        // The new ID remains available in component state for this visit.
+      }
+      setSubmissionId(nextId)
+      setSubmitError('')
+    }
     setForm((f) => ({ ...f, [key]: value }))
   }
 
@@ -240,6 +321,38 @@ export default function QuestionnairePage() {
     if (idx > 0) setStep(STEPS[idx - 1])
   }
 
+  function resumePendingSubmission(pendingId: string) {
+    setSubmissionId(pendingId)
+    setSubmitError('')
+    try {
+      window.sessionStorage.setItem(submissionStorageKey, pendingId)
+    } catch {
+      // The ID remains available in component state for this visit.
+    }
+    setForm(BLANK)
+    setErrors({})
+    setStep('basic')
+    window.scrollTo(0, 0)
+  }
+
+  function startNextParticipant() {
+    const nextId = window.crypto.randomUUID()
+    try {
+      window.sessionStorage.setItem(submissionStorageKey, nextId)
+    } catch {
+      // The new ID remains available in component state for this visit.
+    }
+    setSubmissionId(nextId)
+    setForm(BLANK)
+    setErrors({})
+    setQId('')
+    setQrToken('')
+    setQrExpiresAt('')
+    setSubmitError('')
+    setStep('intro')
+    window.scrollTo(0, 0)
+  }
+
   async function handleSubmit() {
     if (submissionLock.current || !check('all')) return
     if (
@@ -253,11 +366,24 @@ export default function QuestionnairePage() {
     submissionLock.current = true
     setSubmitting(true)
     setSubmitError('')
+    const activeSubmissionId = submissionId || window.crypto.randomUUID()
+    setSubmissionId(activeSubmissionId)
+    try {
+      window.sessionStorage.setItem(submissionStorageKey, activeSubmissionId)
+    } catch {
+      // Request remains valid; recovery after closing the tab may be unavailable.
+    }
+    const pending = readPendingSubmissions(pendingStorageKey)
+    const nextPending = pending.some((item) => item.id === activeSubmissionId)
+      ? pending
+      : [...pending, { id: activeSubmissionId, createdAt: Date.now() }]
+    writePendingSubmissions(pendingStorageKey, nextPending)
+    setPendingSubmissions(nextPending)
     try {
       const res = await fetch('/api/public/questionnaires', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ accessToken: id, ...payload }),
+        body: JSON.stringify({ accessToken: id, submissionId: activeSubmissionId, ...payload }),
       })
       const data = await res.json()
       if (!res.ok) {
@@ -295,6 +421,17 @@ export default function QuestionnairePage() {
         !Number.isFinite(Date.parse(data.qrExpiresAt)) || Date.parse(data.qrExpiresAt) <= Date.now()
       )
         throw new Error('送信結果を確認できませんでした')
+      const remainingPending = readPendingSubmissions(pendingStorageKey)
+        .filter((item) => item.id !== activeSubmissionId)
+      writePendingSubmissions(pendingStorageKey, remainingPending)
+      setPendingSubmissions(remainingPending)
+      try {
+        if (window.sessionStorage.getItem(submissionStorageKey) === activeSubmissionId) {
+          window.sessionStorage.removeItem(submissionStorageKey)
+        }
+      } catch {
+        // Saved questionnaire cleanup is best effort.
+      }
       setQrToken(data.qrToken)
       setQrExpiresAt(data.qrExpiresAt)
       setQId(data.questionnaireId)
@@ -366,6 +503,18 @@ export default function QuestionnairePage() {
               <li>📱 スマホのままお進みください</li>
               <li>🔒 入力内容は安全に管理されます</li>
             </ul>
+            {pendingSubmissions.length > 0 && (
+              <div className="border-t border-gray-100 pt-4 space-y-2">
+                <p className="text-sm font-medium text-gray-700">未完了の送信があります</p>
+                <p className="text-xs text-gray-500">再開すると同じ送信IDを使います。入力内容は端末に保存されていないため、同じ回答を再入力してください。</p>
+                {pendingSubmissions.map((pending) => (
+                  <button key={pending.id} type="button" onClick={() => resumePendingSubmission(pending.id)}
+                    className="w-full border border-amber-300 text-amber-800 py-2 rounded-lg text-sm hover:bg-amber-50">
+                    未完了の送信を再開（{new Date(pending.createdAt).toLocaleString('ja-JP')}）
+                  </button>
+                ))}
+              </div>
+            )}
             <button
               onClick={next}
               className="w-full bg-ocean-600 text-white py-3 rounded-xl font-medium hover:bg-ocean-700 transition-colors"
@@ -907,6 +1056,22 @@ export default function QuestionnairePage() {
                 {form.lastNameKana} {form.firstNameKana}
               </p>
             </div>
+            {pendingSubmissions.length > 0 && (
+              <div className="border-t border-gray-100 pt-4 space-y-2">
+                <p className="text-sm font-medium text-gray-700">未完了の送信があります</p>
+                <p className="text-xs text-gray-500">同じ回答を再入力して再送すると、同じ問診票として処理されます。</p>
+                {pendingSubmissions.map((pending) => (
+                  <button key={pending.id} type="button" onClick={() => resumePendingSubmission(pending.id)}
+                    className="w-full border border-amber-300 text-amber-800 py-2 rounded-lg text-sm hover:bg-amber-50">
+                    未完了の送信を再開（{new Date(pending.createdAt).toLocaleString('ja-JP')}）
+                  </button>
+                ))}
+              </div>
+            )}
+            <button type="button" onClick={startNextParticipant}
+              className="w-full border border-ocean-300 text-ocean-700 py-3 rounded-xl font-medium hover:bg-ocean-50">
+              次の参加者の問診票を入力する
+            </button>
           </div>
         )}
       </div>

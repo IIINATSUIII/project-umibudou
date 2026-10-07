@@ -16,7 +16,7 @@ export default function NewReservationPage() {
   const user = useAuth()
   const router = useRouter()
   const [form, setForm] = useState({
-    diveDate: new Date().toISOString().slice(0, 10),
+    diveDate: new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' }),
     timeSlot: 'morning' as Reservation['timeSlot'],
     courseId: COURSES[0].id,
     guestName: '',
@@ -125,6 +125,8 @@ export default function NewReservationPage() {
                 <option value="hp">HP手動入力</option>
                 <option value="email">メール</option>
                 <option value="phone">電話</option>
+                <option value="ota">OTA</option>
+                <option value="sns">SNS</option>
               </select>
               {fieldErrors.channel && <p className={fieldError}>{fieldErrors.channel}</p>}
             </div>
@@ -160,9 +162,9 @@ export default function NewReservationPage() {
               {fieldErrors.guestPhone && <p className={fieldError}>{fieldErrors.guestPhone}</p>}
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">メールアドレス *</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">メールアドレス（任意）</label>
               <input type="email" value={form.guestEmail} onChange={(e) => set('guestEmail', e.target.value)}
-                placeholder="guest@example.com" maxLength={100} required
+                placeholder="guest@example.com" maxLength={100}
                 aria-invalid={Boolean(fieldErrors.guestEmail)} className={inp} />
               {fieldErrors.guestEmail && <p className={fieldError}>{fieldErrors.guestEmail}</p>}
             </div>

@@ -7,6 +7,7 @@ import type { CustomerFieldErrors } from './customerValidation'
 import type {
   RosterEntry,
   Reservation,
+  ReservationInput,
   QuestionnaireData,
   QuestionnaireFormData,
   QuestionnaireSummary,
@@ -54,8 +55,8 @@ export async function fetchReservations(): Promise<Reservation[]> {
 }
 
 export async function createReservation(
-  data: NewReservationForm
-): Promise<{ id: string }> {
+  data: ReservationInput | NewReservationForm
+): Promise<{ id?: string }> {
   const res = await fetch('/api/reservations', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

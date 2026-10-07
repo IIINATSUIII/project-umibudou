@@ -1,5 +1,6 @@
 import { randomBytes } from 'crypto'
-import type { Reservation, QuestionnaireData } from '@/types'
+import type { QuestionnaireData, Reservation } from '@/types'
+import { isQuestionnaireReservationAllowed } from './reservationStatus'
 
 export const generateQuestionnaireToken = () =>
   randomBytes(32).toString('base64url')
@@ -7,7 +8,7 @@ export const generateQuestionnaireToken = () =>
 export const generateQrToken = () => randomBytes(32).toString('base64url')
 
 export function isReservationActive(r: Reservation): boolean {
-  return !['STS-04', 'cancelled', 'STS-06'].includes(r.status)
+  return isQuestionnaireReservationAllowed(r.status)
 }
 
 export function getQrError(q: QuestionnaireData, now = Date.now()): 'QR_USED' | 'QR_EXPIRED' | null {
@@ -34,7 +35,7 @@ export function isQuestionnaireUrlValid(
   if (
     !r?.questionnaireToken ||
     !r.questionnaireTokenExpiresAt ||
-    !isReservationActive(r)
+    !isQuestionnaireReservationAllowed(r.status)
   )
     return false
   const expiry = Date.parse(r.questionnaireTokenExpiresAt)

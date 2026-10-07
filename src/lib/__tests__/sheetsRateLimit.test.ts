@@ -1,5 +1,4 @@
 import { it, expect, vi, beforeEach } from 'vitest'
-import { HEADERS } from '../storeSchema'
 import { RateLimitedError } from '../withRetry'
 
 const mock = vi.hoisted(() => ({
@@ -20,7 +19,7 @@ vi.mock('googleapis', () => ({
 vi.mock('../storeLock', () => ({
   withStoreWriteLock: async (work: () => Promise<unknown>) => work(),
 }))
-import { getReservations, addReservation, updateReservation } from '../sheets'
+import { HEADERS, getReservations, addReservation, updateReservation } from '../sheets'
 
 const tooMany = () => Object.assign(new Error('Quota exceeded'), { code: 429 })
 const rows = (reservations: Array<Record<string, string>> = []) => ({

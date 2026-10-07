@@ -8,7 +8,13 @@ import WindyWidget from '@/components/WindyWidget'
 import WeatherWidget from '@/components/WeatherWidget'
 import { useAuth } from '@/lib/authContext'
 import { fetchReservations, fetchQuestionnaires, patchReservation, ApiRequestError } from '@/lib/api'
-import { getStatusName, DEFAULT_STATUS_ID, CONFIRMED_STATUS_ID } from '@/lib/masters'
+import { getStatusName } from '@/lib/masters'
+import {
+  confirmedReservationStatus,
+  isPendingReservationStatus,
+  reservationStatusLabel,
+  reservationStatusStyle,
+} from '@/lib/reservationStatus'
 import QuestionnaireUrlButton from '@/components/QuestionnaireUrlButton'
 import type { Reservation, QuestionnaireData } from '@/types'
 
@@ -21,13 +27,26 @@ const TIME_SLOT_LABELS: Record<Reservation['timeSlot'], string> = {
 const TIME_SLOT_ORDER: Record<Reservation['timeSlot'], number> = {
   morning: 0, afternoon: 1, full: 2, unspecified: 3,
 }
-const STATUS_STYLES: Record<string, string> = {
-  'STS-01': 'bg-yellow-100 text-yellow-700',
-  'STS-02': 'bg-orange-100 text-orange-700',
-  'STS-03': 'bg-green-100 text-green-700',
-  'STS-04': 'bg-red-100 text-red-700',
-  'STS-05': 'bg-gray-200 text-gray-700',
-  'STS-06': 'bg-blue-100 text-blue-700',
+
+function displayTime(reservation: Reservation): string {
+  return reservation.time || TIME_SLOT_LABELS[reservation.timeSlot] || reservation.timeSlot
+}
+
+function questionnaireIdFor(reservation: Reservation, questionnaires: QuestionnaireData[]): string | undefined {
+  const parsedIds = (() => {
+    try {
+      const value: unknown = JSON.parse(reservation.questionnaireIds ?? '[]')
+      return Array.isArray(value) ? value.filter((id): id is string => typeof id === 'string') : []
+    } catch {
+      return []
+    }
+  })()
+  return questionnaires.find((q) => q.reservationId === reservation.id)?.id ??
+    reservation.questionnaireId ?? parsedIds[0]
+}
+
+function statusLabel(status: string): string {
+  return status.startsWith('STS-') ? getStatusName(status) : reservationStatusLabel(status)
 }
 
 export default function DashboardPage() {
@@ -39,7 +58,9 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true)
 
   const today    = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' })
-  const tomorrow = new Date(Date.now() + 86400000).toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' })
+  const tomorrowDate = new Date()
+  tomorrowDate.setDate(tomorrowDate.getDate() + 1)
+  const tomorrow = tomorrowDate.toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' })
 
   useEffect(() => {
     if (user === undefined) return
@@ -56,28 +77,33 @@ export default function DashboardPage() {
     return () => { clearInterval(iv); window.removeEventListener('focus', load) }
   }, [user, router])
 
-  function questionnaireIdFor(reservationId: string): string | undefined {
-    return questionnaires.find((q) => q.reservationId === reservationId)?.id
-  }
-
   async function handleConfirm(id: string) {
+    const reservation = reservations.find((item) => item.id === id)
+    if (!reservation) return
     try {
-    const updatedAt = await patchReservation(id, { status: CONFIRMED_STATUS_ID }, reservations.find(r=>r.id===id)?.updatedAt ?? '')
-    setReservations((prev) =>
-      prev.map((r) => r.id === id ? { ...r, status: CONFIRMED_STATUS_ID, updatedAt } : r)
-    )
-    } catch(err) {setActionError(err instanceof Error?err.message:'保存できませんでした'); if(err instanceof ApiRequestError && err.status===409) setReservations(await fetchReservations())}
+      const status = confirmedReservationStatus(reservation)
+      const updatedAt = await patchReservation(id, { status }, reservation.updatedAt ?? '')
+      setReservations((prev) => prev.map((r) => r.id === id ? { ...r, status, updatedAt } : r))
+      setActionError('')
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : '保存できませんでした')
+      if (err instanceof ApiRequestError && err.status === 409) setReservations(await fetchReservations())
+    }
   }
 
-  const byTimeSlot = (a: Reservation, b: Reservation) => TIME_SLOT_ORDER[a.timeSlot] - TIME_SLOT_ORDER[b.timeSlot]
+  const byTimeSlot = (a: Reservation, b: Reservation) =>
+    TIME_SLOT_ORDER[a.timeSlot] - TIME_SLOT_ORDER[b.timeSlot] ||
+    (a.time ?? '').localeCompare(b.time ?? '')
   const todayRes    = reservations.filter((r) => r.diveDate === today).sort(byTimeSlot)
   const tomorrowRes = reservations.filter((r) => r.diveDate === tomorrow).sort(byTimeSlot)
   // 未確定の申し込みは日付に関係なくすべて表示する（客側フォームからの申し込みを見逃さないため）
   const pendingRes = reservations
-    .filter((r) => r.status === DEFAULT_STATUS_ID)
+    .filter((r) => isPendingReservationStatus(r.status))
     .sort((a, b) => a.diveDate.localeCompare(b.diveDate) || byTimeSlot(a, b))
   const totalGuests = todayRes.reduce((s, r) => s + r.guestCount, 0)
-  const withQr      = todayRes.filter((r) => r.questionnaireCompleted).length
+  const withQr = todayRes.filter((r) =>
+    r.questionnaireCompleted || r.questionnaireId || r.questionnaireIds || questionnaireIdFor(r, questionnaires)
+  ).length
 
   if (loading) return <LoadingScreen />
 
@@ -101,7 +127,7 @@ export default function DashboardPage() {
               {pendingRes.map((r) => (
                 <div key={r.id} className="px-4 py-3 flex items-center gap-3">
                   <div className="text-sm font-mono font-semibold text-yellow-800 shrink-0">
-                    {r.diveDate.slice(5).replace('-', '/')} {TIME_SLOT_LABELS[r.timeSlot]}
+                    {r.diveDate.slice(5).replace('-', '/')} {displayTime(r)}
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="font-medium text-gray-800 text-sm">{r.guestName}（{r.guestCount}名）</div>
@@ -146,10 +172,10 @@ export default function DashboardPage() {
           ) : (
             <div className="divide-y divide-gray-50">
               {todayRes.map((r) => {
-                const questionnaireId = questionnaireIdFor(r.id)
+                const questionnaireId = questionnaireIdFor(r, questionnaires)
                 return (
                   <div key={r.id} className="px-4 py-3 flex items-center gap-3">
-                    <div className="text-sm font-mono font-semibold text-ocean-600 w-12">{TIME_SLOT_LABELS[r.timeSlot]}</div>
+                    <div className="text-sm font-mono font-semibold text-ocean-600 w-12">{displayTime(r)}</div>
                     <div className="flex-1 min-w-0">
                       <div className="font-medium text-gray-800 text-sm">{r.guestName}（{r.guestCount}名）</div>
                       <div className="text-xs text-gray-500">{r.courseName}</div>
@@ -158,17 +184,16 @@ export default function DashboardPage() {
                       <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded">
                         {CHANNEL_LABELS[r.channel]}
                       </span>
-                      <span className={`text-xs px-2 py-0.5 rounded ${STATUS_STYLES[r.status]}`}>
-                        {getStatusName(r.status)}
+                      <span className={`text-xs px-2 py-0.5 rounded ${reservationStatusStyle(r.status)}`}>
+                        {statusLabel(r.status)}
                       </span>
-                      {questionnaireId ? (
+                      {questionnaireId && (
                         <Link href={`/questionnaire/scan?id=${questionnaireId}`}
                           className="text-xs bg-teal-50 text-teal-700 border border-teal-200 px-2 py-0.5 rounded hover:bg-teal-100">
                           📋 問診確認
                         </Link>
-                      ) : (
-                        <QuestionnaireUrlButton reservationId={r.id} onError={setActionError} />
                       )}
+                      <QuestionnaireUrlButton reservationId={r.id} onError={setActionError} />
                     </div>
                   </div>
                 )
@@ -185,13 +210,13 @@ export default function DashboardPage() {
             <div className="divide-y divide-gray-50">
               {tomorrowRes.map((r) => (
                 <div key={r.id} className="px-4 py-3 flex items-center gap-3">
-                  <div className="text-sm font-mono font-semibold text-gray-500 w-12">{TIME_SLOT_LABELS[r.timeSlot]}</div>
+                  <div className="text-sm font-mono font-semibold text-gray-500 w-12">{displayTime(r)}</div>
                   <div className="flex-1">
                     <div className="font-medium text-gray-700 text-sm">{r.guestName}（{r.guestCount}名）</div>
                     <div className="text-xs text-gray-400">{r.courseName}</div>
                   </div>
-                  <span className={`text-xs px-2 py-0.5 rounded ${STATUS_STYLES[r.status]}`}>
-                    {getStatusName(r.status)}
+                  <span className={`text-xs px-2 py-0.5 rounded ${reservationStatusStyle(r.status)}`}>
+                    {statusLabel(r.status)}
                   </span>
                 </div>
               ))}

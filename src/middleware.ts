@@ -5,6 +5,7 @@ import { verifySessionToken, SESSION_COOKIE } from '@/lib/session'
 const PUBLIC_PATHS = [
   '/login',
   '/booking',      // 客側：予約申し込みフォーム
+  '/line-menu',    // LINEリッチメニューから開くゲスト向け画面
   '/api/auth',
   '/api/public',   // 客側：予約申し込み・問診票提出API
   '/_next',
@@ -12,7 +13,10 @@ const PUBLIC_PATHS = [
 ]
 
 function isPublic(pathname: string): boolean {
+  // Staff-only scan must stay protected even though /questionnaire/[id] is public.
   if (pathname === '/questionnaire/scan' || pathname.startsWith('/questionnaire/scan/')) return false
+  // The handler still requires its own CRON_SECRET bearer token.
+  if (pathname === '/api/cron/sheets-outbox') return true
   if (PUBLIC_PATHS.some((p) => pathname.startsWith(p))) return true
   // ダイバー向け問診票入力画面はログイン不要（/questionnaire/[id] のみ）
   if (/^\/questionnaire\/[^/]+\/?$/.test(pathname)) return true

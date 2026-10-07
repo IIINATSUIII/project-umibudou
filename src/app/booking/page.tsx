@@ -22,7 +22,7 @@ export default function BookingPage() {
   })
   const [sending, setSending] = useState(false)
   const [done, setDone] = useState(false)
-  const [questionnaireToken,setQuestionnaireToken]=useState('')
+  const [questionnaireToken, setQuestionnaireToken] = useState('')
   const [resId, setResId] = useState('')
   const [error, setError] = useState('')
 
@@ -38,22 +38,28 @@ export default function BookingPage() {
     setError('')
     setSending(true)
     try {
-    const res = await fetch('/api/public/bookings', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(form),
-    })
-    if (res.ok) {
-      const data = await res.json()
-      if(typeof data.questionnaireToken!=='string') throw new Error('問診票URLを取得できませんでした'); setQuestionnaireToken(data.questionnaireToken); setResId(data.id)
+      const res = await fetch('/api/public/bookings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(form),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setError(data.message ?? data.error ?? '送信に失敗しました。時間をおいて再度お試しください。')
+        return
+      }
+      if (typeof data.id !== 'string' || typeof data.questionnaireToken !== 'string' || !data.questionnaireToken) {
+        throw new Error('問診票URLを取得できませんでした')
+      }
+      setQuestionnaireToken(data.questionnaireToken)
+      setResId(data.id)
       setDone(true)
       window.scrollTo(0, 0)
-    } else {
-      const data = await res.json().catch(() => ({}))
-      setError(data.message ?? data.error ?? '送信に失敗しました。時間をおいて再度お試しください。')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '送信に失敗しました。時間をおいて再度お試しください。')
+    } finally {
+      setSending(false)
     }
-    } catch(err) {setError(err instanceof Error ? err.message : '送信に失敗しました。時間をおいて再度お試しください。')}
-    finally {setSending(false)}
   }
 
   function downloadQr() {
