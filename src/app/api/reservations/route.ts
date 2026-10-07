@@ -8,8 +8,8 @@ import {
   patchReservation,
   ReservationConflictError,
 } from '@/lib/reservations'
-import { MSG } from '@/lib/messages'
 import { CONFIRMED_STATUS_ID, STATUSES } from '@/lib/masters'
+import { MSG } from '@/lib/messages'
 import {
   validateNewReservationInput,
   ReservationValidationError,
@@ -25,7 +25,7 @@ import {
   questionnaireTokenExpiryForDiveDate,
 } from '@/lib/reservationQuestionnaireToken'
 import { generateQuestionnaireToken, getQuestionnaireExpiry } from '@/lib/questionnaireToken'
-import { withRetry, RateLimitedError } from '@/lib/withRetry'
+import { RateLimitedError } from '@/lib/withRetry'
 import { StoreBusyError, withStoreWriteLock } from '@/lib/storeLock'
 import type { ReservationInput, ReservationTimeSlot } from '@/types'
 
@@ -40,7 +40,7 @@ export async function GET(req: NextRequest) {
   try {
     const result = await importGoogleFormBookings()
     if (result.errors.length) console.warn('[GET /api/reservations] Googleフォーム取込:', result.errors)
-    const reservations = await withRetry(() => store.getReservations())
+    const reservations = await store.getReservations()
     for (const reservation of reservations) {
       const token = reservation.questionnaireToken?.trim() || deriveReservationQuestionnaireToken(reservation.id)
       const expiry = reservation.questionnaireTokenExpiresAt?.trim() || questionnaireTokenExpiryForDiveDate(reservation.diveDate)
@@ -152,10 +152,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: '保存処理中です。時間をおいて再度お試しください。' }, { status: 503 })
     }
     console.error('[POST /api/reservations]', err)
-    return NextResponse.json(
-      { error: 'Failed to add reservation' },
-      { status: 500 }
-    )
+    return NextResponse.json({ error: 'Failed to add reservation' }, { status: 500 })
   }
 }
 
@@ -174,8 +171,8 @@ export async function PATCH(req: NextRequest) {
     if (!expectedUpdatedAt) return NextResponse.json({ error: '読込時の更新日時が必要です' }, { status: 400 })
     const allowed = ['status', 'staffId', 'staffNote', 'divePoint', 'diveDate', 'date', 'time', 'timeSlot', 'courseId', 'courseName', 'course', 'guestName', 'guestPhone', 'phone', 'guestEmail', 'guestCount', 'notes']
     const rawDelta = Object.fromEntries(Object.entries(values).filter(([key]) => allowed.includes(key)))
-    if (!Object.keys(rawDelta).length) {
-      return NextResponse.json({ error: '更新項目を指定してください' }, { status: 400 })
+    if (Object.keys(rawDelta).length === 0) {
+      return NextResponse.json({ error: '更新項目がありません' }, { status: 400 })
     }
     if (Object.entries(rawDelta).some(([key, value]) => key === 'guestCount'
       ? typeof value !== 'number' || !Number.isInteger(value) || value < 1 || value > 20
@@ -209,9 +206,6 @@ export async function PATCH(req: NextRequest) {
     if (err instanceof StoreBusyError) {
       return NextResponse.json({ error: '保存処理中です。時間をおいて再度お試しください。' }, { status: 503 })
     }
-    return NextResponse.json(
-      { error: 'Failed to update reservation' },
-      { status: 500 }
-    )
+    return NextResponse.json({ error: 'Failed to update reservation' }, { status: 500 })
   }
 }

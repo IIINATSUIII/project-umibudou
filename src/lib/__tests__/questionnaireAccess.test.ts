@@ -2,61 +2,117 @@ import { beforeEach, afterEach, it, expect, vi } from 'vitest'
 import { NextRequest } from 'next/server'
 import type { Reservation, QuestionnaireData } from '@/types'
 
-const memory = vi.hoisted(() => ({ reservations: [] as Reservation[], qs: [] as QuestionnaireData[], submits: vi.fn() }))
+const memory = vi.hoisted(() => ({
+  reservations: [] as Reservation[],
+  qs: [] as QuestionnaireData[],
+  getReservations: vi.fn(),
+  getQuestionnaires: vi.fn(),
+  submitPublicQuestionnaire: vi.fn(),
+}))
 vi.mock('@/lib/dataStore', () => ({ store: {
-  getReservations: async () => memory.reservations,
-  getQuestionnaires: async () => memory.qs,
-  submitPublicQuestionnaire: memory.submits,
+  getReservations: memory.getReservations,
+  getQuestionnaires: memory.getQuestionnaires,
   updateReservation: async (id: string, delta: Partial<Reservation>) => Object.assign(memory.reservations.find(r => r.id === id)!, delta),
-}, USE_POSTGRES: true }))
+  submitPublicQuestionnaire: memory.submitPublicQuestionnaire,
+}, USE_POSTGRES: true, DataStoreError: class DataStoreError extends Error {} }))
 vi.mock('@/lib/storeLock', () => ({ withStoreWriteLock: async (work: () => Promise<unknown>) => work(), StoreBusyError: class extends Error {} }))
-vi.mock('@/lib/session', () => ({ SESSION_COOKIE: 'odp_session', verifySessionToken: async () => null }))
+vi.mock('@/lib/session', () => ({
+  SESSION_COOKIE: 'odp_session',
+  verifySessionToken: async (token: string) => token === 'staff-session' ? { email: 'staff@example.com' } : null,
+}))
 import { GET, POST } from '@/app/api/public/questionnaires/route'
 import { POST as issue, DELETE as revoke } from '@/app/api/reservations/questionnaire-url/route'
 import { middleware } from '@/middleware'
 import { findReservationByQuestionnaireToken, getQuestionnaireExpiry, getQrError } from '../questionnaireToken'
+import { MSG } from '../messages'
+import { RateLimitedError } from '../withRetry'
 
 const token = 'input-token-with-at-least-128-bits'
-const request = (body: unknown) => new NextRequest('http://localhost/api/public/questionnaires', { method: 'POST', body: JSON.stringify(body), headers: { 'Content-Type': 'application/json' } })
-const read = (value: string) => GET(new NextRequest('http://localhost/api/public/questionnaires?accessToken=' + encodeURIComponent(value)))
-const submissionId = 'd9428888-122b-4a74-8152-2bff77e15e66'
-const validAnswers = {
+const submissionId = '00000000-0000-4000-8000-000000000001'
+const validForm = {
   submissionId,
-  lastName: '山田', firstName: '太郎', lastNameKana: 'ヤマダ', firstNameKana: 'タロウ',
-  birthDate: '1990-01-01', gender: 'male', postalCode: '100-0001', address: '東京都',
-  phone: '090-1234-5678', email: 'taro@example.com', emergencyName: '山田花子',
-  emergencyRelation: '家族', emergencyPhone: '090-1111-2222', heartDisease: false,
-  highBloodPressure: false, hypertension: false, medicalCertificate: false, respiratoryDisease: false,
-  earDisease: false, epilepsy: false, diabetes: false, pregnant: false,
-  panicDisorder: false, medication: false, medicationName: '', latexAllergy: false,
-  sleepCategory: '6時間以上', alcoholLastNight: false, alcoholToday: false,
-  condition: 'good', conditionDetails: '', flightWithin48h: false, hasCCard: false,
-  cCardType: '未取得', cCardOrg: '', lastDivePeriod: '初めて', totalDives: 0,
-  agreeRisk: true, agreeMedical: true, agreePhoto: true,
+  lastName: '山田',
+  firstName: '太郎',
+  lastNameKana: 'ヤマダ',
+  firstNameKana: 'タロウ',
+  birthDate: '1990-01-01',
+  gender: 'unanswered',
+  postalCode: '100-0001',
+  address: '沖縄県那覇市',
+  phone: '090-1234-5678',
+  email: 'taro@example.com',
+  emergencyName: '山田 花子',
+  emergencyRelation: '家族',
+  emergencyPhone: '090-9876-5432',
+  heartDisease: false,
+  hypertension: false,
+  respiratoryDisease: false,
+  earDisease: false,
+  epilepsy: false,
+  diabetes: false,
+  pregnant: false,
+  panicDisorder: false,
+  medication: false,
+  medicationName: '',
+  medicalCertificate: false,
+  latexAllergy: false,
+  sleepCategory: '6時間以上',
+  alcoholLastNight: false,
+  alcoholToday: false,
+  condition: 'good',
+  conditionDetails: '',
+  flightWithin48h: false,
+  hasCCard: false,
+  cCardType: '未取得',
+  cCardOrg: '',
+  lastDivePeriod: '初めて',
+  totalDives: null,
+  agreeRisk: true,
+  agreeMedical: true,
+  agreePhoto: false,
 }
+const request = (body: unknown) => new NextRequest('http://localhost/api/public/questionnaires', {
+  method: 'POST',
+  body: JSON.stringify({ ...validForm, ...(body as Record<string, unknown>) }),
+  headers: { 'Content-Type': 'application/json' },
+})
+const read = (value: string) => GET(new NextRequest('http://localhost/api/public/questionnaires?accessToken=' + encodeURIComponent(value)))
 beforeEach(() => {
   vi.useFakeTimers(); vi.setSystemTime(new Date('2026-10-06T00:00:00Z'))
   vi.stubEnv('SESSION_SECRET', 'test-only-secret')
-  memory.reservations = [{ id: 'R-1', diveDate: '2026-10-06', status: 'STS-03', questionnaireToken: token, questionnaireTokenExpiresAt: '2026-10-06T15:00:00Z' } as Reservation]
-  memory.qs = [{ id: 'M-1', reservationId: 'R-1', qrToken: 'independent-reception-token', qrExpiresAt: '2026-10-06T15:00:00Z', qrUsed: false, submissionState: 'complete' } as QuestionnaireData]
-  memory.submits.mockReset().mockImplementation(async () => ({
-    status: 'saved', questionnaire: memory.qs[0], requiresStaffReview: false,
-  }))
+  memory.reservations = [{ id: 'R-1', diveDate: '2026-10-06', status: 'STS-03', questionnaireToken: token, questionnaireTokenExpiresAt: '2026-10-06T15:00:00.000Z' } as Reservation]
+  memory.qs = [{ id: 'M-1', reservationId: 'R-1', qrToken: 'independent-reception-token', qrExpiresAt: '2026-10-06T15:00:00.000Z', qrUsed: false, submissionState: 'complete' } as QuestionnaireData]
+  memory.getReservations.mockReset().mockResolvedValue(memory.reservations)
+  memory.getQuestionnaires.mockReset().mockResolvedValue(memory.qs)
+  memory.submitPublicQuestionnaire.mockReset().mockImplementation(async () => ({ questionnaire: memory.qs[0] }))
 })
 afterEach(() => { vi.useRealTimers(); vi.unstubAllEnvs() })
 
-it.each([{ reservationId: 'R-1' }, { token }, { accessToken: 'R-1' }, { accessToken: 'independent-reception-token' }, { accessToken: { token } }])('rejects non-input credentials %j before saving', async body => {
+it.each([{ reservationId: 'R-1' }, { reservationToken: token }, { token }, { accessToken: 'R-1' }, { accessToken: 'independent-reception-token' }, { accessToken: { token } }])('rejects non-input credentials %j before saving', async body => {
   expect((await POST(request(body))).status).toBe(404)
-  expect(memory.submits).not.toHaveBeenCalled()
+  expect(memory.submitPublicQuestionnaire).not.toHaveBeenCalled()
 })
 it('resolves the reservation from accessToken even when a different reservationId is supplied', async () => {
-  const response = await POST(request({ ...validAnswers, accessToken: token, reservationId: 'attacker-selected' }))
+  const response = await POST(request({ accessToken: token, reservationId: 'attacker-selected' }))
   expect(response.status).toBe(200)
-  expect(memory.submits.mock.calls[0][0]).toMatchObject({ reservationId: 'R-1', reservationToken: token, submissionId })
+  expect(memory.submitPublicQuestionnaire).toHaveBeenCalledWith(expect.objectContaining({
+    reservationId: 'R-1',
+    reservationToken: token,
+    submissionId,
+  }))
   expect(await response.json()).toMatchObject({ questionnaireId: 'M-1', qrToken: 'independent-reception-token' })
 })
 it.each(['R-1', 'independent-reception-token', ''])('rejects GET using %s', async value => {
   expect((await read(value)).status).toBe(404)
+})
+it('returns MSG-17 with no-store when public questionnaire status GET is rate limited', async () => {
+  memory.getReservations.mockRejectedValueOnce(new RateLimitedError('Sheets API rate limited'))
+
+  const response = await read(token)
+
+  expect(response.status).toBe(503)
+  expect(response.headers.get('cache-control')).toBe('no-store')
+  expect(await response.json()).toEqual({ error: MSG.RATE_LIMITED })
 })
 it.each(['STS-04', 'STS-06', 'cancelled'])('rejects cancelled or unavailable reservation %s for all guest access', async status => {
   memory.reservations[0].status = status
@@ -67,7 +123,7 @@ it.each(['STS-04', 'STS-06', 'cancelled'])('rejects cancelled or unavailable res
 it.each(['', 'invalid', '2026-10-06T00:00:00Z'])('rejects absent, malformed or boundary expiry %s', async expiry => {
   memory.reservations[0].questionnaireTokenExpiresAt = expiry
   expect((await read(token)).status).toBe(404)
-  expect((await POST(request({ accessToken: token }))).status).toBe(404)
+  expect((await POST(request({ accessToken: token }))).status).toBe(410)
 })
 it('checks the current dive date and fails closed for invalid dates', () => {
   for (const diveDate of ['2026-10-05', '2026-02-30', 'invalid']) {
@@ -77,19 +133,25 @@ it('checks the current dive date and fails closed for invalid dates', () => {
 })
 it.each([{ qrUsed: true }, { qrExpiresAt: '2026-10-06T00:00:00Z' }, { qrExpiresAt: 'invalid' }, { qrToken: '' }])('does not return unusable QR from GET or POST %j', async delta => {
   Object.assign(memory.qs[0], delta)
+  memory.qs[0].submissionId = submissionId
   expect(getQrError(memory.qs[0])).not.toBeNull()
   expect((await read(token)).status).toBe(410)
   expect((await POST(request({ accessToken: token }))).status).toBe(410)
-  expect(memory.submits).not.toHaveBeenCalled()
+  expect(memory.submitPublicQuestionnaire).not.toHaveBeenCalled()
 })
 it('retries a partially saved submission with the same ID after input-token expiry', async () => {
   memory.reservations[0].questionnaireTokenExpiresAt = '2026-10-05T00:00:00.000Z'
   memory.qs = [{ ...memory.qs[0], submissionId, submissionState: 'pending' }]
+  memory.getQuestionnaires.mockResolvedValue(memory.qs)
 
-  const response = await POST(request({ ...validAnswers, accessToken: token }))
+  const response = await POST(request({ accessToken: token }))
 
   expect(response.status).toBe(200)
-  expect(memory.submits).toHaveBeenCalledWith(expect.objectContaining({ reservationId: 'R-1', submissionId }))
+  expect(memory.submitPublicQuestionnaire).toHaveBeenCalledWith(expect.objectContaining({
+    reservationId: 'R-1',
+    reservationToken: token,
+    submissionId,
+  }))
 })
 it('restores completed QR only through input token and does not expose pending submission', async () => {
   const response = await read(token)

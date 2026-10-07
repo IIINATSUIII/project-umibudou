@@ -2,13 +2,13 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { NextRequest } from 'next/server'
 import { patchReservation as patchFromScreen, ApiRequestError } from '../api'
 
-const mock = vi.hoisted(() => ({
-  patchReservation: vi.fn(),
-  getReservations: vi.fn(async () => [{ id: 'R-1', status: 'STS-03' }]),
-}))
+const mock = vi.hoisted(() => ({ patchReservation: vi.fn(), getReservations: vi.fn() }))
 vi.mock('@/lib/dataStore', () => ({ store: { getReservations: mock.getReservations } }))
+vi.mock('@/lib/session', () => ({
+  SESSION_COOKIE: 'odp_session',
+  verifySessionToken: async (token: string) => token === 'staff-session' ? { email: 'staff@example.com' } : null,
+}))
 vi.mock('@/lib/googleFormImport', () => ({ importGoogleFormBookings: vi.fn() }))
-vi.mock('@/lib/session', () => ({ SESSION_COOKIE: 'odp_session', verifySessionToken: async () => ({ email: 'staff@example.com' }) }))
 vi.mock('@/lib/reservations', () => ({
   createReservation: vi.fn(),
   patchReservation: mock.patchReservation,
@@ -90,14 +90,14 @@ describe('PATCH /api/reservations(サーバー側の競合検知)', () => {
     PATCH(
       new NextRequest('http://localhost/api/reservations', {
         method: 'PATCH',
-        headers: { 'content-type': 'application/json', cookie: 'odp_session=staff' },
+        headers: { 'content-type': 'application/json', cookie: 'odp_session=staff-session' },
         body: JSON.stringify(body),
       })
     )
   beforeEach(() => {
     vi.spyOn(console, 'error').mockImplementation(() => undefined)
     mock.patchReservation.mockReset()
-    mock.getReservations.mockResolvedValue([{ id: 'R-1', status: 'STS-03' }])
+    mock.getReservations.mockReset().mockResolvedValue([{ id: 'R-1', status: 'STS-03' }])
   })
 
   it('expectedUpdatedAt を省略した更新は400で拒否し、書き込まない(必須)', async () => {

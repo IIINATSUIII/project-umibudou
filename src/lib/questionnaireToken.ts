@@ -1,5 +1,5 @@
 import { randomBytes } from 'crypto'
-import type { Reservation, QuestionnaireData } from '@/types'
+import type { QuestionnaireData, Reservation } from '@/types'
 import { isQuestionnaireReservationAllowed } from './reservationStatus'
 
 export const generateQuestionnaireToken = () =>
@@ -35,7 +35,7 @@ export function isQuestionnaireUrlValid(
   if (
     !r?.questionnaireToken ||
     !r.questionnaireTokenExpiresAt ||
-    !isReservationActive(r)
+    !isQuestionnaireReservationAllowed(r.status)
   )
     return false
   const expiry = Date.parse(r.questionnaireTokenExpiresAt)
