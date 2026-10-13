@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import {
+  AuthConfigurationError,
   createSessionToken,
+  isNonEmptyString,
   verifySessionToken,
   validateCredentials,
   SESSION_COOKIE,
@@ -14,21 +16,57 @@ const COOKIE_OPTS = {
   maxAge: 60 * 60 * 24 * 7, // 7日間
 }
 
+function invalidLoginRequest() {
+  return NextResponse.json(
+    { error: 'メールアドレスとパスワードを正しく入力してください' },
+    { status: 400 }
+  )
+}
+
 /** POST /api/auth — ログイン */
 export async function POST(req: NextRequest) {
-  const { email, password } = await req.json()
-
-  if (!validateCredentials(email, password)) {
-    return NextResponse.json(
-      { error: 'メールアドレスまたはパスワードが正しくありません' },
-      { status: 401 }
-    )
+  let body: unknown
+  try {
+    body = await req.json()
+  } catch {
+    return invalidLoginRequest()
   }
 
-  const token = await createSessionToken(email)
-  const res = NextResponse.json({ ok: true, email })
-  res.cookies.set(SESSION_COOKIE, token, COOKIE_OPTS)
-  return res
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+    return invalidLoginRequest()
+  }
+  const { email, password } = body as Record<string, unknown>
+  if (!isNonEmptyString(email) || !isNonEmptyString(password)) {
+    return invalidLoginRequest()
+  }
+
+  try {
+    if (!validateCredentials(email, password)) {
+      return NextResponse.json(
+        { error: 'メールアドレスまたはパスワードが正しくありません' },
+        { status: 401 }
+      )
+    }
+
+    const token = await createSessionToken(email)
+    const res = NextResponse.json({ ok: true, email })
+    res.cookies.set(SESSION_COOKIE, token, COOKIE_OPTS)
+    return res
+  } catch (error) {
+    // 認証設定・パスワード・JWTを応答やログへ含めない。
+    if (error instanceof AuthConfigurationError) {
+      console.error('[auth] AUTH_CONFIGURATION_INVALID')
+      return NextResponse.json(
+        { error: '現在ログインを利用できません。時間をおいて再度お試しください' },
+        { status: 503 }
+      )
+    }
+    console.error('[auth] AUTH_INTERNAL_ERROR')
+    return NextResponse.json(
+      { error: 'ログイン処理に失敗しました。時間をおいて再度お試しください' },
+      { status: 500 }
+    )
+  }
 }
 
 /** DELETE /api/auth — ログアウト */
