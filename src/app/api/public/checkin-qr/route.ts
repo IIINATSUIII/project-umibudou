@@ -57,7 +57,7 @@ export async function POST(req: NextRequest) {
       }
     })
 
-    const questionnaireUrl = `/questionnaire/${encodeURIComponent(reservation.id)}?token=${encodeURIComponent(expectedToken)}`
+    const questionnaireUrl = `/questionnaire/${encodeURIComponent(expectedToken)}`
 
     return NextResponse.json({
       reservation: {
