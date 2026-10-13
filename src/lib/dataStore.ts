@@ -39,6 +39,8 @@ export type QuestionnaireResolutionResult =
 export interface DataStore {
   getReservations(): Promise<Reservation[]>
   addReservation(data: ReservationInput): Promise<Reservation>
+  /** 一括登録（任意）。未実装のストアでは addReservation を順に呼ぶ。 */
+  addReservations?(data: ReservationInput[]): Promise<Reservation[]>
   updateReservation(id: string, data: ReservationInput): Promise<void>
   getQuestionnaires(): Promise<QuestionnaireData[]>
   addQuestionnaire(data: Omit<QuestionnaireData, 'id'>): Promise<QuestionnaireData>

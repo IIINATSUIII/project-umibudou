@@ -343,6 +343,46 @@ export async function addReservation(data: ReservationInput): Promise<Reservatio
   return reservation
 }
 
+/**
+ * 複数予約を1回の読取・1回の追記でまとめて登録する（OTA-CSV取込用）。
+ * 1件ずつ追加すると行数×2回のAPI呼出しになり、読取枠（既定60回/分）を超えるため。
+ * 既存IDと重複する行が1件でもあれば何も書き込まない。
+ */
+export async function addReservations(list: ReservationInput[]): Promise<Reservation[]> {
+  const reservations = list.map((data) => {
+    const normalized = normalizeReservationInput(data)
+    return {
+      ...normalized,
+      legacyTime: normalized.legacyTime ?? normalized.time,
+      legacyChannel: normalized.legacyChannel ?? normalized.channel,
+      questionnaireToken: normalized.questionnaireToken ?? createReservationQuestionnaireToken(),
+      questionnaireTokenExpiresAt: normalized.questionnaireTokenExpiresAt ??
+        questionnaireTokenExpiryForDiveDate(normalized.diveDate),
+    }
+  })
+  if (reservations.length === 0) return []
+  await withStoreWriteLock(async () => {
+    const s = await snapshot('RESERVATIONS', true)
+    const existing = new Set(s.data.map((r) => r.id))
+    const ids = reservations.map((r) => r.id)
+    const duplicate = ids.find((id, index) => existing.has(id) || ids.indexOf(id) !== index)
+    if (duplicate) throw new Error(`ID ${duplicate} は登録済みです`)
+    await withRetry(() =>
+      client().spreadsheets.values.append({
+        spreadsheetId: spreadsheetId(),
+        range: `${quote(names.RESERVATIONS)}!A1`,
+        valueInputOption: 'RAW',
+        insertDataOption: 'INSERT_ROWS',
+        requestBody: {
+          values: reservations.map((v) =>
+            s.headers.map((h) => cell((v as unknown as RecordValue)[h]))),
+        },
+      })
+    )
+  })
+  return reservations
+}
+
 export async function updateReservation(id: string, data: ReservationInput): Promise<void> {
   return withStoreWriteLock(async () => {
     const all = await getReservations()

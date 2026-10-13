@@ -17,6 +17,7 @@ import {
   reservationStatusStyle,
 } from '@/lib/reservationStatus'
 import QuestionnaireUrlButton from '@/components/QuestionnaireUrlButton'
+import OtaCsvImport from '@/components/OtaCsvImport'
 import type { Reservation, QuestionnaireData } from '@/types'
 
 const CHANNEL_LABELS: Record<Reservation['channel'], string> = {
@@ -112,11 +113,8 @@ export default function ReservationsPage() {
     }
   }
 
-  function handleCsvImport(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
-    if (!file) return
-    alert(`📥 "${file.name}" を読み込みました\n\nCSV をパースして /api/reservations に POST します。`)
-    e.target.value = ''
+  async function reloadAfterImport() {
+    try { setReservations(await fetchReservations()) } catch { /* 次回の自動更新で反映される */ }
   }
 
   if (loading) return <div className="min-h-screen flex items-center justify-center text-gray-400 text-sm">読み込み中…</div>
@@ -142,14 +140,12 @@ export default function ReservationsPage() {
               すべて表示
             </button>
           )}
-          <label className="cursor-pointer text-sm border border-gray-300 rounded-lg px-3 py-1.5 hover:bg-gray-50 transition-colors">
-            📥 CSV取込
-            <input type="file" accept=".csv" className="hidden" onChange={handleCsvImport} />
-          </label>
           <Link href="/reservations/new"
             className="bg-ocean-600 text-white text-sm px-4 py-1.5 rounded-lg hover:bg-ocean-700 transition-colors">
             ＋ 予約追加
           </Link>
+          {/* 取込結果パネルは basis-full で操作行の下に折り返す */}
+          <OtaCsvImport onImported={reloadAfterImport} />
         </div>
 
         {successMessage && (
