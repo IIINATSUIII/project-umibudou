@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { buildDiveHistory } from '../diveHistory'
-import type { Reservation } from '@/types'
+import type { QuestionnaireReservationLink, Reservation } from '@/types'
 
 const reservation = (over: Partial<Reservation>): Reservation => ({
   id: 'R-1',
@@ -73,6 +73,33 @@ describe('buildDiveHistory', () => {
 
     expect(buildDiveHistory('C-9', list)).toEqual([])
     expect(buildDiveHistory('', list)).toEqual([])
+  })
+
+  it('問診票の顧客リンクから複数参加者の予約を表示し、直接リンクとの重複を避ける', () => {
+    const list = [
+      reservation({ id: 'R-1', customerId: 'C-1' }),
+      reservation({ id: 'R-2', guestCount: 2 }),
+      reservation({ id: 'R-3' }),
+    ]
+    const questionnaires = [
+      { customerId: 'C-1', reservationId: 'R-2' },
+      { customerId: 'C-1', reservationId: 'R-2' },
+      { customerId: 'C-2', reservationId: 'R-3' },
+    ] as QuestionnaireReservationLink[]
+
+    expect(buildDiveHistory('C-1', list, questionnaires).map((item) => item.reservationId))
+      .toEqual(['R-2', 'R-1'])
+  })
+
+  it('問診票の同じ予約を複数回送信しても履歴に一度だけ表示する', () => {
+    const list = [reservation({ id: 'R-1' }), reservation({ id: 'R-1', customerId: 'C-1' })]
+    const questionnaires = [
+      { customerId: 'C-1', reservationId: 'R-1' },
+      { customerId: 'C-1', reservationId: 'R-1' },
+    ] as QuestionnaireReservationLink[]
+
+    expect(buildDiveHistory('C-1', list, questionnaires).map((item) => item.reservationId))
+      .toEqual(['R-1'])
   })
 
   it('元の配列を並べ替えて変更しない', () => {

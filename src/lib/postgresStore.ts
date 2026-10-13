@@ -737,6 +737,17 @@ async function submitQuestionnaire(
       if (!expiry || Number.isNaN(expiry.getTime()) || expiry.getTime() <= Date.now()) {
         throw new DataStoreError('questionnaire_expired')
       }
+
+      const capacity = Number.isFinite(reservation.guestCount)
+        ? Math.max(1, Math.floor(reservation.guestCount))
+        : 1
+      const countResult = await client.query(
+        'SELECT COUNT(*) AS count FROM questionnaires WHERE reservation_id = $1',
+        [reservation.id],
+      )
+      if (Number(countResult.rows[0]?.count ?? 0) >= capacity) {
+        throw new DataStoreError('reservation_guest_limit')
+      }
     }
 
     await lockCustomerIdentity(client, input.formData)

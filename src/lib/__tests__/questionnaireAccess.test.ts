@@ -14,18 +14,22 @@ vi.mock('@/lib/dataStore', () => ({ store: {
   getQuestionnaires: memory.getQuestionnaires,
   updateReservation: async (id: string, delta: Partial<Reservation>) => Object.assign(memory.reservations.find(r => r.id === id)!, delta),
   submitPublicQuestionnaire: memory.submitPublicQuestionnaire,
-}, USE_POSTGRES: true, DataStoreError: class DataStoreError extends Error {} }))
+}, USE_POSTGRES: true, DataStoreError: class DataStoreError extends Error {
+  constructor(public readonly code: string) { super(code) }
+} }))
 vi.mock('@/lib/storeLock', () => ({ withStoreWriteLock: async (work: () => Promise<unknown>) => work(), StoreBusyError: class extends Error {} }))
 vi.mock('@/lib/session', () => ({
   SESSION_COOKIE: 'odp_session',
   verifySessionToken: async (token: string) => token === 'staff-session' ? { email: 'staff@example.com' } : null,
 }))
 import { GET, POST } from '@/app/api/public/questionnaires/route'
+import { GET as staffQuestionnaireGet } from '@/app/api/questionnaires/route'
 import { POST as issue, DELETE as revoke } from '@/app/api/reservations/questionnaire-url/route'
 import { middleware } from '@/middleware'
 import { findReservationByQuestionnaireToken, getQuestionnaireExpiry, getQrError } from '../questionnaireToken'
 import { MSG } from '../messages'
 import { RateLimitedError } from '../withRetry'
+import { DataStoreError } from '@/lib/dataStore'
 
 const token = 'input-token-with-at-least-128-bits'
 const submissionId = '00000000-0000-4000-8000-000000000001'
@@ -93,6 +97,7 @@ it.each([{ reservationId: 'R-1' }, { reservationToken: token }, { token }, { acc
   expect(memory.submitPublicQuestionnaire).not.toHaveBeenCalled()
 })
 it('resolves the reservation from accessToken even when a different reservationId is supplied', async () => {
+  memory.reservations[0].guestCount = 2
   const response = await POST(request({ accessToken: token, reservationId: 'attacker-selected' }))
   expect(response.status).toBe(200)
   expect(memory.submitPublicQuestionnaire).toHaveBeenCalledWith(expect.objectContaining({
@@ -102,8 +107,31 @@ it('resolves the reservation from accessToken even when a different reservationI
   }))
   expect(await response.json()).toMatchObject({ questionnaireId: 'M-1', qrToken: 'independent-reception-token' })
 })
+it('rejects a new guest submission after all reservation slots are taken', async () => {
+  memory.submitPublicQuestionnaire.mockRejectedValueOnce(new DataStoreError('reservation_guest_limit'))
+  const response = await POST(request({ accessToken: token }))
+
+  expect(response.status).toBe(409)
+  expect(await response.json()).toMatchObject({ error: expect.stringContaining('予約人数分') })
+  expect(memory.submitPublicQuestionnaire).toHaveBeenCalled()
+})
 it.each(['R-1', 'independent-reception-token', ''])('rejects GET using %s', async value => {
   expect((await read(value)).status).toBe(404)
+})
+it('returns only customer and reservation links for a customer history lookup', async () => {
+  memory.qs = [
+    { ...memory.qs[0], customerId: 'C-1', lastName: '表示しない' },
+    { ...memory.qs[0], id: 'M-2', reservationId: 'R-2', customerId: 'C-2' },
+  ]
+  memory.getQuestionnaires.mockResolvedValue(memory.qs)
+
+  const response = await staffQuestionnaireGet(new NextRequest(
+    'http://localhost/api/questionnaires?customerId=C-1',
+    { headers: { cookie: 'odp_session=staff-session' } },
+  ))
+
+  expect(response.status).toBe(200)
+  expect(await response.json()).toEqual([{ customerId: 'C-1', reservationId: 'R-1' }])
 })
 it('returns MSG-17 with no-store when public questionnaire status GET is rate limited', async () => {
   memory.getReservations.mockRejectedValueOnce(new RateLimitedError('Sheets API rate limited'))
@@ -173,7 +201,7 @@ it('reissue and revocation invalidate the old input credential without mutating 
   expect(memory.qs).toEqual(original)
 })
 it('protects staff scan and issuance endpoints while leaving token pages public', async () => {
-  for (const path of ['/questionnaire/scan', '/questionnaire/scan/', '/api/reservations/questionnaire-url', '/api/questionnaires']) {
+  for (const path of ['/questionnaire/scan', '/questionnaire/scan/', '/api/reservations/questionnaire-url', '/api/questionnaires', '/api/questionnaires/checkin']) {
     expect((await middleware(new NextRequest('http://localhost' + path))).status).toBe(307)
   }
   expect((await middleware(new NextRequest('http://localhost/questionnaire/' + token))).status).toBe(200)

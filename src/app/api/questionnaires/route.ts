@@ -135,6 +135,20 @@ export async function GET(req: NextRequest) {
         : NextResponse.json({ error: '問診票が見つかりません' }, { status: 404 })
     }
 
+    if (req.nextUrl.searchParams.has('customerId')) {
+      const customerId = req.nextUrl.searchParams.get('customerId')?.trim() ?? ''
+      if (!customerId || customerId.length > 200) {
+        return NextResponse.json({ error: '顧客IDが不正です' }, { status: 400 })
+      }
+      const links = (await store.getQuestionnaires())
+        .filter((questionnaire) => questionnaire.customerId === customerId)
+        .map(({ customerId: linkedCustomerId, reservationId }) => ({
+          customerId: linkedCustomerId,
+          reservationId,
+        }))
+      return NextResponse.json(links, { headers: { 'Cache-Control': 'no-store' } })
+    }
+
     const query = req.nextUrl.searchParams.get('q')?.trim() ?? ''
     if (!query) return NextResponse.json(await store.getQuestionnaires())
     if (query.length > 200) {
