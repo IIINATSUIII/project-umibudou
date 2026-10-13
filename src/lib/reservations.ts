@@ -14,6 +14,7 @@ import type { Reservation } from '@/types'
 import { nextUpdatedAt } from './updateVersion'
 import { randomUUID } from 'crypto'
 import { withStoreWriteLock } from './storeLock'
+import { DataStoreConflictError } from './dataStoreErrors'
 import {
   generateQuestionnaireToken,
   getQuestionnaireExpiry,
@@ -91,7 +92,16 @@ export async function patchReservation(
     if (Object.prototype.hasOwnProperty.call(delta, 'staffId')) {
       patch.staffName = getStaffName(delta.staffId)
     }
-    await store.updateReservation(id, patch)
+    try {
+      await store.updateReservation(id, patch, expectedUpdatedAt)
+    } catch (error) {
+      if (error instanceof DataStoreConflictError) {
+        throw new ReservationConflictError(
+          '他のスタッフが先に更新した可能性があります。最新の内容をご確認ください。'
+        )
+      }
+      throw error
+    }
     return patch.updatedAt!
   })
 }
