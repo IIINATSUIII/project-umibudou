@@ -7,6 +7,7 @@ import {
   validateCustomerUpdate,
 } from '@/lib/customerValidation'
 import { withStoreWriteLock, StoreBusyError } from '@/lib/storeLock'
+import { DataStoreConflictError } from '@/lib/dataStoreErrors'
 
 /** GET /api/customers — 顧客一覧取得 */
 export async function GET(req: NextRequest) {
@@ -102,7 +103,20 @@ export async function PATCH(req: NextRequest) {
       }
 
       const updatedAt = nextUpdatedAt(current.updatedAt)
-      await store.updateCustomer(id, { ...delta, updatedAt })
+      try {
+        await store.updateCustomer(
+          id,
+          { ...delta, updatedAt },
+          body.force === true ? undefined : typeof expectedUpdatedAt === 'string' ? expectedUpdatedAt : undefined,
+        )
+      } catch (error) {
+        if (!(error instanceof DataStoreConflictError)) throw error
+        const latest = (await store.getCustomers()).find((customer) => customer.id === id)
+        return NextResponse.json(
+          { error: 'CONFLICT', message: MSG.CONFLICT, customer: latest ?? current },
+          { status: 409 }
+        )
+      }
 
       return NextResponse.json({
         ok: true,

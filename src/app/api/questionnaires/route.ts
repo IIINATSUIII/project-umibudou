@@ -5,7 +5,7 @@ import { SESSION_COOKIE, verifySessionToken } from '@/lib/session'
 import type { Customer, QuestionnaireData, QuestionnaireFormData } from '@/types'
 import { saveSubmission, SubmissionValidationError, validateSubmission } from '@/lib/questionnaireSubmission'
 import { normalizeQuestionnaireExperience } from '@/lib/questionnaireExperience'
-import { withStoreWriteLock } from '@/lib/storeLock'
+import { StoreBusyError, withStoreWriteLock } from '@/lib/storeLock'
 import { getQrError } from '@/lib/questionnaireToken'
 
 export const runtime = 'nodejs'
@@ -296,7 +296,16 @@ export async function PATCH(req: NextRequest) {
 
   let response: NextResponse | null = null
   const resolve = async () => {
-    response = await resolveExistingCustomer(body)
+    try {
+      response = await withStoreWriteLock(() => resolveExistingCustomer(body))
+    } catch (err) {
+      if (err instanceof StoreBusyError) {
+        response = NextResponse.json({ error: err.message }, { status: 503 })
+      } else {
+        console.error('[PATCH /api/questionnaires]', err)
+        response = NextResponse.json({ error: 'Failed to resolve questionnaire' }, { status: 500 })
+      }
+    }
   }
   const pending = resolutionQueue.then(resolve, resolve)
   resolutionQueue = pending.then(() => undefined, () => undefined)
