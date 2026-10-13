@@ -1,15 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { verifySessionToken, SESSION_COOKIE } from '@/lib/session'
+import { SESSION_COOKIE } from '@/lib/session'
+import { requireStaffSession } from '@/lib/staffAuth'
 
 // ログイン不要のパス
 const PUBLIC_PATHS = [
   '/login',
   '/booking',      // 客側：予約申し込みフォーム
   '/line-menu',    // LINEリッチメニューから開くゲスト向け画面
-  '/api/auth',
-  '/api/public',   // 客側：予約申し込み・問診票提出API
   '/_next',
-  '/favicon',
 ]
 
 function isPublic(pathname: string): boolean {
@@ -17,7 +15,9 @@ function isPublic(pathname: string): boolean {
   if (pathname === '/questionnaire/scan' || pathname.startsWith('/questionnaire/scan/')) return false
   // The handler still requires its own CRON_SECRET bearer token.
   if (pathname === '/api/cron/sheets-outbox') return true
-  if (PUBLIC_PATHS.some((p) => pathname.startsWith(p))) return true
+  if (pathname === '/api/auth' || pathname.startsWith('/api/public/')) return true
+  if (pathname === '/favicon.ico') return true
+  if (PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`))) return true
   // ダイバー向け問診票入力画面はログイン不要（/questionnaire/[id] のみ）
   if (/^\/questionnaire\/[^/]+\/?$/.test(pathname)) return true
   return false
@@ -28,29 +28,14 @@ export async function middleware(req: NextRequest) {
 
   if (isPublic(pathname)) return NextResponse.next()
 
-  // シークレット未設定のまま検証すると全リクエストが「無効なトークン」扱いになり
-  // /login への無限リダイレクトになるため、設定漏れは明示的にエラーにする
-  if (!process.env.SESSION_SECRET) {
-    console.error(
-      '[middleware] SESSION_SECRET が未設定です。.env.local を確認して dev サーバーを再起動してください。'
-    )
-    return new NextResponse('Server misconfiguration: SESSION_SECRET is not set', {
-      status: 500,
-    })
-  }
+  const auth = await requireStaffSession(req)
+  if (auth.ok) return NextResponse.next()
+  if (pathname === '/api' || pathname.startsWith('/api/') || auth.response.status !== 401) return auth.response
 
-  const token = req.cookies.get(SESSION_COOKIE)?.value
-
-  if (!token) {
-    return NextResponse.redirect(new URL('/login', req.url))
-  }
-
-  const payload = await verifySessionToken(token)
-  if (payload) return NextResponse.next()
-
-  // トークンが無効 → ログインへ
+  // Only page requests redirect; API callers receive JSON from the guard.
   const res = NextResponse.redirect(new URL('/login', req.url))
-  res.cookies.delete(SESSION_COOKIE)
+  res.headers.set('Cache-Control', 'no-store')
+  if (req.cookies.has(SESSION_COOKIE)) res.cookies.delete(SESSION_COOKIE)
   return res
 }
 

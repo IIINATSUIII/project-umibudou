@@ -1,4 +1,4 @@
-import { it, expect, vi, beforeEach } from 'vitest'
+import { it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { NextRequest } from 'next/server'
 import { RateLimitedError } from '../withRetry'
 import { MSG } from '../messages'
@@ -43,11 +43,13 @@ const validBooking = {
 const limited = () => new RateLimitedError('Sheets API rate limited')
 
 beforeEach(() => {
+  vi.stubEnv('SESSION_SECRET', 'test-only-session-secret')
   vi.spyOn(console, 'error').mockImplementation(() => undefined)
   mock.getReservations.mockReset()
   mock.createReservation.mockReset()
   mock.patchReservation.mockReset()
 })
+afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks() })
 
 it('MSG-17の文言は設計書どおり', () => {
   expect(MSG.RATE_LIMITED).toBe('通信が集中しています。しばらく経ってから再度お試しください。')

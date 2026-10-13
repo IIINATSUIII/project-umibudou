@@ -8,14 +8,22 @@ import { SignJWT, jwtVerify } from 'jose'
 const SESSION_COOKIE = 'odp_session'
 const EXPIRY = '7d'
 
+export class SessionConfigurationError extends Error {
+  constructor() {
+    super('SESSION_SECRET is not configured')
+    this.name = 'SessionConfigurationError'
+  }
+}
+
 function getSecret(): Uint8Array {
   const s = process.env.SESSION_SECRET
-  if (!s) throw new Error('SESSION_SECRET が設定されていません')
+  if (!s?.trim()) throw new SessionConfigurationError()
   return new TextEncoder().encode(s)
 }
 
 /** JWT を生成してクッキー用の文字列を返す */
 export async function createSessionToken(email: string): Promise<string> {
+  if (typeof email !== 'string' || !email.trim()) throw new TypeError('A non-empty staff email is required')
   return new SignJWT({ email })
     .setProtectedHeader({ alg: 'HS256' })
     .setIssuedAt()
@@ -27,16 +35,24 @@ export async function createSessionToken(email: string): Promise<string> {
 export async function verifySessionToken(
   token: string
 ): Promise<{ email: string } | null> {
+  // Configuration errors are operational failures, not invalid user tokens.
+  const secret = getSecret()
   try {
-    const { payload } = await jwtVerify(token, getSecret())
-    return { email: payload.email as string }
+    const { payload } = await jwtVerify(token, secret, {
+      algorithms: ['HS256'],
+      requiredClaims: ['exp', 'email'],
+    })
+    if (typeof payload.email !== 'string' || !payload.email.trim()) return null
+    if (typeof payload.exp !== 'number' || !Number.isFinite(payload.exp)) return null
+    return { email: payload.email }
   } catch {
     return null
   }
 }
 
 /** スタッフ認証情報を検証する（.env.local の STAFF_CREDENTIALS を参照） */
-export function validateCredentials(email: string, password: string): boolean {
+export function validateCredentials(email: unknown, password: unknown): boolean {
+  if (typeof email !== 'string' || !email.trim() || typeof password !== 'string' || !password.trim()) return false
   // 書式: "staff@okidive.com:pass1|staff2@okidive.com:pass2"
   const raw = process.env.STAFF_CREDENTIALS ?? ''
   const users = raw.split('|').map((u) => {

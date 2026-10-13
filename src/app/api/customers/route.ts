@@ -1,5 +1,6 @@
 import { nextUpdatedAt } from '@/lib/updateVersion'
-import { NextRequest, NextResponse } from 'next/server'
+import { requireStaffSession, staffJson } from '@/lib/staffAuth'
+import { NextRequest } from 'next/server'
 import { store } from '@/lib/dataStore'
 import { MSG } from '@/lib/messages'
 import {
@@ -8,16 +9,21 @@ import {
 } from '@/lib/customerValidation'
 import { withStoreWriteLock, StoreBusyError } from '@/lib/storeLock'
 
+export const dynamic = 'force-dynamic'
+
 /** GET /api/customers — 顧客一覧取得 */
 export async function GET(req: NextRequest) {
+  const auth = await requireStaffSession(req)
+  if (!auth.ok) return auth.response
+
   try {
     const query = req.nextUrl.searchParams.get('q') || ''
-    return NextResponse.json(
+    return staffJson(
       query ? await store.searchCustomers(query) : await store.getCustomers()
     )
   } catch (err) {
     console.error('[GET /api/customers]', err)
-    return NextResponse.json(
+    return staffJson(
       { error: 'Failed to fetch customers' },
       { status: 500 }
     )
@@ -26,13 +32,16 @@ export async function GET(req: NextRequest) {
 
 /** POST /api/customers — 顧客登録 */
 export async function POST(req: NextRequest) {
+  const auth = await requireStaffSession(req)
+  if (!auth.ok) return auth.response
+
   try {
     const body = await req.json()
     await store.addCustomer({ ...body, updatedAt: new Date().toISOString() })
-    return NextResponse.json({ ok: true })
+    return staffJson({ ok: true })
   } catch (err) {
     console.error('[POST /api/customers]', err)
-    return NextResponse.json(
+    return staffJson(
       { error: 'Failed to add customer' },
       { status: 500 }
     )
@@ -48,11 +57,14 @@ export async function POST(req: NextRequest) {
  *  - expectedUpdatedAt が最新と食い違う場合は 409（MSG-20）。force: true で後勝ち上書き
  */
 export async function PATCH(req: NextRequest) {
+  const auth = await requireStaffSession(req)
+  if (!auth.ok) return auth.response
+
   try {
     const body = (await req.json()) as Record<string, unknown>
     const id = typeof body.id === 'string' ? body.id : ''
     if (!id) {
-      return NextResponse.json(
+      return staffJson(
         { error: 'INVALID_REQUEST', message: '顧客IDが指定されていません。' },
         { status: 400 }
       )
@@ -62,7 +74,7 @@ export async function PATCH(req: NextRequest) {
       const all = await store.getCustomers()
       const current = all.find((c) => c.id === id)
       if (!current) {
-        return NextResponse.json(
+        return staffJson(
           { error: 'NOT_FOUND', message: '対象の顧客が見つかりません。' },
           { status: 404 }
         )
@@ -75,7 +87,7 @@ export async function PATCH(req: NextRequest) {
         typeof expectedUpdatedAt === 'string' &&
         (current.updatedAt ?? '') !== expectedUpdatedAt
       ) {
-        return NextResponse.json(
+        return staffJson(
           { error: 'CONFLICT', message: MSG.CONFLICT, customer: current },
           { status: 409 }
         )
@@ -83,7 +95,7 @@ export async function PATCH(req: NextRequest) {
 
       const delta = pickEditableFields(body)
       if (Object.keys(delta).length === 0) {
-        return NextResponse.json(
+        return staffJson(
           { error: 'INVALID_REQUEST', message: '更新する項目がありません。' },
           { status: 400 }
         )
@@ -91,7 +103,7 @@ export async function PATCH(req: NextRequest) {
 
       const fields = validateCustomerUpdate(delta, current, all)
       if (Object.keys(fields).length > 0) {
-        return NextResponse.json(
+        return staffJson(
           {
             error: 'VALIDATION_ERROR',
             message: '入力内容を確認してください。',
@@ -104,7 +116,7 @@ export async function PATCH(req: NextRequest) {
       const updatedAt = nextUpdatedAt(current.updatedAt)
       await store.updateCustomer(id, { ...delta, updatedAt })
 
-      return NextResponse.json({
+      return staffJson({
         ok: true,
         message: MSG.SAVED,
         customer: { ...current, ...delta, updatedAt },
@@ -113,8 +125,8 @@ export async function PATCH(req: NextRequest) {
   } catch (err) {
     console.error('[PATCH /api/customers]', err)
     if (err instanceof StoreBusyError)
-      return NextResponse.json({ error: err.message }, { status: 503 })
-    return NextResponse.json(
+      return staffJson({ error: err.message }, { status: 503 })
+    return staffJson(
       { error: 'Failed to update customer' },
       { status: 500 }
     )

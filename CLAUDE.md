@@ -39,8 +39,9 @@
 - Google Sheets へのアクセスは **必ず API Route（サーバーサイド）経由**。サービスアカウント鍵・`GOOGLE_PRIVATE_KEY` をクライアントコードに出さない。
 - 環境変数は `.env.local`（コミット禁止）。新しい変数を追加したら `.env.local.example` と README も更新する。
 - ダイバー（ゲスト）向け画面 `/questionnaire/[id]` は認証不要。それ以外のページは middleware で保護される。ルート保護の対象を変える場合は `src/middleware.ts` の matcher を確認。
+- スタッフAPIは必ず各ハンドラーの先頭で `requireStaffSession()` を実行し、本文解析・データ処理・ロックより前に拒否する。個人情報のJSON応答には `staffJson()` を使う。新しいAPIを追加したら `staffApiAuth.test.ts` の認証分類と拒否テストも更新する。
 - 問診票 URL の ID は推測困難なランダム ID を使うこと（要件定義書 §6）。
-- `src/app/api/setup/route.ts` はシート初期化用。本番デプロイ前に削除する。
+- `src/app/api/setup/route.ts` はシート初期化用。スタッフ認証に加え、開発環境で `ENABLE_SHEETS_SETUP=true` の場合だけ実行できる。本番で有効にする抜け道を追加しない。
 
 ## 検証
 

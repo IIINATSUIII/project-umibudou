@@ -1,9 +1,12 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest } from 'next/server'
+import { requireStaffSession, staffJson } from '@/lib/staffAuth'
 import { store } from '@/lib/dataStore'
 import type { QuestionnaireData, RosterEntry } from '@/types'
 import { withStoreWriteLock } from '@/lib/storeLock'
 import { randomUUID } from 'crypto'
 import { getQrError, isReservationActive } from '@/lib/questionnaireToken'
+
+export const dynamic = 'force-dynamic'
 
 function ageAt(birthDate: string, date: string): number {
   const birth = new Date(`${birthDate}T00:00:00+09:00`)
@@ -20,17 +23,23 @@ function normalizePhone(value: string): string {
 }
 
 /** GET /api/roster — 名簿一覧（スタッフ専用） */
-export async function GET() {
-  return NextResponse.json(await store.getRoster())
+export async function GET(req: NextRequest) {
+  const auth = await requireStaffSession(req)
+  if (!auth.ok) return auth.response
+
+  return staffJson(await store.getRoster())
 }
 
 /** POST /api/roster — 問診・予約・顧客を名簿へ追加（スタッフ専用） */
 export async function POST(req: NextRequest) {
+  const auth = await requireStaffSession(req)
+  if (!auth.ok) return auth.response
+
   try {
     const body = await req.json() as { questionnaireId?: string; qrToken?: string; method?: RosterEntry['checkInMethod'] }
     const questionnaireId = String(body.questionnaireId ?? '')
     if (body.method !== 'QR読取' && body.method !== '手動照合') {
-      return NextResponse.json({ error: '受付方法が不正です' }, { status: 400 })
+      return staffJson({ error: '受付方法が不正です' }, { status: 400 })
     }
     const method = body.method
     const result = await withStoreWriteLock(async () => {
@@ -67,11 +76,11 @@ export async function POST(req: NextRequest) {
     if (result.error) {
       const errorMessage = result.error
       const status = errorMessage.includes('MSG-22') ? 409 : errorMessage.includes('問診情報') || errorMessage.includes('予約情報') ? 404 : 400
-      return NextResponse.json({ error: errorMessage }, { status })
+      return staffJson({ error: errorMessage }, { status })
     }
-    return NextResponse.json(result)
+    return staffJson(result)
   } catch (err) {
     console.error('[POST /api/roster]', err)
-    return NextResponse.json({ error: '名簿への追加に失敗しました' }, { status: 500 })
+    return staffJson({ error: '名簿への追加に失敗しました' }, { status: 500 })
   }
 }

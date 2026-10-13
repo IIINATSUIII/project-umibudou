@@ -95,10 +95,12 @@ describe('PATCH /api/reservations(サーバー側の競合検知)', () => {
       })
     )
   beforeEach(() => {
+    vi.stubEnv('SESSION_SECRET', 'test-only-session-secret')
     vi.spyOn(console, 'error').mockImplementation(() => undefined)
     mock.patchReservation.mockReset()
     mock.getReservations.mockReset().mockResolvedValue([{ id: 'R-1', status: 'STS-03' }])
   })
+  afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks() })
 
   it('expectedUpdatedAt を省略した更新は400で拒否し、書き込まない(必須)', async () => {
     const res = await call({ id: 'R-1', status: 'STS-03' })

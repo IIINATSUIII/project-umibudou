@@ -77,6 +77,10 @@ const request = (body: unknown) => new NextRequest('http://localhost/api/public/
   headers: { 'Content-Type': 'application/json' },
 })
 const read = (value: string) => GET(new NextRequest('http://localhost/api/public/questionnaires?accessToken=' + encodeURIComponent(value)))
+const staffRequest = (body: unknown) => new NextRequest('http://localhost/api/reservations/questionnaire-url', {
+  method: 'POST', body: JSON.stringify(body),
+  headers: { 'Content-Type': 'application/json', cookie: 'odp_session=staff-session' },
+})
 beforeEach(() => {
   vi.useFakeTimers(); vi.setSystemTime(new Date('2026-10-06T00:00:00Z'))
   vi.stubEnv('SESSION_SECRET', 'test-only-secret')
@@ -118,7 +122,7 @@ it.each(['STS-04', 'STS-06', 'cancelled'])('rejects cancelled or unavailable res
   memory.reservations[0].status = status
   expect((await read(token)).status).toBe(404)
   expect((await POST(request({ accessToken: token }))).status).toBe(404)
-  expect((await issue(request({ id: 'R-1' }))).status).toBe(404)
+  expect((await issue(staffRequest({ id: 'R-1' }))).status).toBe(404)
 })
 it.each(['', 'invalid', '2026-10-06T00:00:00Z'])('rejects absent, malformed or boundary expiry %s', async expiry => {
   memory.reservations[0].questionnaireTokenExpiresAt = expiry
@@ -162,19 +166,22 @@ it('restores completed QR only through input token and does not expose pending s
 })
 it('reissue and revocation invalidate the old input credential without mutating consent or reception QR', async () => {
   const original = structuredClone(memory.qs)
-  const result = await (await issue(request({ id: 'R-1', reissue: true }))).json()
+  const result = await (await issue(staffRequest({ id: 'R-1', reissue: true }))).json()
   expect(result.questionnaireToken).not.toBe(token)
   expect(result.questionnaireToken).not.toBe(memory.qs[0].qrToken)
   expect(Buffer.from(result.questionnaireToken, 'base64url').length).toBe(32)
   expect((await read(token)).status).toBe(404)
   expect((await read(result.questionnaireToken)).status).toBe(200)
-  expect((await revoke(request({ id: 'R-1' }))).status).toBe(200)
+  expect((await revoke(staffRequest({ id: 'R-1' }))).status).toBe(200)
   expect((await read(result.questionnaireToken)).status).toBe(404)
   expect(memory.qs).toEqual(original)
 })
 it('protects staff scan and issuance endpoints while leaving token pages public', async () => {
-  for (const path of ['/questionnaire/scan', '/questionnaire/scan/', '/api/reservations/questionnaire-url', '/api/questionnaires']) {
+  for (const path of ['/questionnaire/scan', '/questionnaire/scan/']) {
     expect((await middleware(new NextRequest('http://localhost' + path))).status).toBe(307)
+  }
+  for (const path of ['/api/reservations/questionnaire-url', '/api/questionnaires']) {
+    expect((await middleware(new NextRequest('http://localhost' + path))).status).toBe(401)
   }
   expect((await middleware(new NextRequest('http://localhost/questionnaire/' + token))).status).toBe(200)
 })
