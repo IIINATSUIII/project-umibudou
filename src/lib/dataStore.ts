@@ -81,3 +81,6 @@ export const store: DataStore = USE_POSTGRES
     : configuredStore === 'sheets' || USE_SHEETS
       ? sheets
       : local
+
+/** 共有サービスアカウントの読取枠（既定60回/分）を持つSheetsが主ストアか（Issue #68） */
+export const USES_SHEETS_STORE = store === sheets

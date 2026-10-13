@@ -7,6 +7,9 @@ import { saveSubmission, SubmissionValidationError, validateSubmission } from '@
 import { normalizeQuestionnaireExperience } from '@/lib/questionnaireExperience'
 import { withStoreWriteLock } from '@/lib/storeLock'
 import { getQrError } from '@/lib/questionnaireToken'
+import { getQuestionnairesForList } from '@/lib/listReads'
+import { RateLimitedError } from '@/lib/withRetry'
+import { MSG } from '@/lib/messages'
 
 export const runtime = 'nodejs'
 
@@ -136,7 +139,8 @@ export async function GET(req: NextRequest) {
     }
 
     const query = req.nextUrl.searchParams.get('q')?.trim() ?? ''
-    if (!query) return NextResponse.json(await store.getQuestionnaires())
+    // 一覧（ポーリング対象）は短期キャッシュ経由で読む（Issue #68）
+    if (!query) return NextResponse.json(await getQuestionnairesForList())
     if (query.length > 200) {
       return NextResponse.json({ error: '検索語が長すぎます' }, { status: 400 })
     }
@@ -159,6 +163,8 @@ export async function GET(req: NextRequest) {
     })))
   } catch (err) {
     console.error('[GET /api/questionnaires]', err)
+    if (err instanceof RateLimitedError)
+      return NextResponse.json({ error: MSG.RATE_LIMITED }, { status: 503 })
     return NextResponse.json({ error: 'Failed to fetch questionnaires' }, { status: 500 })
   }
 }

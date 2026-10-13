@@ -50,7 +50,10 @@ export class ApiRequestError extends Error {
 
 export async function fetchReservations(): Promise<Reservation[]> {
   const res = await fetch('/api/reservations')
-  if (!res.ok) throw new Error('Failed to fetch reservations')
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}))
+    throw new ApiRequestError(body?.error || 'Failed to fetch reservations', res.status)
+  }
   return res.json()
 }
 
@@ -102,7 +105,10 @@ export async function fetchQuestionnaires(
 ): Promise<QuestionnaireData[] | QuestionnaireSummary[]> {
   const res = await fetch(`/api/questionnaires?q=${encodeURIComponent(query)}`)
   if (res.status === 410) throw new Error('QR_EXPIRED')
-  if (!res.ok) throw new Error('Failed to fetch questionnaires')
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}))
+    throw new ApiRequestError(body?.error || 'Failed to fetch questionnaires', res.status)
+  }
   return res.json()
 }
 

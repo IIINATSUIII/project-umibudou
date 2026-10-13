@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { store } from '@/lib/dataStore'
 import { importGoogleFormBookings } from '@/lib/googleFormImport'
+import { getReservationsForList } from '@/lib/listReads'
 import { SESSION_COOKIE, verifySessionToken } from '@/lib/session'
 import {
   createReservation,
@@ -40,8 +41,10 @@ export async function GET(req: NextRequest) {
   try {
     const result = await importGoogleFormBookings()
     if (result.errors.length) console.warn('[GET /api/reservations] Googleフォーム取込:', result.errors)
-    const reservations = await store.getReservations()
-    for (const reservation of reservations) {
+    // 一覧は短期キャッシュ経由で読む（Issue #68）。共有の配列なので要素は書き換えずコピーする
+    const reservations = []
+    for (const cached of await getReservationsForList()) {
+      const reservation = { ...cached }
       const token = reservation.questionnaireToken?.trim() || deriveReservationQuestionnaireToken(reservation.id)
       const expiry = reservation.questionnaireTokenExpiresAt?.trim() || questionnaireTokenExpiryForDiveDate(reservation.diveDate)
       if (token !== reservation.questionnaireToken || expiry !== reservation.questionnaireTokenExpiresAt) {
@@ -52,6 +55,7 @@ export async function GET(req: NextRequest) {
         reservation.questionnaireToken = token
         reservation.questionnaireTokenExpiresAt = expiry
       }
+      reservations.push(reservation)
     }
     const date = req.nextUrl.searchParams.get('date')
     return NextResponse.json(date ? reservations.filter((r) => r.diveDate === date) : reservations)

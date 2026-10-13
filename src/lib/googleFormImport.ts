@@ -130,10 +130,26 @@ function makeReservationId(spreadsheetId: string, sheetName: string, rowNumber: 
 }
 
 /**
+ * 取込の最短間隔（Issue #68）。一覧のポーリングごとに回答タブを読むと、
+ * 画面数に比例してSheetsの読取枠（既定60回/分）を消費するため、プロセス内で間引く。
+ * 客側フォームの申し込みは最大でこの間隔＋一覧の更新間隔の遅れで反映される。
+ */
+export const FORM_IMPORT_MIN_INTERVAL_MS = 30_000
+
+/**
+ * 予約シートに存在を確認済みの取込ID。回答行がすべて既知なら予約シートを読まない。
+ * IDはスプレッドシート・タブ・行番号から決まるため、同一プロセス内で使い回してよい。
+ */
+const knownReservationIds = new Set<string>()
+
+type ImportCandidate = { rowNumber: number; reservation: Reservation }
+
+/**
  * 回答タブの未取込行を仮予約として追加する。
  * 予約一覧取得時に呼び出すため、スタッフ画面を開いている間は自動反映される。
  */
 let importInFlight: Promise<GoogleFormImportResult> | null = null
+let lastImport: { finishedAt: number; result: GoogleFormImportResult } | null = null
 
 async function importGoogleFormBookingsOnce(): Promise<GoogleFormImportResult> {
   if (!USE_SHEETS) {
@@ -175,11 +191,10 @@ async function importGoogleFormBookingsOnce(): Promise<GoogleFormImportResult> {
     }
   }
 
-  const reservations = await store.getReservations()
-  const existingIds = new Set(reservations.map((reservation) => reservation.id))
   let imported = 0
   let skipped = 0
   const errors: string[] = []
+  const candidates: ImportCandidate[] = []
 
   for (let index = 1; index < rows.length; index += 1) {
     const row = rows[index]
@@ -187,7 +202,7 @@ async function importGoogleFormBookingsOnce(): Promise<GoogleFormImportResult> {
     if (!row || row.every((value) => String(value ?? '').trim() === '')) continue
 
     const id = makeReservationId(spreadsheetId, sheetName, rowNumber)
-    if (existingIds.has(id)) {
+    if (knownReservationIds.has(id)) {
       skipped += 1
       continue
     }
@@ -216,46 +231,87 @@ async function importGoogleFormBookingsOnce(): Promise<GoogleFormImportResult> {
     }
 
     const now = new Date().toISOString()
-    const reservation: Reservation = {
-      id,
-      diveDate: date as string,
-      time: time as string,
-      legacyTime: time as string,
-      timeSlot: 'unspecified',
-      courseName: course,
-      guestName: guestName.slice(0, 50),
-      guestCount: guestCount as number,
-      guestPhone: phone.slice(0, 20),
-      channel: 'google_form',
-      status: ISSUE_5_RESERVATION_STATUS.requested,
-      staffNote: cell(row, columns.notes).slice(0, 500),
-      createdAt: now,
-      updatedAt: now,
-      questionnaireToken: generateQuestionnaireToken(),
-      questionnaireTokenExpiresAt: getQuestionnaireExpiry(date as string),
-    }
-    try {
-      await store.addReservation(reservation)
-    } catch (err) {
-      skipped += 1
-      errors.push(`行${rowNumber}: 予約の保存に失敗しました`)
-      console.error(`[googleFormImport] 行${rowNumber} の保存に失敗しました`, err)
-      continue
-    }
-    existingIds.add(id)
-    imported += 1
+    candidates.push({
+      rowNumber,
+      reservation: {
+        id,
+        diveDate: date as string,
+        time: time as string,
+        legacyTime: time as string,
+        timeSlot: 'unspecified',
+        courseName: course,
+        guestName: guestName.slice(0, 50),
+        guestCount: guestCount as number,
+        guestPhone: phone.slice(0, 20),
+        channel: 'google_form',
+        status: ISSUE_5_RESERVATION_STATUS.requested,
+        staffNote: cell(row, columns.notes).slice(0, 500),
+        createdAt: now,
+        updatedAt: now,
+        questionnaireToken: generateQuestionnaireToken(),
+        questionnaireTokenExpiresAt: getQuestionnaireExpiry(date as string),
+      },
+    })
+  }
+
+  // 未確認の行があるときだけ書込ロックを取り、予約シートを読んで重複を確認する
+  if (candidates.length === 0) return { enabled: true, imported, skipped, errors }
+  try {
+    await withStoreWriteLock(async () => {
+      const reservations = await store.getReservations()
+      for (const reservation of reservations) {
+        if (reservation.id.startsWith('GF-')) knownReservationIds.add(reservation.id)
+      }
+      for (const { rowNumber, reservation } of candidates) {
+        if (knownReservationIds.has(reservation.id)) {
+          skipped += 1
+          continue
+        }
+        try {
+          await store.addReservation(reservation)
+        } catch (err) {
+          skipped += 1
+          errors.push(`行${rowNumber}: 予約の保存に失敗しました`)
+          console.error(`[googleFormImport] 行${rowNumber} の保存に失敗しました`, err)
+          continue
+        }
+        knownReservationIds.add(reservation.id)
+        imported += 1
+      }
+    })
+  } catch (err) {
+    // ロック待ち・API制限でも一覧表示は止めず、次回の取込で再試行する
+    console.error('[googleFormImport] 予約の取込に失敗しました', err)
+    errors.push('予約の取込を完了できませんでした。次回の更新で再試行します')
   }
 
   return { enabled: true, imported, skipped, errors }
 }
 
-/** 同一プロセス内の同時リクエストによる二重取込を防ぐ */
-export function importGoogleFormBookings(): Promise<GoogleFormImportResult> {
-  if (!process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || !process.env.GOOGLE_PRIVATE_KEY || !process.env.GOOGLE_SPREADSHEET_ID) return importGoogleFormBookingsOnce()
-  if (!importInFlight) {
-    importInFlight = withStoreWriteLock(()=>importGoogleFormBookingsOnce()).finally(() => {
+/**
+ * 同一プロセス内の同時リクエストによる二重取込を防ぎ、
+ * FORM_IMPORT_MIN_INTERVAL_MS 以内の再呼出しは直前の結果を返す。
+ */
+export function importGoogleFormBookings(now: () => number = Date.now): Promise<GoogleFormImportResult> {
+  if (!USE_SHEETS) return importGoogleFormBookingsOnce()
+  if (importInFlight) return importInFlight
+  if (lastImport && now() - lastImport.finishedAt < FORM_IMPORT_MIN_INTERVAL_MS) {
+    return Promise.resolve(lastImport.result)
+  }
+  importInFlight = importGoogleFormBookingsOnce()
+    .then((result) => {
+      lastImport = { finishedAt: now(), result }
+      return result
+    })
+    .finally(() => {
       importInFlight = null
     })
-  }
   return importInFlight
+}
+
+/** テスト用 */
+export function resetGoogleFormImportForTests(): void {
+  importInFlight = null
+  lastImport = null
+  knownReservationIds.clear()
 }

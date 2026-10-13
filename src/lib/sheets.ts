@@ -17,6 +17,7 @@ import {
 } from './storeSchema'
 import { withStoreWriteLock } from './storeLock'
 import { withRetry } from './withRetry'
+import { invalidateReadCache } from './readCache'
 import { matchesCustomer } from './customerSearch'
 import { matchesQuestionnaire, nextQuestionnaireId } from './questionnaireUtils'
 import { normalizeReservationInput, normalizeReservationPatch } from './reservationNormalization'
@@ -46,6 +47,14 @@ const names: Record<StoreKind, string> = {
 }
 const spreadsheetId = () => process.env.GOOGLE_SPREADSHEET_ID!
 const quote = (name: string) => `'${name.replace(/'/g, "''")}'`
+/** 書込（成否を問わず）の後は一覧用読取キャッシュを無効化する（Issue #68）。 */
+async function invalidatingReads<T>(write: () => Promise<T>): Promise<T> {
+  try {
+    return await write()
+  } finally {
+    invalidateReadCache()
+  }
+}
 function client() {
   const auth = new google.auth.GoogleAuth({
     credentials: {
@@ -307,7 +316,7 @@ export async function upsertSheetProjection(
     projection[key] = value === undefined || value === null ? '' : value
   }
 
-  await withStoreWriteLock(async () => {
+  await withStoreWriteLock(() => invalidatingReads(async () => {
     // Fail closed on an unmigrated sheet before applying an outbox projection.
     await snapshot(kind, true)
     const { headers, rows } = await getSheetTable(config.sheetName, options.timeoutMs)
@@ -320,7 +329,7 @@ export async function upsertSheetProjection(
     } else {
       await appendObject(config.sheetName, projection, options.timeoutMs)
     }
-  })
+  }))
 }
 
 // ─── 予約 ─────────────────────────────────────────────────────
@@ -458,6 +467,10 @@ export async function updateCustomer(id: string, data: Partial<Customer>): Promi
  * 初回セットアップ時またはスキーマ更新後に実行（/api/setup エンドポイント経由）。
  */
 export async function initializeSheetsByAppendingMissingHeaders(): Promise<void> {
+  return invalidatingReads(appendMissingHeaders)
+}
+
+async function appendMissingHeaders(): Promise<void> {
   for (const [sheetName, headers] of [
     [SHEET.RESERVATIONS, HEADERS.RESERVATIONS],
     [SHEET.QUESTIONNAIRES, HEADERS.QUESTIONNAIRES],
@@ -481,7 +494,7 @@ export async function initializeSheetsByAppendingMissingHeaders(): Promise<void>
 }
 
 async function add<T extends { id: string }>(kind: StoreKind, v: T) {
-  return withStoreWriteLock(async () => {
+  return withStoreWriteLock(() => invalidatingReads(async () => {
     const s = await snapshot(kind, true)
     if (s.data.some((r) => r.id === v.id))
       throw new Error(`ID ${v.id} は登録済みです`)
@@ -498,7 +511,7 @@ async function add<T extends { id: string }>(kind: StoreKind, v: T) {
         },
       })
     )
-  })
+  }))
 }
 function column(index: number) {
   let result = ''
@@ -507,7 +520,7 @@ function column(index: number) {
   return result
 }
 async function update<T>(kind: StoreKind, id: string, delta: Partial<T>) {
-  return withStoreWriteLock(async () => {
+  return withStoreWriteLock(() => invalidatingReads(async () => {
     const s = await snapshot(kind, true)
     const index = s.data.findIndex((r) => r.id === id)
     if (index < 0) throw new Error(`${kind} ${id} not found`)
@@ -529,7 +542,7 @@ async function update<T>(kind: StoreKind, id: string, delta: Partial<T>) {
           requestBody: { valueInputOption: 'RAW', data },
         })
       )
-  })
+  }))
 }
 export const searchQuestionnaires = async (q: string) =>
   (await getQuestionnaires()).filter((v) => matchesQuestionnaire(v, q))
@@ -540,7 +553,7 @@ export const addRoster = (v: RosterEntry) => add('ROSTER', v)
 
 /** バックアップの複製後、一回の原子的batchUpdateで列名と全行を移行する。 */
 export async function initializeSheets() {
-  return withStoreWriteLock(async () => {
+  return withStoreWriteLock(() => invalidatingReads(async () => {
     const sheets = client()
     const metadata = await sheets.spreadsheets.get({
       spreadsheetId: spreadsheetId(),
@@ -688,5 +701,5 @@ export async function initializeSheets() {
       })
     }
     return results
-  })
+  }))
 }

@@ -1,12 +1,13 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import Navigation from '@/components/Navigation'
 import WindyWidget from '@/components/WindyWidget'
 import WeatherWidget from '@/components/WeatherWidget'
 import { useAuth } from '@/lib/authContext'
+import { pollingErrorMessage, usePolling } from '@/lib/usePolling'
 import { fetchReservations, fetchQuestionnaires, patchReservation, ApiRequestError } from '@/lib/api'
 import { getStatusName } from '@/lib/masters'
 import {
@@ -54,6 +55,7 @@ export default function DashboardPage() {
   const router = useRouter()
   const [reservations, setReservations] = useState<Reservation[]>([])
   const [actionError,setActionError]=useState('')
+  const [loadError, setLoadError] = useState('')
   const [questionnaires, setQuestionnaires] = useState<QuestionnaireData[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -63,19 +65,24 @@ export default function DashboardPage() {
   const tomorrow = tomorrowDate.toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' })
 
   useEffect(() => {
-    if (user === undefined) return
-    if (!user) { router.push('/login'); return }
-    const load = () => Promise.all([fetchReservations(), fetchQuestionnaires()]).then(([res, qs]) => {
+    if (user === null) router.push('/login')
+  }, [user, router])
+
+  // 客側フォームからの申し込みを自動反映（30秒ごと＋タブ表示・ウィンドウ復帰時。失敗時は間隔を伸ばす）
+  const load = useCallback(async () => {
+    try {
+      const [res, qs] = await Promise.all([fetchReservations(), fetchQuestionnaires()])
       setReservations(res)
       setQuestionnaires(qs)
+      setLoadError('')
+    } catch (err) {
+      setLoadError(pollingErrorMessage(err))
+      throw err
+    } finally {
       setLoading(false)
-    }).catch(() => { setActionError('データを読み込めませんでした。更新して再度お試しください。'); setLoading(false) })
-    load()
-    // 客側フォームからの申し込みを自動反映（10秒ごと＋ウィンドウ復帰時）
-    const iv = setInterval(load, 10000)
-    window.addEventListener('focus', load)
-    return () => { clearInterval(iv); window.removeEventListener('focus', load) }
-  }, [user, router])
+    }
+  }, [])
+  usePolling(load, Boolean(user))
 
   async function handleConfirm(id: string) {
     const reservation = reservations.find((item) => item.id === id)
@@ -111,6 +118,7 @@ export default function DashboardPage() {
     <div className="min-h-screen">
       <Navigation />
       {actionError && <p role="alert" className="p-4 text-red-700">{actionError}</p>}
+      {loadError && <p role="status" className="p-4 text-amber-700">{loadError}</p>}
       <main className="max-w-5xl mx-auto px-4 py-6 pb-20 md:pb-6 space-y-6">
 
         {pendingRes.length > 0 && (
