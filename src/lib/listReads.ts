@@ -8,14 +8,17 @@ import { store, USES_SHEETS_STORE } from './dataStore'
 import { cachedRead } from './readCache'
 import type { QuestionnaireData, Reservation } from '@/types'
 
-export function getReservationsForList(): Promise<Reservation[]> {
+/** fresh: 競合後の再読込・QR照合の事前ロードなど、キャッシュを使わず最新を読む */
+export type ListReadOptions = { fresh?: boolean }
+
+export function getReservationsForList({ fresh = false }: ListReadOptions = {}): Promise<Reservation[]> {
   return USES_SHEETS_STORE
-    ? cachedRead('RESERVATIONS', () => store.getReservations())
+    ? cachedRead('RESERVATIONS', () => store.getReservations(), { force: fresh })
     : store.getReservations()
 }
 
-export function getQuestionnairesForList(): Promise<QuestionnaireData[]> {
+export function getQuestionnairesForList({ fresh = false }: ListReadOptions = {}): Promise<QuestionnaireData[]> {
   return USES_SHEETS_STORE
-    ? cachedRead('QUESTIONNAIRES', () => store.getQuestionnaires())
+    ? cachedRead('QUESTIONNAIRES', () => store.getQuestionnaires(), { force: fresh })
     : store.getQuestionnaires()
 }

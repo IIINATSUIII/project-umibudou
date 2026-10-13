@@ -1,14 +1,14 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import Navigation from '@/components/Navigation'
 import WindyWidget from '@/components/WindyWidget'
 import WeatherWidget from '@/components/WeatherWidget'
 import { useAuth } from '@/lib/authContext'
-import { pollingErrorMessage, usePolling } from '@/lib/usePolling'
-import { fetchReservations, fetchQuestionnaires, patchReservation, ApiRequestError } from '@/lib/api'
+import { useReservationLists } from '@/lib/useReservationLists'
+import { patchReservation, ApiRequestError } from '@/lib/api'
 import { getStatusName } from '@/lib/masters'
 import {
   confirmedReservationStatus,
@@ -53,11 +53,7 @@ function statusLabel(status: string): string {
 export default function DashboardPage() {
   const user = useAuth()
   const router = useRouter()
-  const [reservations, setReservations] = useState<Reservation[]>([])
   const [actionError,setActionError]=useState('')
-  const [loadError, setLoadError] = useState('')
-  const [questionnaires, setQuestionnaires] = useState<QuestionnaireData[]>([])
-  const [loading, setLoading] = useState(true)
 
   const today    = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' })
   const tomorrowDate = new Date()
@@ -68,21 +64,8 @@ export default function DashboardPage() {
     if (user === null) router.push('/login')
   }, [user, router])
 
-  // 客側フォームからの申し込みを自動反映（30秒ごと＋タブ表示・ウィンドウ復帰時。失敗時は間隔を伸ばす）
-  const load = useCallback(async () => {
-    try {
-      const [res, qs] = await Promise.all([fetchReservations(), fetchQuestionnaires()])
-      setReservations(res)
-      setQuestionnaires(qs)
-      setLoadError('')
-    } catch (err) {
-      setLoadError(pollingErrorMessage(err))
-      throw err
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-  usePolling(load, Boolean(user))
+  const { reservations, setReservations, questionnaires, loading, loadError, reloadReservationsFresh } =
+    useReservationLists(Boolean(user))
 
   async function handleConfirm(id: string) {
     const reservation = reservations.find((item) => item.id === id)
@@ -94,7 +77,7 @@ export default function DashboardPage() {
       setActionError('')
     } catch (err) {
       setActionError(err instanceof Error ? err.message : '保存できませんでした')
-      if (err instanceof ApiRequestError && err.status === 409) setReservations(await fetchReservations())
+      if (err instanceof ApiRequestError && err.status === 409) await reloadReservationsFresh()
     }
   }
 

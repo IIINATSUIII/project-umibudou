@@ -63,9 +63,10 @@ function ScanContent() {
   const load = useCallback(async () => {
     setLoading(true)
     try {
+      // QR照合の事前ロードは5分間隔なので、送信直後の問診も漏れないよう最新を読む
       const [qs, rs] = await Promise.all([
-        fetchQuestionnaires(),
-        fetchReservations(),
+        fetchQuestionnaires({ fresh: true }),
+        fetchReservations({ fresh: true }),
       ])
       const today = new Date().toLocaleDateString('sv-SE', {
         timeZone: 'Asia/Tokyo',

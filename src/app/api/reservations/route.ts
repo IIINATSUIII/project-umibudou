@@ -41,9 +41,11 @@ export async function GET(req: NextRequest) {
   try {
     const result = await importGoogleFormBookings()
     if (result.errors.length) console.warn('[GET /api/reservations] Googleフォーム取込:', result.errors)
-    // 一覧は短期キャッシュ経由で読む（Issue #68）。共有の配列なので要素は書き換えずコピーする
+    // 一覧は短期キャッシュ経由で読む（Issue #68）。?fresh=1 は競合後の再読込などで最新を読む。
+    // 共有の配列なので要素は書き換えずコピーする
+    const fresh = req.nextUrl.searchParams.get('fresh') === '1'
     const reservations = []
-    for (const cached of await getReservationsForList()) {
+    for (const cached of await getReservationsForList({ fresh })) {
       const reservation = { ...cached }
       const token = reservation.questionnaireToken?.trim() || deriveReservationQuestionnaireToken(reservation.id)
       const expiry = reservation.questionnaireTokenExpiresAt?.trim() || questionnaireTokenExpiryForDiveDate(reservation.diveDate)

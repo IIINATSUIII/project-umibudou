@@ -51,13 +51,13 @@ beforeEach(() => {
 describe('一覧用読取キャッシュ', () => {
   it('TTL内は何画面から読んでも1回だけ読む', async () => {
     const load = vi.fn(async () => ['R-1'])
-    await Promise.all([cachedRead('K', load, now), cachedRead('K', load, now), cachedRead('K', load, now)])
+    await Promise.all([cachedRead('K', load, { now }), cachedRead('K', load, { now }), cachedRead('K', load, { now })])
     clock += READ_CACHE_TTL_MS - 1
-    expect(await cachedRead('K', load, now)).toEqual(['R-1'])
+    expect(await cachedRead('K', load, { now })).toEqual(['R-1'])
     expect(load).toHaveBeenCalledTimes(1)
 
     clock += 1
-    await cachedRead('K', load, now)
+    await cachedRead('K', load, { now })
     expect(load).toHaveBeenCalledTimes(2)
   })
 
@@ -67,32 +67,47 @@ describe('一覧用読取キャッシュ', () => {
       .mockImplementationOnce(() => new Promise<string[]>((resolve) => { resolveFirst = resolve }))
       .mockResolvedValue(['after-write'])
 
-    const inFlight = cachedRead('K', load, now)
+    const inFlight = cachedRead('K', load, { now })
     await Promise.resolve()
     invalidateReadCache()
     // 書込後に来た読取は書込前の読取に相乗りしない
-    expect(await cachedRead('K', load, now)).toEqual(['after-write'])
+    expect(await cachedRead('K', load, { now })).toEqual(['after-write'])
     resolveFirst(['before-write'])
     expect(await inFlight).toEqual(['before-write'])
-    expect(await cachedRead('K', load, now)).toEqual(['after-write'])
+    expect(await cachedRead('K', load, { now })).toEqual(['after-write'])
     expect(load).toHaveBeenCalledTimes(2)
   })
 
   it('API制限時は取得済みの値で代替し、古すぎる場合はエラーを返す', async () => {
     const load = vi.fn().mockResolvedValueOnce(['old']).mockRejectedValue(new RateLimitedError('limited'))
-    await cachedRead('K', load, now)
-    invalidateReadCache()
-    expect(await cachedRead('K', load, now)).toEqual(['old'])
+    await cachedRead('K', load, { now })
+    clock += READ_CACHE_TTL_MS
+    expect(await cachedRead('K', load, { now })).toEqual(['old'])
 
     clock += READ_CACHE_STALE_ON_RATE_LIMIT_MS
-    await expect(cachedRead('K', load, now)).rejects.toBeInstanceOf(RateLimitedError)
+    await expect(cachedRead('K', load, { now })).rejects.toBeInstanceOf(RateLimitedError)
+  })
+
+  it('自分の書込後は、API制限でも書込前の値で画面を巻き戻さない', async () => {
+    const load = vi.fn().mockResolvedValueOnce(['before-write']).mockRejectedValue(new RateLimitedError('limited'))
+    await cachedRead('K', load, { now })
+    invalidateReadCache()
+    await expect(cachedRead('K', load, { now })).rejects.toBeInstanceOf(RateLimitedError)
+  })
+
+  it('force はTTL内でも読み直し、結果を以後の読取で使う', async () => {
+    const load = vi.fn().mockResolvedValueOnce(['cached']).mockResolvedValueOnce(['latest'])
+    await cachedRead('K', load, { now })
+    expect(await cachedRead('K', load, { now, force: true })).toEqual(['latest'])
+    expect(await cachedRead('K', load, { now })).toEqual(['latest'])
+    expect(load).toHaveBeenCalledTimes(2)
   })
 
   it('API制限以外の失敗は代替しない', async () => {
     const load = vi.fn().mockResolvedValueOnce(['old']).mockRejectedValue(new Error('boom'))
-    await cachedRead('K', load, now)
-    invalidateReadCache()
-    await expect(cachedRead('K', load, now)).rejects.toThrow('boom')
+    await cachedRead('K', load, { now })
+    clock += READ_CACHE_TTL_MS
+    await expect(cachedRead('K', load, { now })).rejects.toThrow('boom')
   })
 })
 
@@ -118,13 +133,13 @@ describe('Googleフォーム取込の間引き', () => {
     mock.addReservation.mockResolvedValue(undefined)
 
     expect((await importGoogleFormBookings(now)).imported).toBe(1)
-    expect(mock.getReservations).toHaveBeenCalledTimes(1)
+    const readsAfterFirst = mock.getReservations.mock.calls.length
     expect(mock.lock).toHaveBeenCalledTimes(1)
 
     clock += FORM_IMPORT_MIN_INTERVAL_MS
     const second = await importGoogleFormBookings(now)
     expect(second).toMatchObject({ imported: 0, skipped: 1 })
-    expect(mock.getReservations).toHaveBeenCalledTimes(1)
+    expect(mock.getReservations).toHaveBeenCalledTimes(readsAfterFirst)
     expect(mock.lock).toHaveBeenCalledTimes(1)
   })
 
@@ -141,12 +156,27 @@ describe('Googleフォーム取込の間引き', () => {
     expect(mock.addReservation).toHaveBeenCalledTimes(1)
   })
 
+  it('取込済みの行は、後から不正になっていても検証エラーにしない', async () => {
+    mock.getSheetValues.mockResolvedValue([header, row])
+    mock.addReservation.mockResolvedValue(undefined)
+    mock.getReservations.mockResolvedValue([])
+    await importGoogleFormBookings(now)
+    const importedId = mock.addReservation.mock.calls[0][0].id
+
+    resetGoogleFormImportForTests() // 再起動相当
+    const edited = [...row]
+    edited[2] = '' // 希望時間を消す
+    mock.getSheetValues.mockResolvedValue([header, edited])
+    mock.getReservations.mockResolvedValue([{ id: importedId }])
+    expect(await importGoogleFormBookings(now)).toMatchObject({ imported: 0, skipped: 1, errors: [] })
+  })
+
   it('ロック待ち・API制限でも例外にせず、一覧表示を止めない', async () => {
     mock.getSheetValues.mockResolvedValue([header, row])
     mock.getReservations.mockRejectedValue(new RateLimitedError('limited'))
     const result = await importGoogleFormBookings(now)
     expect(result.imported).toBe(0)
-    expect(result.errors).toHaveLength(1)
+    expect(result.errors).toEqual(['予約の取込を完了できませんでした。次回の更新で再試行します'])
   })
 })
 

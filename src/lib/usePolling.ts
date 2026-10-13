@@ -6,7 +6,7 @@ import { ApiRequestError } from './api'
 /**
  * 一覧の自動更新（Issue #68）。Sheetsの読取枠を複数画面で共有するため、
  * - 前回の取得が終わってから次を予約し、重ねて取得しない
- * - タブが非表示の間は取得しない（表示・フォーカス復帰時にすぐ取得する）
+ * - タブが非表示の間は（初回を除き）取得しない（表示・フォーカス復帰時にすぐ取得する）
  * - 失敗（API制限の503など）が続くと間隔を伸ばし、成功したら元に戻す。止めはしない
  */
 export const POLL_INTERVAL_MS = 30_000
@@ -36,7 +36,8 @@ export function usePolling(load: () => Promise<void>, enabled: boolean): void {
     }
     const run = async () => {
       if (stopped || running) return
-      if (document.visibilityState === 'hidden') { schedule(); return }
+      // 初回は非表示でも読み込む（「読み込み中」のまま止めない）。以降の定期取得だけ非表示中は休む
+      if (lastStartedAt > 0 && document.visibilityState === 'hidden') { schedule(); return }
       running = true
       lastStartedAt = Date.now()
       try {
@@ -51,8 +52,9 @@ export function usePolling(load: () => Promise<void>, enabled: boolean): void {
     }
     const resume = () => {
       if (document.visibilityState === 'hidden') return
-      // バックオフ中は待機を優先し、復帰操作で読取を増やさない
-      if (failures === 0 && Date.now() - lastStartedAt >= RESUME_MIN_GAP_MS) void run()
+      // 復帰時は最新を見せる。ただしバックオフ中は通常間隔より短い再取得はしない（読取を増やさない）
+      const minGap = failures === 0 ? RESUME_MIN_GAP_MS : POLL_INTERVAL_MS
+      if (Date.now() - lastStartedAt >= minGap) void run()
     }
 
     void run()

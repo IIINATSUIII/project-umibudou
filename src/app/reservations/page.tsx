@@ -1,13 +1,13 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import WeatherWidget from '@/components/WeatherWidget'
 import Navigation from '@/components/Navigation'
 import { useAuth } from '@/lib/authContext'
-import { pollingErrorMessage, usePolling } from '@/lib/usePolling'
-import { fetchReservations, fetchQuestionnaires, patchReservation, ApiRequestError } from '@/lib/api'
+import { useReservationLists } from '@/lib/useReservationLists'
+import { patchReservation, ApiRequestError } from '@/lib/api'
 import { getStatusName } from '@/lib/masters'
 import {
   cancelledReservationStatus,
@@ -40,14 +40,10 @@ function statusLabel(status: string): string {
 export default function ReservationsPage() {
   const user = useAuth()
   const router = useRouter()
-  const [reservations, setReservations] = useState<Reservation[]>([])
   const [actionError,setActionError]=useState('')
-  const [loadError, setLoadError] = useState('')
-  const [questionnaires, setQuestionnaires] = useState<QuestionnaireData[]>([])
   const [successMessage, setSuccessMessage] = useState('')
   // 空文字 = 全件表示。日付を選ぶとその日のみ表示
   const [dateFilter, setDateFilter] = useState('')
-  const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     if (new URLSearchParams(window.location.search).get('saved') === '1') {
@@ -60,21 +56,8 @@ export default function ReservationsPage() {
     if (user === null) router.push('/login')
   }, [user, router])
 
-  // 客側フォームからの申し込みを自動反映（30秒ごと＋タブ表示・ウィンドウ復帰時。失敗時は間隔を伸ばす）
-  const load = useCallback(async () => {
-    try {
-      const [res, qs] = await Promise.all([fetchReservations(), fetchQuestionnaires()])
-      setReservations(res)
-      setQuestionnaires(qs)
-      setLoadError('')
-    } catch (err) {
-      setLoadError(pollingErrorMessage(err))
-      throw err
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-  usePolling(load, Boolean(user))
+  const { reservations, setReservations, questionnaires, loading, loadError, reloadReservationsFresh } =
+    useReservationLists(Boolean(user))
 
   function questionnaireIdFor(reservationId: string): string | undefined {
     return questionnaires.find((q) => q.reservationId === reservationId)?.id
@@ -97,9 +80,7 @@ export default function ReservationsPage() {
       setActionError('')
     } catch (err) {
       setActionError(err instanceof Error ? err.message : '保存できませんでした')
-      if (err instanceof ApiRequestError && err.status === 409) {
-        try { setReservations(await fetchReservations()) } catch { /* keep the visible stale row */ }
-      }
+      if (err instanceof ApiRequestError && err.status === 409) await reloadReservationsFresh()
     }
   }
 
@@ -113,9 +94,7 @@ export default function ReservationsPage() {
       setActionError('')
     } catch (err) {
       setActionError(err instanceof Error ? err.message : '保存できませんでした')
-      if (err instanceof ApiRequestError && err.status === 409) {
-        try { setReservations(await fetchReservations()) } catch { /* keep the visible stale row */ }
-      }
+      if (err instanceof ApiRequestError && err.status === 409) await reloadReservationsFresh()
     }
   }
 

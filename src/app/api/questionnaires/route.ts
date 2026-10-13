@@ -139,8 +139,11 @@ export async function GET(req: NextRequest) {
     }
 
     const query = req.nextUrl.searchParams.get('q')?.trim() ?? ''
-    // 一覧（ポーリング対象）は短期キャッシュ経由で読む（Issue #68）
-    if (!query) return NextResponse.json(await getQuestionnairesForList())
+    // 一覧（ポーリング対象）は短期キャッシュ経由で読む（Issue #68）。?fresh=1 はQR照合の事前ロード用に最新を読む
+    if (!query) {
+      const fresh = req.nextUrl.searchParams.get('fresh') === '1'
+      return NextResponse.json(await getQuestionnairesForList({ fresh }))
+    }
     if (query.length > 200) {
       return NextResponse.json({ error: '検索語が長すぎます' }, { status: 400 })
     }

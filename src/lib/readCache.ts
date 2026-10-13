@@ -6,7 +6,9 @@
  *
  * - 同時リクエストは実行中の読取を共有する（重複読込しない）
  * - 書込（invalidateReadCache）後は次の読取で必ず再取得する。書込前に始まった読取の結果は保存しない
- * - API制限（RateLimitedError）時は、取得済みの値が古すぎなければそれを返して画面更新を止めない
+ * - API制限（RateLimitedError）時は、取得済みの値が古すぎず、かつ書込で無効化されていなければそれを返して画面更新を止めない
+ *   （自分の書込より前の値で画面を巻き戻さない）
+ * - TTLはプロセス単位。複数インスタンスでは他インスタンスの書込が最大TTLだけ遅れて見えるため短くしている
  *
  * 競合チェック・採番などの書込経路では使わないこと（常に最新値を読む必要があるため）。
  */
@@ -14,14 +16,14 @@
 import { RateLimitedError } from './withRetry'
 
 /** 一覧の鮮度：この時間内の再読取はキャッシュを返す */
-export const READ_CACHE_TTL_MS = 15_000
+export const READ_CACHE_TTL_MS = 5_000
 /** API制限時に古い値で代替してよい上限 */
 export const READ_CACHE_STALE_ON_RATE_LIMIT_MS = 5 * 60_000
 
 type Entry = {
   value?: unknown
   fetchedAt: number
-  /** 書込で無効化されたらfalse。値はAPI制限時の代替用に残す */
+  /** 書込で無効化されたらfalse。無効化された値はAPI制限時の代替にも使わない */
   fresh: boolean
   inFlight?: Promise<unknown>
   inFlightGeneration?: number
@@ -30,17 +32,23 @@ type Entry = {
 const entries = new Map<string, Entry>()
 let generation = 0
 
+export type CachedReadOptions = {
+  /** trueならキャッシュを使わず必ず読み直す（競合後の再読込など）。結果はキャッシュに保存する */
+  force?: boolean
+  now?: () => number
+}
+
 export async function cachedRead<T>(
   key: string,
   load: () => Promise<T>,
-  now: () => number = Date.now,
+  { force = false, now = Date.now }: CachedReadOptions = {},
 ): Promise<T> {
   const entry = entries.get(key) ?? { fetchedAt: 0, fresh: false }
   entries.set(key, entry)
-  if (entry.fresh && now() - entry.fetchedAt < READ_CACHE_TTL_MS) {
+  if (!force && entry.fresh && now() - entry.fetchedAt < READ_CACHE_TTL_MS) {
     return entry.value as T
   }
-  if (entry.inFlight && entry.inFlightGeneration === generation) {
+  if (!force && entry.inFlight && entry.inFlightGeneration === generation) {
     return entry.inFlight as Promise<T>
   }
 
@@ -61,7 +69,7 @@ export async function cachedRead<T>(
       (err: unknown) => {
         if (
           err instanceof RateLimitedError &&
-          entry.value !== undefined &&
+          entry.fresh &&
           now() - entry.fetchedAt < READ_CACHE_STALE_ON_RATE_LIMIT_MS
         ) {
           console.warn(`[readCache] ${key}: API制限のため取得済みの一覧を返します`)
@@ -81,7 +89,7 @@ export async function cachedRead<T>(
   return request
 }
 
-/** 書込後に呼ぶ。以降の読取は必ず再取得する（API制限時の代替値としては保持する）。 */
+/** 書込後に呼ぶ。以降の読取は必ず再取得する。 */
 export function invalidateReadCache(): void {
   generation += 1
   entries.forEach((entry) => { entry.fresh = false })

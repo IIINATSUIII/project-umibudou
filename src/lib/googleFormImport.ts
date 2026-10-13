@@ -141,6 +141,14 @@ export const FORM_IMPORT_MIN_INTERVAL_MS = 30_000
  * IDはスプレッドシート・タブ・行番号から決まるため、同一プロセス内で使い回してよい。
  */
 const knownReservationIds = new Set<string>()
+/** プロセス起動後の初回だけ予約シートから既知IDを読み込む（取込済み行を検証より先に除外するため） */
+let knownIdsSeeded = false
+
+function rememberImportedIds(reservations: Reservation[]): void {
+  for (const reservation of reservations) {
+    if (reservation.id.startsWith('GF-')) knownReservationIds.add(reservation.id)
+  }
+}
 
 type ImportCandidate = { rowNumber: number; reservation: Reservation }
 
@@ -188,6 +196,18 @@ async function importGoogleFormBookingsOnce(): Promise<GoogleFormImportResult> {
       imported: 0,
       skipped: 0,
       errors: [`${sheetName} に必要な見出しがありません: ${missingHeaders.join(', ')}`],
+    }
+  }
+
+  // 取込済みの行は、後から回答が編集されて不正になっていても検証せず読み飛ばす（従来どおり）
+  if (!knownIdsSeeded && rows.slice(1).some((row) => row?.some((value) => String(value ?? '').trim() !== ''))) {
+    try {
+      // 取込済みと確認できたIDは以後も取込不要なので、ロック外で読んでよい
+      rememberImportedIds(await store.getReservations())
+      knownIdsSeeded = true
+    } catch (err) {
+      // 読めなくても取込は続け、未確認の行はロック内で改めて確認する
+      console.error('[googleFormImport] 取込済みIDの読み込みに失敗しました', err)
     }
   }
 
@@ -258,10 +278,8 @@ async function importGoogleFormBookingsOnce(): Promise<GoogleFormImportResult> {
   if (candidates.length === 0) return { enabled: true, imported, skipped, errors }
   try {
     await withStoreWriteLock(async () => {
-      const reservations = await store.getReservations()
-      for (const reservation of reservations) {
-        if (reservation.id.startsWith('GF-')) knownReservationIds.add(reservation.id)
-      }
+      rememberImportedIds(await store.getReservations())
+      knownIdsSeeded = true
       for (const { rowNumber, reservation } of candidates) {
         if (knownReservationIds.has(reservation.id)) {
           skipped += 1
@@ -314,4 +332,5 @@ export function resetGoogleFormImportForTests(): void {
   importInFlight = null
   lastImport = null
   knownReservationIds.clear()
+  knownIdsSeeded = false
 }
