@@ -10,7 +10,7 @@ const TIME_SLOTS: [Reservation['timeSlot'], string][] = [
 ]
 
 export default function BookingPage() {
-  const [form, setForm] = useState({
+  const [form, setForm] = useState(() => ({
     diveDate: new Date(Date.now() + 86400000).toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' }),
     timeSlot: 'morning' as Reservation['timeSlot'],
     courseId: COURSES[0].id,
@@ -19,7 +19,7 @@ export default function BookingPage() {
     guestPhone: '',
     guestEmail: '',
     staffNote: '',
-  })
+  }))
   const [sending, setSending] = useState(false)
   const [done, setDone] = useState(false)
   const [questionnaireToken, setQuestionnaireToken] = useState('')

@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { issueQuestionnaireUrl } from '@/lib/api'
 
 export default function QuestionnaireUrlButton({
@@ -10,6 +11,7 @@ export default function QuestionnaireUrlButton({
   reservationId: string
   onError: (message: string) => void
 }) {
+  const router = useRouter()
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
   async function issue(action: 'open' | 'copy' | 'reissue') {
@@ -28,7 +30,7 @@ export default function QuestionnaireUrlButton({
       if (!issued.questionnaireToken)
         throw new Error('URLの発行結果を確認できませんでした')
       const url = `${window.location.origin}/questionnaire/${encodeURIComponent(issued.questionnaireToken)}`
-      if (action === 'open') window.location.assign(url)
+      if (action === 'open') router.push(url)
       else {
         await navigator.clipboard.writeText(url)
         setMessage(

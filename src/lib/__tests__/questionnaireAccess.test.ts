@@ -22,7 +22,7 @@ vi.mock('@/lib/session', () => ({
 }))
 import { GET, POST } from '@/app/api/public/questionnaires/route'
 import { POST as issue, DELETE as revoke } from '@/app/api/reservations/questionnaire-url/route'
-import { middleware } from '@/middleware'
+import { proxy as middleware } from '@/proxy'
 import { findReservationByQuestionnaireToken, getQuestionnaireExpiry, getQrError } from '../questionnaireToken'
 import { MSG } from '../messages'
 import { RateLimitedError } from '../withRetry'

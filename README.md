@@ -1,12 +1,12 @@
 # 🤿 沖ダイブ・パートナー
 
-ダイビングショップ運営支援 Web アプリ — Next.js 14 + JWT 認証 + Google Sheets
+ダイビングショップ運営支援 Web アプリ — Next.js 16 + JWT 認証 + Google Sheets
 
 ---
 
 ## クイックスタート（チームメンバー向け）
 
-前提: **Node.js 18.17 以上**（`.nvmrc` 参照）と Git。
+前提: **Node.js 24 LTS**（`.nvmrc` 参照）と Git。開発・CI・本番を24系にそろえてください。
 
 ```bash
 git clone <このリポジトリのURL>
@@ -108,7 +108,7 @@ POST http://localhost:3000/api/setup
 
 ### スタッフAPIの認証
 
-顧客・予約・問診・名簿・問診URL発行/失効・setupの全操作は、各ハンドラーの先頭で共通の `requireStaffSession()` を実行します。middlewareが実行されなくても、未認証はデータ取得・更新・ロックの前に401のJSONで拒否します。署名鍵の設定不備は503です。個人情報を含むスタッフAPIの応答には `Cache-Control: no-store` を設定します。
+顧客・予約・問診・名簿・問診URL発行/失効・setupの全操作は、各ハンドラーの先頭で共通の `requireStaffSession()` を実行します。proxyが実行されなくても、未認証はデータ取得・更新・ロックの前に401のJSONで拒否します。署名鍵の設定不備は503です。個人情報を含むスタッフAPIの応答には `Cache-Control: no-store` を設定します。
 
 公開予約・公開問診・受付QRにはスタッフのログインを要求せず、従来の予約トークン検証を維持します。cronは独立した `CRON_SECRET` のBearer認証で保護します。保護画面の未認証アクセスはログインへ誘導します。[認証仕様と検証](docs/security/staff-api-auth.md)
 
@@ -146,7 +146,9 @@ Vercel ダッシュボード → Settings → Environment Variables で以下を
 2. `npm ci` による依存関係のインストール
 3. `npm run lint` によるLint
 4. `npm run typecheck` による型チェック
-5. `npm run build` による本番ビルド確認
+5. `npm test` による回帰テスト
+6. `npm run build` による本番ビルド確認
+7. `npm run test:security` による使い捨てJSONデータでのHTTP検証
 
 GitHubリポジトリの **Settings → Branches** で、`main`へのマージ条件にActionsのジョブ **Lint, typecheck, and build** を必須チェックとして追加すると、チェックに失敗した変更のマージを防止できます。
 
@@ -179,7 +181,7 @@ src/
 │   ├── api.ts           ← クライアント側 fetch 関数
 │   ├── mockData.ts      ← フォールバック用モックデータ
 │   └── weather.ts       ← 気象庁オープンデータ（沖縄）
-├── middleware.ts         ← Edge Middleware：JWT Cookie でルート保護
+├── proxy.ts              ← Node.js Proxy：画面のログイン誘導とAPIの401応答
 └── types/index.ts        ← 型定義
 ```
 
@@ -204,7 +206,7 @@ POST /api/auth { email, password }
   → HTTP-only Cookie にセット（odp_session）
 
 以降のリクエスト:
-  → middleware.ts が Cookie を検証
+  → proxy.ts が Cookie を検証
   → スタッフAPIはハンドラーでも requireStaffSession() を実行
   → 無効ならAPIは401のJSON、画面は /login にリダイレクト
 ```

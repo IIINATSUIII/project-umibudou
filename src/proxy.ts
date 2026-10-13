@@ -16,14 +16,14 @@ function isPublic(pathname: string): boolean {
   // The handler still requires its own CRON_SECRET bearer token.
   if (pathname === '/api/cron/sheets-outbox') return true
   if (pathname === '/api/auth' || pathname.startsWith('/api/public/')) return true
-  if (pathname === '/favicon.ico') return true
+  if (pathname === '/favicon.ico' || pathname === '/line-rich-menu.png') return true
   if (PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`))) return true
   // ダイバー向け問診票入力画面はログイン不要（/questionnaire/[id] のみ）
   if (/^\/questionnaire\/[^/]+\/?$/.test(pathname)) return true
   return false
 }
 
-export async function middleware(req: NextRequest) {
+export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl
 
   if (isPublic(pathname)) return NextResponse.next()

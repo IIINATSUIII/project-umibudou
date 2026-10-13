@@ -25,7 +25,7 @@
 
 ## 2. 前提条件
 
-- **Node.js 18.17 以上**（`node -v` で確認）
+- **Node.js 24 LTS**（`node -v` と `.nvmrc` で確認。CI・本番も24系に統一）
 - **Git**
 
 ---
@@ -102,7 +102,7 @@ GOOGLE_SPREADSHEET_ID=your_spreadsheet_id
 
 | 症状 | 対処 |
 |------|------|
-| `npm run dev` でエラー | Node.js のバージョンを確認（18.17 以上必須）。`node_modules` を削除して `npm install` をやり直す |
+| `npm run dev` でエラー | Node.js のバージョンを確認（24 LTS必須）。`npm ci` で固定済み依存を入れ直す |
 | ログインできない | `.env.local` の `STAFF_CREDENTIALS` の書式（`メール:パスワード`）を確認し、サーバーを再起動 |
 | ポート 3000 が使用中 | `npm run dev -- -p 3001` で別ポートを指定 |
 | 画面にデータが出ない | Sheets 未設定なら正常（モックデータ＋ `data/*.json` 保存で動作）。`data/` フォルダの中身を確認 |

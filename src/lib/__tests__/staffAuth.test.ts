@@ -3,7 +3,7 @@ import { SignJWT } from 'jose'
 import { NextRequest } from 'next/server'
 import { createSessionToken, verifySessionToken, SESSION_COOKIE, SessionConfigurationError } from '../session'
 import { requireStaffSession, staffJson } from '../staffAuth'
-import { middleware } from '@/middleware'
+import { proxy as middleware } from '@/proxy'
 import { GET as currentUser, POST as login, DELETE as logout } from '@/app/api/auth/route'
 
 const secret = 'session-test-secret-never-use-in-production'
@@ -81,7 +81,7 @@ describe('signed staff sessions', () => {
 })
 
 describe('page and API authentication boundaries', () => {
-  it.each(['/api/customers', '/api/roster', '/api/auth-extra', '/api/publicity', '/api/cron/sheets-outbox-extra'])(
+  it.each(['/api/customers', '/api/customers.png', '/api/roster', '/api/auth-extra', '/api/publicity', '/api/cron/sheets-outbox-extra'])(
     'returns JSON 401 for protected API %s', async (url) => {
       const response = await middleware(request(url))
       expect(response.status).toBe(401)
@@ -98,7 +98,7 @@ describe('page and API authentication boundaries', () => {
     },
   )
 
-  it.each(['/login', '/booking', '/line-menu/checkin', '/api/auth', '/api/public/bookings', '/api/public/questionnaires', '/api/public/checkin-qr', '/api/cron/sheets-outbox', '/questionnaire/opaque-token', '/_next/static/app.js', '/favicon.ico'])(
+  it.each(['/login', '/booking', '/line-menu/checkin', '/api/auth', '/api/public/bookings', '/api/public/questionnaires', '/api/public/checkin-qr', '/api/cron/sheets-outbox', '/questionnaire/opaque-token', '/_next/static/app.js', '/favicon.ico', '/line-rich-menu.png'])(
     'keeps public and independently authenticated paths available: %s', async (url) => {
       vi.stubEnv('SESSION_SECRET', '')
       expect((await middleware(request(url))).headers.get('x-middleware-next')).toBe('1')
