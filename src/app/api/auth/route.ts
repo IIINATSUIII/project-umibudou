@@ -21,7 +21,7 @@ const COOKIE_OPTS = {
 }
 
 function invalidLoginRequest() {
-  return NextResponse.json(
+  return staffJson(
     { error: 'メールアドレスとパスワードを正しく入力してください' },
     { status: 400 }
   )
@@ -46,27 +46,27 @@ export async function POST(req: NextRequest) {
 
   try {
     if (!validateCredentials(email, password)) {
-      return NextResponse.json(
+      return staffJson(
         { error: 'メールアドレスまたはパスワードが正しくありません' },
         { status: 401 }
       )
     }
 
     const token = await createSessionToken(email)
-    const res = NextResponse.json({ ok: true, email })
+    const res = staffJson({ ok: true, email })
     res.cookies.set(SESSION_COOKIE, token, COOKIE_OPTS)
     return res
   } catch (error) {
     // 認証設定・パスワード・JWTを応答やログへ含めない。
     if (error instanceof AuthConfigurationError) {
       console.error('[auth] AUTH_CONFIGURATION_INVALID')
-      return NextResponse.json(
+      return staffJson(
         { error: '現在ログインを利用できません。時間をおいて再度お試しください' },
         { status: 503 }
       )
     }
     console.error('[auth] AUTH_INTERNAL_ERROR')
-    return NextResponse.json(
+    return staffJson(
       { error: 'ログイン処理に失敗しました。時間をおいて再度お試しください' },
       { status: 500 }
     )
