@@ -26,7 +26,7 @@ import { GET, POST } from '@/app/api/public/questionnaires/route'
 import { GET as staffQuestionnaireGet } from '@/app/api/questionnaires/route'
 import { POST as issue, DELETE as revoke } from '@/app/api/reservations/questionnaire-url/route'
 import { middleware } from '@/middleware'
-import { findReservationByQuestionnaireToken, getQuestionnaireExpiry, getQrError } from '../questionnaireToken'
+import { findReservationByQuestionnaireToken, getQuestionnaireExpiry, getQrError, getQuestionnaireScanError } from '../questionnaireToken'
 import { MSG } from '../messages'
 import { RateLimitedError } from '../withRetry'
 import { DataStoreError } from '@/lib/dataStore'
@@ -107,6 +107,13 @@ it('resolves the reservation from accessToken even when a different reservationI
   }))
   expect(await response.json()).toMatchObject({ questionnaireId: 'M-1', qrToken: 'independent-reception-token' })
 })
+it('rejects incomplete public submissions before calling the persistence adapter', async () => {
+  const response = await POST(request({ accessToken: token, firstName: '' }))
+
+  expect(response.status).toBe(400)
+  expect(await response.json()).toMatchObject({ errors: { firstName: expect.any(String) } })
+  expect(memory.submitPublicQuestionnaire).not.toHaveBeenCalled()
+})
 it('rejects a new guest submission after all reservation slots are taken', async () => {
   memory.submitPublicQuestionnaire.mockRejectedValueOnce(new DataStoreError('reservation_guest_limit'))
   const response = await POST(request({ accessToken: token }))
@@ -158,6 +165,12 @@ it('checks the current dive date and fails closed for invalid dates', () => {
     expect(findReservationByQuestionnaireToken([{ ...memory.reservations[0], diveDate }], token)).toBeUndefined()
   }
   expect(getQuestionnaireExpiry('2026-12-31')).toBe('2026-12-31T15:00:00.000Z')
+})
+it('maps missing, expired, and used QR scans to their documented messages', () => {
+  expect(getQuestionnaireScanError(undefined, 'unknown', 'QR読取')).toContain('MSG-11')
+  expect(getQuestionnaireScanError({ ...memory.qs[0], qrUsed: true }, memory.qs[0].qrToken!, 'QR読取')).toContain('MSG-22')
+  expect(getQuestionnaireScanError({ ...memory.qs[0], qrExpiresAt: '2026-10-05T15:00:00.000Z' }, memory.qs[0].qrToken!, 'QR読取')).toContain('MSG-10')
+  expect(getQuestionnaireScanError({ ...memory.qs[0], qrExpiresAt: '2026-10-05T15:00:00.000Z' }, memory.qs[0].id, '手動照合')).toBeNull()
 })
 it.each([{ qrUsed: true }, { qrExpiresAt: '2026-10-06T00:00:00Z' }, { qrExpiresAt: 'invalid' }, { qrToken: '' }])('does not return unusable QR from GET or POST %j', async delta => {
   Object.assign(memory.qs[0], delta)

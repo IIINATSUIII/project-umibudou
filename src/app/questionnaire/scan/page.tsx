@@ -8,6 +8,7 @@ import { useAuth } from '@/lib/authContext'
 import { addRoster, fetchCustomers, fetchQuestionnaireById, fetchQuestionnaires, fetchReservations } from '@/lib/api'
 import type { Customer, QuestionnaireData, Reservation } from '@/types'
 import { matchesQuestionnaire } from '@/lib/questionnaireUtils'
+import { getQuestionnaireScanError } from '@/lib/questionnaireToken'
 
 const HEALTH_FLAGS: [keyof QuestionnaireData, string][] = [
   ['heartDisease', '心臓・循環器系疾患'],
@@ -143,22 +144,13 @@ function ScanContent() {
       } else if (!found) {
         found = questionnaires.find((item) => item.id === q)
       }
+      const lookupError = getQuestionnaireScanError(found, q, method)
       if (!found) {
-        setError('MSG-11：該当する問診情報が見つかりません。')
+        setError(lookupError ?? 'MSG-11：該当する問診情報が見つかりません。')
         return
       }
-      if (found.qrUsed) {
-        setError('MSG-22：このQRコードは受付済みです。')
-        return
-      }
-      if (
-        (found.qrToken === q || method === 'QR読取') &&
-        (!Number.isFinite(Date.parse(found.qrExpiresAt || '')) ||
-          Date.parse(found.qrExpiresAt!) <= Date.now())
-      ) {
-        setError(
-          'MSG-10：QRコードの有効期限が切れています。受付にお申し出ください。'
-        )
+      if (lookupError) {
+        setError(lookupError)
         return
       }
       setResult(found)
