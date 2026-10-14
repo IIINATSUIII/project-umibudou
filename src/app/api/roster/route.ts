@@ -82,7 +82,7 @@ export async function POST(req: NextRequest) {
         : errorMessage.includes('問診情報') || errorMessage.includes('予約情報')
           ? 404
           : 400
-      return NextResponse.json({ error: errorMessage }, { status })
+      return staffJson({ error: errorMessage }, { status })
     }
     return staffJson(result)
   } catch (err) {
