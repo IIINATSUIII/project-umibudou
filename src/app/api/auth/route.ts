@@ -58,7 +58,7 @@ export async function POST(req: NextRequest) {
     return res
   } catch (error) {
     // 認証設定・パスワード・JWTを応答やログへ含めない。
-    if (error instanceof AuthConfigurationError) {
+    if (error instanceof AuthConfigurationError || error instanceof SessionConfigurationError) {
       console.error('[auth] AUTH_CONFIGURATION_INVALID')
       return staffJson(
         { error: '現在ログインを利用できません。時間をおいて再度お試しください' },
