@@ -18,7 +18,7 @@ powershell -ExecutionPolicy Bypass -File scripts\setup.ps1
 # Mac / Linux / WSL / Git Bash
 bash scripts/setup.sh
 
-npm run dev   # → http://localhost:3000
+npm run dev   # → http://127.0.0.1:3030
 ```
 
 セットアップスクリプトは「依存インストール → `.env.local` 作成 → `SESSION_SECRET` 自動生成 → 型チェック」まで自動で行います。あとは `.env.local` の `STAFF_CREDENTIALS` に自分のログイン用メール:パスワードを設定するだけです。
@@ -39,7 +39,7 @@ Git / GitHub が初めてのメンバーは [docs/00_GitHub初心者ガイド.md
 cd oki-dive-partner
 npm install
 cp .env.local.example .env.local   # 下記を参考に値を設定
-npm run dev                         # → http://localhost:3000
+npm run dev                         # → http://127.0.0.1:3030
 ```
 
 ---
@@ -107,7 +107,7 @@ Sheetsへの書き込みはFirestoreの分散ロックを使用します。同�
 ### スプレッドシートの初期化・移行
 
 ```
-POST http://localhost:3000/api/setup
+POST http://127.0.0.1:3030/api/setup
 ```
 
 スタッフとしてログインしたセッションでPOSTすると、「予約」「問診票」「顧客台帳」「名簿」を初期化・移行します。既存シートは複製してバックアップし、ヘッダー名を使って全行を移行します。予約データでは `diveDate` を日付の正準フィールドとして扱い、旧 `date` / `course` / `phone` / `notes` 列も読み替えます。ステータスは旧文字列と `STS-01`〜`STS-06` を保存値のまま扱います。既存予約にはスタッフが予約一覧を開いた際に問診URL用トークンを発行します。移行後は旧スキーマへの書き込みが拒否されます。GETではデータを変更しません。更新前に保存した予約QRは問診ページを開けないため、新しい問診URLを参加者へ共有してください。運用開始前に [レビュー修正・移行手順](docs/reviews/2026-10-06-review-fixes.md) を確認してください。

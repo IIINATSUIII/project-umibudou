@@ -14,7 +14,7 @@
 
 | コマンド | 内容 |
 |---|---|
-| `npm run dev` | 開発サーバー（http://localhost:3000） |
+| `npm run dev` | 開発サーバー（http://127.0.0.1:3030） |
 | `npm run typecheck` | `tsc --noEmit` 型チェック |
 | `npm run lint` | ESLint |
 | `npm run build` | 本番ビルド |
