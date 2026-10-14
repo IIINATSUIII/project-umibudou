@@ -34,7 +34,7 @@ function getSecret(): Uint8Array {
 
 /** JWT を生成してクッキー用の文字列を返す */
 export async function createSessionToken(email: string): Promise<string> {
-  if (!isNonEmptyString(email)) throw new Error('セッションのメールアドレスが不正です')
+  if (!isNonEmptyString(email)) throw new TypeError('セッションのメールアドレスが不正です')
 
   return new SignJWT({ email })
     .setProtectedHeader({ alg: 'HS256' })
