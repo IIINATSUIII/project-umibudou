@@ -110,7 +110,7 @@ function ScanContent() {
       if (!q) return
       setCheckInMethod(method)
       let found = questionnaires.find((item) => item.qrToken === q)
-      if (method === 'QR読取' && !found) {
+      if (method === 'QR読取') {
         try {
           const response = await fetch(`/api/questionnaires/checkin?token=${encodeURIComponent(q)}`, {
             cache: 'no-store',
@@ -389,7 +389,7 @@ function ScanContent() {
             </button>
           </form>
           <p className="text-xs text-gray-500">
-            当日分の問診を事前ロード済み。読取時はキャッシュから照合します。
+            当日分の問診を事前ロード済み。QR読取時は最新の問診・予約状態をサーバーで照合します。
           </p>
         </section>
         {error && (
