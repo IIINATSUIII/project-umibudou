@@ -8,6 +8,7 @@
 
 import { createHash } from 'crypto'
 import { store } from './dataStore'
+import { invalidateReadCache } from './readCache'
 import { withStoreWriteLock } from './storeLock'
 import { COURSES, CONFIRMED_STATUS_ID, getCourseName } from './masters'
 import { validateNewReservationInput } from './reservationValidation'
@@ -279,11 +280,13 @@ export async function importOtaCsv(csvText: string, { dryRun = false } = {}): Pr
       // 一括追記は全件成功か全件失敗のどちらか
       await store.addReservations(pending.map((row) => reservations.get(row.line) as Reservation))
       for (const row of pending) row.status = 'imported'
+      invalidateReadCache()
+      invalidateReadCache()
       return
     }
     for (const row of pending) {
       try {
-        await store.addReservation(reservations.get(row.line) as Reservation)
+        await store.addReservation(reservations.get(row.line) as Reservation); invalidateReadCache()
         row.status = 'imported'
       } catch (err) {
         console.error(`[otaCsvImport] ${row.line}行目の保存に失敗しました`, err)
