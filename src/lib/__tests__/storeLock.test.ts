@@ -22,3 +22,18 @@ it('分散ロック未設定では書き込み処理を実行しない',async()=
   await expect(withStoreWriteLock(write)).rejects.toThrow('GOOGLE_DATASTORE_LOCK_PROJECT_ID')
   expect(write).not.toHaveBeenCalled()
 })
+it('PostgreSQLをprimaryにする場合はローカル・Firestoreロックを使わない', async () => {
+  vi.stubEnv('DATA_STORE', 'postgres')
+  vi.stubEnv('GOOGLE_SERVICE_ACCOUNT_EMAIL', 'test@example.com')
+  vi.stubEnv('GOOGLE_PRIVATE_KEY', 'fake')
+  vi.stubEnv('GOOGLE_SPREADSHEET_ID', 'fake')
+  vi.stubEnv('GOOGLE_DATASTORE_LOCK_PROJECT_ID', '')
+  document.held = false
+  document.created = 0
+  const { withStoreWriteLock } = await import('../storeLock')
+  const write = vi.fn().mockResolvedValue('saved')
+
+  await expect(withStoreWriteLock(write)).resolves.toBe('saved')
+  expect(write).toHaveBeenCalledOnce()
+  expect(document.created).toBe(0)
+})
