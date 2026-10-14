@@ -221,7 +221,7 @@ it('protects staff scan and issuance endpoints while leaving token pages public'
   for (const path of ['/questionnaire/scan', '/questionnaire/scan/']) {
     expect((await middleware(new NextRequest('http://localhost' + path))).status).toBe(307)
   }
-  for (const path of ['/api/reservations/questionnaire-url', '/api/questionnaires']) {
+  for (const path of ['/api/reservations/questionnaire-url', '/api/questionnaires', '/api/questionnaires/checkin']) {
     expect((await middleware(new NextRequest('http://localhost' + path))).status).toBe(401)
   }
   expect((await middleware(new NextRequest('http://localhost/questionnaire/' + token))).status).toBe(200)
