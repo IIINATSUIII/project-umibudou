@@ -2,7 +2,7 @@ import { NextRequest, type NextResponse } from 'next/server'
 import { requireStaffSession, staffJson } from '@/lib/staffAuth'
 import { store } from '@/lib/dataStore'
 import { isConfirmedReservationStatus } from '@/lib/reservationStatus'
-import { SESSION_COOKIE, verifySessionToken } from '@/lib/session'
+
 import { getQrError } from '@/lib/questionnaireToken'
 import { RateLimitedError } from '@/lib/withRetry'
 import { MSG } from '@/lib/messages'
@@ -12,14 +12,14 @@ export const dynamic = 'force-dynamic'
 let checkinQueue: Promise<void> = Promise.resolve()
 
 /** GET /api/questionnaires/checkin?token=... — 最新の票と予約状態でQRを照合する */
-export async function GET(req: NextRequest) {
-  if (!await isStaff(req)) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+export async function GET(req: NextRequest) { const auth = await requireStaffSession(req);
+  if (!auth.ok) {
+    return auth.response
   }
 
   const token = req.nextUrl.searchParams.get('token')?.trim() ?? ''
   if (token.length < 20 || token.length > 128) {
-    return NextResponse.json({ error: '受付用QRコードではありません。' }, { status: 400 })
+    return staffJson({ error: '受付用QRコードではありません。' }, { status: 400 })
   }
 
   try {
@@ -29,7 +29,7 @@ export async function GET(req: NextRequest) {
     ])
     const questionnaire = candidates.find((item) => item.qrToken === token)
     if (!questionnaire) {
-      return NextResponse.json(
+      return staffJson(
         { error: 'MSG-11：該当する問診情報が見つかりません。' },
         { status: 404, headers: { 'Cache-Control': 'no-store' } },
       )
@@ -39,14 +39,14 @@ export async function GET(req: NextRequest) {
       (item) => item.id === questionnaire.reservationId,
     )
     if (!reservation || !isConfirmedReservationStatus(reservation.status)) {
-      return NextResponse.json(
+      return staffJson(
         { error: '確定済みの予約を確認できません。' },
         { status: 409, headers: { 'Cache-Control': 'no-store' } },
       )
     }
     const today = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' })
     if (reservation.diveDate !== today) {
-      return NextResponse.json(
+      return staffJson(
         { error: '本日の予約ではないため受付できません。' },
         { status: 409, headers: { 'Cache-Control': 'no-store' } },
       )
@@ -54,31 +54,31 @@ export async function GET(req: NextRequest) {
 
     const qrError = getQrError(questionnaire)
     if (qrError === 'QR_USED') {
-      return NextResponse.json(
+      return staffJson(
         { error: 'MSG-22：このQRコードは受付済みです。' },
         { status: 409, headers: { 'Cache-Control': 'no-store' } },
       )
     }
     if (qrError) {
-      return NextResponse.json(
+      return staffJson(
         { error: 'MSG-10：QRコードの有効期限が切れています。受付にお申し出ください。' },
         { status: 410, headers: { 'Cache-Control': 'no-store' } },
       )
     }
 
-    return NextResponse.json(
+    return staffJson(
       { questionnaire, reservation },
       { headers: { 'Cache-Control': 'no-store' } },
     )
   } catch (error) {
     if (error instanceof RateLimitedError) {
-      return NextResponse.json(
+      return staffJson(
         { error: MSG.RATE_LIMITED },
         { status: 503, headers: { 'Cache-Control': 'no-store' } },
       )
     }
     console.error('[GET /api/questionnaires/checkin]', error)
-    return NextResponse.json(
+    return staffJson(
       { error: '受付情報を確認できませんでした。時間をおいて再度お試しください。' },
       { status: 500, headers: { 'Cache-Control': 'no-store' } },
     )
