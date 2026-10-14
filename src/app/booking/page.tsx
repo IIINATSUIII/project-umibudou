@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { QRCodeCanvas } from 'qrcode.react'
-import { buildCheckinPath } from '@/lib/checkinLink'
+import { buildCheckinPath, saveCheckin } from '@/lib/checkinLink'
 import { COURSES } from '@/lib/masters'
 import type { Reservation } from '@/types'
 
@@ -54,6 +54,16 @@ export default function BookingPage() {
       }
       setQuestionnaireToken(data.questionnaireToken)
       setResId(data.id)
+      // 受付QRを後から入力なしで開けるよう、予約した端末のブラウザに保存する
+      try {
+        saveCheckin(window.localStorage, {
+          reservationId: data.id,
+          reservationToken: data.questionnaireToken,
+          diveDate: form.diveDate,
+        })
+      } catch {
+        // 保存できない環境でも、予約自体は完了している
+      }
       setDone(true)
       window.scrollTo(0, 0)
     } catch (err) {
@@ -105,7 +115,7 @@ export default function BookingPage() {
             <a href={qrUrl} className="mt-4 block text-sm font-medium text-ocean-600 underline">問診票に進む</a>
             <a href={checkinPath} className="mt-2 block text-sm font-medium text-ocean-600 underline">受付QRを確認する（保存用リンク）</a>
             <p className="text-xs text-gray-400 mt-1 leading-relaxed">
-              問診票の提出とスタッフの確定後に、このリンクから受付QRを確認できます。ブックマークや画面メモに残しておくと便利です。
+              問診票の提出とスタッフの確定後に、受付QRを確認できます。このスマホでは「チェックインQR」を開くだけで自動表示されます。別の端末で開くときのために、このリンクも残しておくと安心です。
             </p>
             <button onClick={downloadQr}
               className="mt-4 w-full bg-ocean-600 text-white py-2.5 rounded-lg text-sm font-medium hover:bg-ocean-700 transition-colors">

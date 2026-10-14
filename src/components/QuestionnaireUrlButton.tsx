@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { issueQuestionnaireUrl } from '@/lib/api'
+import { buildCheckinPath } from '@/lib/checkinLink'
 
 export default function QuestionnaireUrlButton({
   reservationId,
@@ -12,7 +13,7 @@ export default function QuestionnaireUrlButton({
 }) {
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
-  async function issue(action: 'open' | 'copy' | 'reissue') {
+  async function issue(action: 'open' | 'copy' | 'reissue' | 'checkin') {
     if (busy) return
     if (
       action === 'reissue' &&
@@ -27,12 +28,18 @@ export default function QuestionnaireUrlButton({
       )
       if (!issued.questionnaireToken)
         throw new Error('URLの発行結果を確認できませんでした')
-      const url = `${window.location.origin}/questionnaire/${encodeURIComponent(issued.questionnaireToken)}`
+      const url = action === 'checkin'
+        ? `${window.location.origin}${buildCheckinPath(reservationId, issued.questionnaireToken)}`
+        : `${window.location.origin}/questionnaire/${encodeURIComponent(issued.questionnaireToken)}`
       if (action === 'open') window.location.assign(url)
       else {
         await navigator.clipboard.writeText(url)
         setMessage(
-          action === 'reissue' ? '再発行してコピーしました' : 'コピーしました'
+          action === 'reissue'
+            ? '再発行してコピーしました'
+            : action === 'checkin'
+              ? '受付QRリンクをコピーしました'
+              : 'コピーしました'
         )
       }
     } catch (err) {
@@ -51,6 +58,9 @@ export default function QuestionnaireUrlButton({
       </button>
       <button disabled={busy} onClick={() => issue('reissue')}>
         再発行
+      </button>
+      <button disabled={busy} onClick={() => issue('checkin')}>
+        受付QRリンクをコピー
       </button>
       {message && <span role="status">{message}</span>}
     </div>
