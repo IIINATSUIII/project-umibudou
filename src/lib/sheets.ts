@@ -17,7 +17,7 @@ import {
 } from './storeSchema'
 import { withStoreWriteLock } from './storeLock'
 import { withRetry } from './withRetry'
-import { invalidateReadCache } from './readCache'
+import { invalidateReadCache, reserveSharedSheetsReadSlot } from './readCache'
 import { matchesCustomer } from './customerSearch'
 import { matchesQuestionnaire, nextQuestionnaireId } from './questionnaireUtils'
 import { normalizeReservationInput, normalizeReservationPatch } from './reservationNormalization'
@@ -166,6 +166,7 @@ async function getSheetTable(sheetName: string, timeoutMs?: number): Promise<She
     spreadsheetId: spreadsheetId(),
     range: quoteSheetName(sheetName),
   }
+  await reserveSharedSheetsReadSlot()
   const res = timeoutMs
     ? await sheets.spreadsheets.values.get(params, { timeout: timeoutMs })
     : await sheets.spreadsheets.values.get(params)
@@ -180,12 +181,13 @@ export async function getSheetValues(
 ): Promise<string[][]> {
   // API制限(429)で拒否された呼び出しだけを指数バックオフで再送する（詳細設計書 2-5-1）。
   // 拒否された呼び出しは未処理なので再送しても二重登録にならない。
-  const r = await withRetry(() =>
-    client().spreadsheets.values.get({
+  const r = await withRetry(async () => {
+    await reserveSharedSheetsReadSlot()
+    return client().spreadsheets.values.get({
       spreadsheetId: id,
       range: quote(sheetName),
     })
-  )
+  })
   return (r.data.values ?? []).map((row) => row.map((v) => String(v ?? '')))
 }
 /** オブジェクトを実ヘッダー順で末尾に追加する。 */
@@ -555,6 +557,7 @@ export const addRoster = (v: RosterEntry) => add('ROSTER', v)
 export async function initializeSheets() {
   return withStoreWriteLock(() => invalidatingReads(async () => {
     const sheets = client()
+    await reserveSharedSheetsReadSlot()
     const metadata = await sheets.spreadsheets.get({
       spreadsheetId: spreadsheetId(),
       fields: 'sheets.properties',
