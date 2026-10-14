@@ -137,7 +137,7 @@ export async function GET(req: NextRequest) {
     if (req.nextUrl.searchParams.has('customerId')) {
       const customerId = req.nextUrl.searchParams.get('customerId')?.trim() ?? ''
       if (!customerId || customerId.length > 200) {
-        return NextResponse.json({ error: '顧客IDが不正です' }, { status: 400 })
+        return staffJson({ error: '顧客IDが不正です' }, { status: 400 })
       }
       const links = (await store.getQuestionnaires())
         .filter((questionnaire) => questionnaire.customerId === customerId)
@@ -145,14 +145,14 @@ export async function GET(req: NextRequest) {
           customerId: linkedCustomerId,
           reservationId,
         }))
-      return NextResponse.json(links, { headers: { 'Cache-Control': 'no-store' } })
+      return staffJson(links, { headers: { 'Cache-Control': 'no-store' } })
     }
 
     const query = req.nextUrl.searchParams.get('q')?.trim() ?? ''
     // 一覧（ポーリング対象）は短期キャッシュ経由で読む（Issue #68）。?fresh=1 はQR照合の事前ロード用に最新を読む
     if (!query) {
       const fresh = req.nextUrl.searchParams.get('fresh') === '1'
-      return NextResponse.json(await getQuestionnairesForList({ fresh }))
+      return staffJson(await getQuestionnairesForList({ fresh }))
     }
     if (query.length > 200) {
       return staffJson({ error: '検索語が長すぎます' }, { status: 400 })
@@ -177,8 +177,8 @@ export async function GET(req: NextRequest) {
   } catch (err) {
     console.error('[GET /api/questionnaires]', err)
     if (err instanceof RateLimitedError)
-      return NextResponse.json({ error: MSG.RATE_LIMITED }, { status: 503 })
-    return NextResponse.json({ error: 'Failed to fetch questionnaires' }, { status: 500 })
+      return staffJson({ error: MSG.RATE_LIMITED }, { status: 503 })
+    return staffJson({ error: 'Failed to fetch questionnaires' }, { status: 500 })
   }
 }
 
@@ -319,10 +319,10 @@ export async function PATCH(req: NextRequest) {
       response = await withStoreWriteLock(() => resolveExistingCustomer(body))
     } catch (err) {
       if (err instanceof StoreBusyError) {
-        response = NextResponse.json({ error: err.message }, { status: 503 })
+        response = staffJson({ error: err.message }, { status: 503 })
       } else {
         console.error('[PATCH /api/questionnaires]', err)
-        response = NextResponse.json({ error: 'Failed to resolve questionnaire' }, { status: 500 })
+        response = staffJson({ error: 'Failed to resolve questionnaire' }, { status: 500 })
       }
     }
   }
