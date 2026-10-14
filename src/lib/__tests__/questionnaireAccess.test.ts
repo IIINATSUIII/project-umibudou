@@ -113,6 +113,7 @@ it('rejects incomplete public submissions before calling the persistence adapter
   expect(response.status).toBe(400)
   expect(await response.json()).toMatchObject({ errors: { firstName: expect.any(String) } })
   expect(memory.submitPublicQuestionnaire).not.toHaveBeenCalled()
+})
 it('rejects a new guest submission after all reservation slots are taken', async () => {
   memory.submitPublicQuestionnaire.mockRejectedValueOnce(new DataStoreError('reservation_guest_limit'))
   const response = await POST(request({ accessToken: token }))
