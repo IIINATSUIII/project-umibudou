@@ -68,7 +68,11 @@ export async function POST(req: NextRequest) {
     })
     if (result.error) {
       const errorMessage = result.error
-      const status = errorMessage.includes('MSG-22') ? 409 : errorMessage.includes('問診情報') || errorMessage.includes('予約情報') ? 404 : 400
+      const status = errorMessage.includes('MSG-22') || errorMessage.includes('本日の予約')
+        ? 409
+        : errorMessage.includes('問診情報') || errorMessage.includes('予約情報')
+          ? 404
+          : 400
       return NextResponse.json({ error: errorMessage }, { status })
     }
     return NextResponse.json(result)
