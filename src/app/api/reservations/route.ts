@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { store } from '@/lib/dataStore'
 import { importGoogleFormBookings } from '@/lib/googleFormImport'
+import { getReservationsForList } from '@/lib/listReads'
 import { SESSION_COOKIE, verifySessionToken } from '@/lib/session'
 import {
   createReservation,
@@ -36,9 +37,10 @@ export async function GET(req: NextRequest) {
   try {
     const result = await importGoogleFormBookings()
     if (result.errors.length) console.warn('[GET /api/reservations] Googleフォーム取込:', result.errors)
-    const reservations = await store.getReservations()
-    // Missing credentials may be explicitly revoked. Only the issuance endpoint
-    // may fill them; a list read must never overwrite a concurrent revoke/reissue.
+    const fresh = req.nextUrl.searchParams.get('fresh') === '1'
+    const reservations = await getReservationsForList({ fresh })
+    // Missing credentials may be explicitly revoked. Only the issuance endpoint may fill them;
+    // list reads must never overwrite a concurrent revoke or reissue.
     const date = req.nextUrl.searchParams.get('date')
     return NextResponse.json(date ? reservations.filter((r) => r.diveDate === date) : reservations, {
       headers: { 'Cache-Control': 'no-store' },

@@ -49,9 +49,15 @@ export class ApiRequestError extends Error {
   }
 }
 
-export async function fetchReservations(): Promise<Reservation[]> {
-  const res = await fetch('/api/reservations')
-  if (!res.ok) throw new Error('Failed to fetch reservations')
+/** fresh: サーバーの短期キャッシュを使わず最新を読む（競合後の再読込など） */
+export type FetchListOptions = { fresh?: boolean }
+
+export async function fetchReservations({ fresh = false }: FetchListOptions = {}): Promise<Reservation[]> {
+  const res = await fetch(fresh ? '/api/reservations?fresh=1' : '/api/reservations')
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}))
+    throw new ApiRequestError(body?.error || 'Failed to fetch reservations', res.status)
+  }
   return res.json()
 }
 
@@ -94,16 +100,21 @@ export async function patchReservation(
 
 // ─── 問診票 ───────────────────────────────────────────────────
 
-export function fetchQuestionnaires(): Promise<QuestionnaireData[]>
+export function fetchQuestionnaires(options?: FetchListOptions): Promise<QuestionnaireData[]>
 export function fetchQuestionnaires(
   query: string
 ): Promise<QuestionnaireSummary[]>
 export async function fetchQuestionnaires(
-  query = ''
+  queryOrOptions: string | FetchListOptions = ''
 ): Promise<QuestionnaireData[] | QuestionnaireSummary[]> {
-  const res = await fetch(`/api/questionnaires?q=${encodeURIComponent(query)}`)
+  const query = typeof queryOrOptions === 'string' ? queryOrOptions : ''
+  const fresh = typeof queryOrOptions === 'object' && queryOrOptions.fresh
+  const res = await fetch(`/api/questionnaires?q=${encodeURIComponent(query)}${fresh ? '&fresh=1' : ''}`)
   if (res.status === 410) throw new Error('QR_EXPIRED')
-  if (!res.ok) throw new Error('Failed to fetch questionnaires')
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}))
+    throw new ApiRequestError(body?.error || 'Failed to fetch questionnaires', res.status)
+  }
   return res.json()
 }
 
