@@ -30,6 +30,19 @@ vi.mock('@/lib/storeLock', () => ({
   withStoreWriteLock: async (work: () => Promise<unknown>) => work(),
 }))
 
+vi.mock('@/lib/staffAuth', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/staffAuth')>('@/lib/staffAuth')
+  return {
+    ...actual,
+    requireStaffSession: vi.fn().mockResolvedValue({
+      ok: true,
+      session: { email: 'staff@example.com' },
+    }),
+  }
+})
+
+
+
 import { POST } from '@/app/api/roster/route'
 
 const qrToken = 'independent-reception-qr-token'
