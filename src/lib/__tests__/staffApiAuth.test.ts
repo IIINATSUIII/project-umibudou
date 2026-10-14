@@ -23,6 +23,11 @@ vi.mock('@/lib/storeLock', () => ({
 }))
 vi.mock('@/lib/sheets', () => ({ initializeSheets: dependencies.initializeSheets }))
 vi.mock('@/lib/googleFormImport', () => ({ importGoogleFormBookings: dependencies.importBookings }))
+vi.mock('@/lib/listReads', () => ({
+  getReservationsForList: () => dependencies.store.getReservations(),
+  getQuestionnairesForList: () => dependencies.store.getQuestionnaires(),
+}))
+
 
 import * as customers from '@/app/api/customers/route'
 import * as roster from '@/app/api/roster/route'
@@ -48,7 +53,7 @@ const actions = [
   { path: '/api/questionnaires', method: 'GET', handler: questionnaires.GET, status: 200 },
   { path: '/api/questionnaires', method: 'POST', handler: questionnaires.POST, body: null, status: 400 },
   { path: '/api/questionnaires', method: 'PATCH', handler: questionnaires.PATCH, body: {}, status: 400 },
-  { path: '/api/questionnaires/checkin', method: 'GET', handler: checkin.GET, status: 404 }, { path: '/api/questionnaires/checkin', method: 'POST', handler: checkin.POST, body: {}, status: 400 },
+  { path: '/api/questionnaires/checkin', method: 'GET', handler: checkin.GET, status: 400 }, { path: '/api/questionnaires/checkin', method: 'POST', handler: checkin.POST, body: {}, status: 400 },
 ] as const
 
 const allBusinessCalls = () => [
