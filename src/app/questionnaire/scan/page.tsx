@@ -144,6 +144,7 @@ function ScanContent() {
       } else if (!found) {
         found = questionnaires.find((item) => item.id === q)
       }
+      const lookupError = getQuestionnaireScanError(found, q, method)
       if (!found) {
         setError(lookupError ?? 'MSG-11：該当する問診情報が見つかりません。')
         return
