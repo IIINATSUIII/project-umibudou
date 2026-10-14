@@ -38,6 +38,8 @@ function ScanContent() {
   const searchParams = useSearchParams()
   const videoRef = useRef<HTMLVideoElement>(null)
   const streamRef = useRef<MediaStream | null>(null)
+  const initialLookupRef = useRef('')
+  const lookupSequenceRef = useRef(0)
   const [query, setQuery] = useState(
     searchParams.get('token') ?? searchParams.get('id') ?? ''
   )
@@ -94,7 +96,8 @@ function ScanContent() {
   }, [user, router, load])
 
   const lookup = useCallback(
-    (value: string, method: 'QR読取' | '手動照合' = '手動照合') => {
+    async (value: string, method: 'QR読取' | '手動照合' = '手動照合') => {
+      const lookupSequence = ++lookupSequenceRef.current
       const q = value.trim()
       setQuery(q)
       setCandidates([])
@@ -106,9 +109,40 @@ function ScanContent() {
       setError('')
       if (!q) return
       setCheckInMethod(method)
-      const found = questionnaires.find(
-        (item) => item.qrToken === q || item.id === q
-      )
+      let found = questionnaires.find((item) => item.qrToken === q)
+      if (method === 'QR読取') {
+        try {
+          const response = await fetch(`/api/questionnaires/checkin?token=${encodeURIComponent(q)}`, {
+            cache: 'no-store',
+          })
+          const data = await response.json().catch(() => ({})) as {
+            error?: string
+            questionnaire?: QuestionnaireData
+            reservation?: Reservation
+          }
+          if (lookupSequence !== lookupSequenceRef.current) return
+          if (!response.ok || !data.questionnaire || !data.reservation) {
+            setError(data.error ?? '受付情報を確認できませんでした。時間をおいて再度お試しください。')
+            return
+          }
+          found = data.questionnaire
+          setQuestionnaires((current) => [
+            ...current.filter((item) => item.id !== found!.id),
+            found!,
+          ])
+          setReservations((current) => [
+            ...current.filter((item) => item.id !== data.reservation!.id),
+            data.reservation!,
+          ])
+        } catch {
+          if (lookupSequence === lookupSequenceRef.current) {
+            setError('受付情報を確認できませんでした。通信状態を確認してください。')
+          }
+          return
+        }
+      } else if (!found) {
+        found = questionnaires.find((item) => item.id === q)
+      }
       if (!found) {
         setError('MSG-11：該当する問診情報が見つかりません。')
         return
@@ -137,8 +171,15 @@ function ScanContent() {
   )
   useEffect(() => {
     const initial = searchParams.get('token') ?? searchParams.get('id')
-    if (initial && questionnaires.length)
-      lookup(initial, searchParams.get('token') ? 'QR読取' : '手動照合')
+    if (!initial) {
+      initialLookupRef.current = ''
+      return
+    }
+    const isQrToken = Boolean(searchParams.get('token'))
+    if (initial !== initialLookupRef.current && (isQrToken || questionnaires.length > 0)) {
+      initialLookupRef.current = initial
+      void lookup(initial, isQrToken ? 'QR読取' : '手動照合')
+    }
   }, [questionnaires, searchParams, lookup])
 
   async function startCamera() {
@@ -219,6 +260,10 @@ function ScanContent() {
       lookup(term, exact.qrToken === term ? 'QR読取' : '手動照合')
       return
     }
+    if (/^[A-Za-z0-9_-]{20,128}$/.test(term)) {
+      void lookup(term, 'QR読取')
+      return
+    }
     const found = questionnaires.filter((q) => matchesQuestionnaire(q, term))
     if (found.length === 0) {
       setError('MSG-11：該当する問診情報が見つかりません。')
@@ -244,8 +289,11 @@ function ScanContent() {
       })
       setAdded(true)
       setResult({ ...result, qrUsed: true })
-    } catch {
-      setError('名簿への追加に失敗しました。時間をおいて再度お試しください。')
+      setQuestionnaires((current) => current.map((item) =>
+        item.id === result.id ? { ...item, qrUsed: true } : item,
+      ))
+    } catch (error) {
+      setError(error instanceof Error ? error.message : '名簿への追加に失敗しました。時間をおいて再度お試しください。')
     } finally {
       setAdding(false)
     }
@@ -341,7 +389,7 @@ function ScanContent() {
             </button>
           </form>
           <p className="text-xs text-gray-500">
-            当日分の問診を事前ロード済み。読取時はキャッシュから照合します。
+            当日分の問診を事前ロード済み。QR読取時は最新の問診・予約状態をサーバーで照合します。
           </p>
         </section>
         {error && (

@@ -9,6 +9,7 @@ import type {
   Reservation,
   ReservationInput,
   QuestionnaireData,
+  QuestionnaireReservationLink,
   QuestionnaireFormData,
   QuestionnaireSummary,
   Customer,
@@ -103,6 +104,14 @@ export async function fetchQuestionnaires(
   const res = await fetch(`/api/questionnaires?q=${encodeURIComponent(query)}`)
   if (res.status === 410) throw new Error('QR_EXPIRED')
   if (!res.ok) throw new Error('Failed to fetch questionnaires')
+  return res.json()
+}
+
+export async function fetchQuestionnaireReservationLinks(
+  customerId: string,
+): Promise<QuestionnaireReservationLink[]> {
+  const res = await fetch(`/api/questionnaires?customerId=${encodeURIComponent(customerId)}`)
+  if (!res.ok) throw new Error('Failed to fetch questionnaire reservation links')
   return res.json()
 }
 
