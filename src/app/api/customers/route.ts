@@ -1,6 +1,6 @@
 import { nextUpdatedAt } from '@/lib/updateVersion'
 import { requireStaffSession, staffJson } from '@/lib/staffAuth'
-import { NextRequest, type NextResponse } from 'next/server'
+import { NextRequest } from 'next/server'
 import { store } from '@/lib/dataStore'
 import { MSG } from '@/lib/messages'
 import {
@@ -124,7 +124,7 @@ export async function PATCH(req: NextRequest) {
       } catch (error) {
         if (!(error instanceof DataStoreConflictError)) throw error
         const latest = (await store.getCustomers()).find((customer) => customer.id === id)
-        return NextResponse.json(
+        return staffJson(
           { error: 'CONFLICT', message: MSG.CONFLICT, customer: latest ?? current },
           { status: 409 }
         )
