@@ -1,16 +1,24 @@
 import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest'
 import type { Reservation } from '@/types'
 
-const { getReservations } = vi.hoisted(() => ({ getReservations: vi.fn() }))
+const { getReservations, updateReservation } = vi.hoisted(() => ({
+  getReservations: vi.fn(),
+  updateReservation: vi.fn(),
+}))
 vi.mock('@/lib/dataStore', () => ({
-  store: { getReservations, addReservation: vi.fn(), updateReservation: vi.fn() },
+  store: { getReservations, addReservation: vi.fn(), updateReservation },
+}))
+vi.mock('@/lib/storeLock', () => ({
+  withStoreWriteLock: async (work: () => Promise<unknown>) => work(),
 }))
 
 let generateReservationId: typeof import('../reservations').generateReservationId
 let hasUpdateConflict: typeof import('../reservations').hasUpdateConflict
+let patchReservation: typeof import('../reservations').patchReservation
+let ReservationConflictError: typeof import('../reservations').ReservationConflictError
 
 beforeAll(async () => {
-  ({ generateReservationId, hasUpdateConflict } = await import('../reservations'))
+  ({ generateReservationId, hasUpdateConflict, patchReservation, ReservationConflictError } = await import('../reservations'))
 })
 
 function fakeReservation(id: string): Reservation {
@@ -49,4 +57,15 @@ describe('hasUpdateConflict', () => {
     const current = { updatedAt: '2026-09-10T09:00:00.000Z' }
     expect(hasUpdateConflict(current, '2026-09-10T00:00:00.000Z')).toBe(true)
   })
+})
+
+it('maps a PostgreSQL row-lock conflict to the reservation API conflict error', async () => {
+  const { DataStoreConflictError } = await import('../dataStoreErrors')
+  getReservations.mockResolvedValue([{ id: 'R-1', updatedAt: 'v1' }])
+  updateReservation.mockRejectedValue(new DataStoreConflictError())
+
+  await expect(patchReservation('R-1', { status: 'STS-03' }, 'v1')).rejects.toBeInstanceOf(
+    ReservationConflictError
+  )
+  expect(updateReservation).toHaveBeenCalledWith('R-1', expect.objectContaining({ status: 'STS-03' }), 'v1')
 })

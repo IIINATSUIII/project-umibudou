@@ -16,6 +16,23 @@ export function getQrError(q: QuestionnaireData, now = Date.now()): 'QR_USED' | 
   if (!q.qrToken || !Number.isFinite(Date.parse(q.qrExpiresAt ?? '')) || Date.parse(q.qrExpiresAt!) <= now) return 'QR_EXPIRED'
   return null
 }
+
+export function getQuestionnaireScanError(
+  questionnaire: QuestionnaireData | undefined,
+  value: string,
+  method: 'QR読取' | '手動照合',
+  now = Date.now(),
+): string | null {
+  if (!questionnaire) return 'MSG-11：該当する問診情報が見つかりません。'
+  if (questionnaire.qrUsed) return 'MSG-22：このQRコードは受付済みです。'
+  if (
+    (questionnaire.qrToken === value || method === 'QR読取') &&
+    getQrError(questionnaire, now) === 'QR_EXPIRED'
+  ) {
+    return 'MSG-10：QRコードの有効期限が切れています。受付にお申し出ください。'
+  }
+  return null
+}
 export function getQuestionnaireExpiry(date: string): string {
   const value = new Date(`${date}T00:00:00Z`)
   if (

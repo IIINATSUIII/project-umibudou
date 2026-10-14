@@ -14,18 +14,22 @@ vi.mock('@/lib/dataStore', () => ({ store: {
   getQuestionnaires: memory.getQuestionnaires,
   updateReservation: async (id: string, delta: Partial<Reservation>) => Object.assign(memory.reservations.find(r => r.id === id)!, delta),
   submitPublicQuestionnaire: memory.submitPublicQuestionnaire,
-}, USE_POSTGRES: true, DataStoreError: class DataStoreError extends Error {} }))
+}, USE_POSTGRES: true, DataStoreError: class DataStoreError extends Error {
+  constructor(public readonly code: string) { super(code) }
+} }))
 vi.mock('@/lib/storeLock', () => ({ withStoreWriteLock: async (work: () => Promise<unknown>) => work(), StoreBusyError: class extends Error {} }))
 vi.mock('@/lib/session', () => ({
   SESSION_COOKIE: 'odp_session',
   verifySessionToken: async (token: string) => token === 'staff-session' ? { email: 'staff@example.com' } : null,
 }))
 import { GET, POST } from '@/app/api/public/questionnaires/route'
+import { GET as staffQuestionnaireGet } from '@/app/api/questionnaires/route'
 import { POST as issue, DELETE as revoke } from '@/app/api/reservations/questionnaire-url/route'
 import { middleware } from '@/middleware'
-import { findReservationByQuestionnaireToken, getQuestionnaireExpiry, getQrError } from '../questionnaireToken'
+import { findReservationByQuestionnaireToken, getQuestionnaireExpiry, getQrError, getQuestionnaireScanError } from '../questionnaireToken'
 import { MSG } from '../messages'
 import { RateLimitedError } from '../withRetry'
+import { DataStoreError } from '@/lib/dataStore'
 
 const token = 'input-token-with-at-least-128-bits'
 const submissionId = '00000000-0000-4000-8000-000000000001'
@@ -97,6 +101,7 @@ it.each([{ reservationId: 'R-1' }, { reservationToken: token }, { token }, { acc
   expect(memory.submitPublicQuestionnaire).not.toHaveBeenCalled()
 })
 it('resolves the reservation from accessToken even when a different reservationId is supplied', async () => {
+  memory.reservations[0].guestCount = 2
   const response = await POST(request({ accessToken: token, reservationId: 'attacker-selected' }))
   expect(response.status).toBe(200)
   expect(memory.submitPublicQuestionnaire).toHaveBeenCalledWith(expect.objectContaining({
@@ -106,8 +111,38 @@ it('resolves the reservation from accessToken even when a different reservationI
   }))
   expect(await response.json()).toMatchObject({ questionnaireId: 'M-1', qrToken: 'independent-reception-token' })
 })
+it('rejects incomplete public submissions before calling the persistence adapter', async () => {
+  const response = await POST(request({ accessToken: token, firstName: '' }))
+
+  expect(response.status).toBe(400)
+  expect(await response.json()).toMatchObject({ errors: { firstName: expect.any(String) } })
+  expect(memory.submitPublicQuestionnaire).not.toHaveBeenCalled()
+})
+it('rejects a new guest submission after all reservation slots are taken', async () => {
+  memory.submitPublicQuestionnaire.mockRejectedValueOnce(new DataStoreError('reservation_guest_limit'))
+  const response = await POST(request({ accessToken: token }))
+
+  expect(response.status).toBe(409)
+  expect(await response.json()).toMatchObject({ error: expect.stringContaining('予約人数分') })
+  expect(memory.submitPublicQuestionnaire).toHaveBeenCalled()
+})
 it.each(['R-1', 'independent-reception-token', ''])('rejects GET using %s', async value => {
   expect((await read(value)).status).toBe(404)
+})
+it('returns only customer and reservation links for a customer history lookup', async () => {
+  memory.qs = [
+    { ...memory.qs[0], customerId: 'C-1', lastName: '表示しない' },
+    { ...memory.qs[0], id: 'M-2', reservationId: 'R-2', customerId: 'C-2' },
+  ]
+  memory.getQuestionnaires.mockResolvedValue(memory.qs)
+
+  const response = await staffQuestionnaireGet(new NextRequest(
+    'http://localhost/api/questionnaires?customerId=C-1',
+    { headers: { cookie: 'odp_session=staff-session' } },
+  ))
+
+  expect(response.status).toBe(200)
+  expect(await response.json()).toEqual([{ customerId: 'C-1', reservationId: 'R-1' }])
 })
 it('returns MSG-17 with no-store when public questionnaire status GET is rate limited', async () => {
   memory.getReservations.mockRejectedValueOnce(new RateLimitedError('Sheets API rate limited'))
@@ -134,6 +169,12 @@ it('checks the current dive date and fails closed for invalid dates', () => {
     expect(findReservationByQuestionnaireToken([{ ...memory.reservations[0], diveDate }], token)).toBeUndefined()
   }
   expect(getQuestionnaireExpiry('2026-12-31')).toBe('2026-12-31T15:00:00.000Z')
+})
+it('maps missing, expired, and used QR scans to their documented messages', () => {
+  expect(getQuestionnaireScanError(undefined, 'unknown', 'QR読取')).toContain('MSG-11')
+  expect(getQuestionnaireScanError({ ...memory.qs[0], qrUsed: true }, memory.qs[0].qrToken!, 'QR読取')).toContain('MSG-22')
+  expect(getQuestionnaireScanError({ ...memory.qs[0], qrExpiresAt: '2026-10-05T15:00:00.000Z' }, memory.qs[0].qrToken!, 'QR読取')).toContain('MSG-10')
+  expect(getQuestionnaireScanError({ ...memory.qs[0], qrExpiresAt: '2026-10-05T15:00:00.000Z' }, memory.qs[0].id, '手動照合')).toBeNull()
 })
 it.each([{ qrUsed: true }, { qrExpiresAt: '2026-10-06T00:00:00Z' }, { qrExpiresAt: 'invalid' }, { qrToken: '' }])('does not return unusable QR from GET or POST %j', async delta => {
   Object.assign(memory.qs[0], delta)
