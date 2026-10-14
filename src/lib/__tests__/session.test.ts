@@ -65,8 +65,7 @@ describe('JWTの利用者情報', () => {
     '署名済みでも不正なメールの既存JWTを拒否する: %j',
     async (claims) => {
       const token = await new SignJWT(claims).setProtectedHeader({ alg: 'HS256' }).setExpirationTime('7d')
-        .sign(new TextEncoder().encode(SECRET))
-      await expect(verifySessionToken(token)).rejects.toBeInstanceOf(SessionConfigurationError)
+        .sign(new TextEncoder().encode(SECRET)); expect(await verifySessionToken(token)).toBeNull()
     }
   )
   it('期限切れ・異なる署名・不正形式も拒否する', async () => {
