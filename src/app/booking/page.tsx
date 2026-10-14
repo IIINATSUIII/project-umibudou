@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { QRCodeCanvas } from 'qrcode.react'
+import { buildCheckinPath } from '@/lib/checkinLink'
 import { COURSES } from '@/lib/masters'
 import type { Reservation } from '@/types'
 
@@ -74,6 +75,7 @@ export default function BookingPage() {
   if (done) {
     // QRには問診票入力ページのURLを埋め込む（当日スタッフが読み取る／事前入力にも使える）
     const qrUrl = `${window.location.origin}/questionnaire/${questionnaireToken}`
+    const checkinPath = buildCheckinPath(resId, questionnaireToken)
     return (
       <div className="min-h-screen bg-gradient-to-b from-ocean-700 to-ocean-500 flex items-center justify-center p-4">
         <div className="w-full max-w-md bg-white rounded-2xl shadow-xl p-8 text-center">
@@ -101,6 +103,10 @@ export default function BookingPage() {
               問診票は事前のご入力も可能です。
             </p>
             <a href={qrUrl} className="mt-4 block text-sm font-medium text-ocean-600 underline">問診票に進む</a>
+            <a href={checkinPath} className="mt-2 block text-sm font-medium text-ocean-600 underline">受付QRを確認する（保存用リンク）</a>
+            <p className="text-xs text-gray-400 mt-1 leading-relaxed">
+              問診票の提出とスタッフの確定後に、このリンクから受付QRを確認できます。ブックマークや画面メモに残しておくと便利です。
+            </p>
             <button onClick={downloadQr}
               className="mt-4 w-full bg-ocean-600 text-white py-2.5 rounded-lg text-sm font-medium hover:bg-ocean-700 transition-colors">
               ⬇ QRコードを保存する

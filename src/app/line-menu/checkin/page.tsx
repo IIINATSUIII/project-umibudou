@@ -1,8 +1,10 @@
 'use client'
 
-import { useState } from 'react'
+import { Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
+import { useSearchParams } from 'next/navigation'
 import { QRCodeSVG } from 'qrcode.react'
+import { readCheckinParams } from '@/lib/checkinLink'
 
 type CheckinParticipant = { name: string; token?: string; expiresAt?: string; used: boolean }
 type LookupResult = {
@@ -12,15 +14,16 @@ type LookupResult = {
   incompleteCount: number
 }
 
-export default function CheckinQrPage() {
+function CheckinQr() {
+  const searchParams = useSearchParams()
   const [reservationId, setReservationId] = useState('')
   const [reservationToken, setReservationToken] = useState('')
   const [result, setResult] = useState<LookupResult | null>(null)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const autoLookedUp = useRef(false)
 
-  async function findReservation(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault()
+  const lookup = useCallback(async (id: string, token: string) => {
     setError('')
     setResult(null)
     setLoading(true)
@@ -28,7 +31,7 @@ export default function CheckinQrPage() {
       const response = await fetch('/api/public/checkin-qr', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reservationId, reservationToken }),
+        body: JSON.stringify({ reservationId: id, reservationToken: token }),
       })
       const data = await response.json() as LookupResult & { error?: string }
       if (!response.ok) throw new Error(data.error ?? '予約を確認できませんでした。')
@@ -38,6 +41,22 @@ export default function CheckinQrPage() {
     } finally {
       setLoading(false)
     }
+  }, [])
+
+  // 予約完了画面のリンクから開いた場合は、入力なしで受付QRを表示する
+  useEffect(() => {
+    if (autoLookedUp.current) return
+    const fromLink = readCheckinParams(searchParams)
+    if (!fromLink) return
+    autoLookedUp.current = true
+    setReservationId(fromLink.reservationId)
+    setReservationToken(fromLink.reservationToken)
+    void lookup(fromLink.reservationId, fromLink.reservationToken)
+  }, [searchParams, lookup])
+
+  function findReservation(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    void lookup(reservationId, reservationToken)
   }
 
   return (
@@ -101,6 +120,14 @@ export default function CheckinQrPage() {
         )}
       </div>
     </main>
+  )
+}
+
+export default function CheckinQrPage() {
+  return (
+    <Suspense>
+      <CheckinQr />
+    </Suspense>
   )
 }
 
