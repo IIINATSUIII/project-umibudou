@@ -5,7 +5,7 @@ import { SESSION_COOKIE, verifySessionToken } from '@/lib/session'
 import type { Customer, QuestionnaireData, QuestionnaireFormData } from '@/types'
 import { saveSubmission, SubmissionValidationError, validateSubmission } from '@/lib/questionnaireSubmission'
 import { normalizeQuestionnaireExperience } from '@/lib/questionnaireExperience'
-import { withStoreWriteLock } from '@/lib/storeLock'
+import { StoreBusyError, withStoreWriteLock } from '@/lib/storeLock'
 import { getQrError } from '@/lib/questionnaireToken'
 
 export const runtime = 'nodejs'
@@ -133,6 +133,20 @@ export async function GET(req: NextRequest) {
       return questionnaire
         ? NextResponse.json(questionnaire)
         : NextResponse.json({ error: '問診票が見つかりません' }, { status: 404 })
+    }
+
+    if (req.nextUrl.searchParams.has('customerId')) {
+      const customerId = req.nextUrl.searchParams.get('customerId')?.trim() ?? ''
+      if (!customerId || customerId.length > 200) {
+        return NextResponse.json({ error: '顧客IDが不正です' }, { status: 400 })
+      }
+      const links = (await store.getQuestionnaires())
+        .filter((questionnaire) => questionnaire.customerId === customerId)
+        .map(({ customerId: linkedCustomerId, reservationId }) => ({
+          customerId: linkedCustomerId,
+          reservationId,
+        }))
+      return NextResponse.json(links, { headers: { 'Cache-Control': 'no-store' } })
     }
 
     const query = req.nextUrl.searchParams.get('q')?.trim() ?? ''
@@ -296,7 +310,16 @@ export async function PATCH(req: NextRequest) {
 
   let response: NextResponse | null = null
   const resolve = async () => {
-    response = await resolveExistingCustomer(body)
+    try {
+      response = await withStoreWriteLock(() => resolveExistingCustomer(body))
+    } catch (err) {
+      if (err instanceof StoreBusyError) {
+        response = NextResponse.json({ error: err.message }, { status: 503 })
+      } else {
+        console.error('[PATCH /api/questionnaires]', err)
+        response = NextResponse.json({ error: 'Failed to resolve questionnaire' }, { status: 500 })
+      }
+    }
   }
   const pending = resolutionQueue.then(resolve, resolve)
   resolutionQueue = pending.then(() => undefined, () => undefined)

@@ -20,10 +20,6 @@ import {
   isCancelledReservationStatus,
   isCancellableReservationStatus,
 } from '@/lib/reservationStatus'
-import {
-  deriveReservationQuestionnaireToken,
-  questionnaireTokenExpiryForDiveDate,
-} from '@/lib/reservationQuestionnaireToken'
 import { generateQuestionnaireToken, getQuestionnaireExpiry } from '@/lib/questionnaireToken'
 import { RateLimitedError } from '@/lib/withRetry'
 import { StoreBusyError, withStoreWriteLock } from '@/lib/storeLock'
@@ -41,20 +37,12 @@ export async function GET(req: NextRequest) {
     const result = await importGoogleFormBookings()
     if (result.errors.length) console.warn('[GET /api/reservations] Googleフォーム取込:', result.errors)
     const reservations = await store.getReservations()
-    for (const reservation of reservations) {
-      const token = reservation.questionnaireToken?.trim() || deriveReservationQuestionnaireToken(reservation.id)
-      const expiry = reservation.questionnaireTokenExpiresAt?.trim() || questionnaireTokenExpiryForDiveDate(reservation.diveDate)
-      if (token !== reservation.questionnaireToken || expiry !== reservation.questionnaireTokenExpiresAt) {
-        await store.updateReservation(reservation.id, {
-          questionnaireToken: token,
-          questionnaireTokenExpiresAt: expiry,
-        })
-        reservation.questionnaireToken = token
-        reservation.questionnaireTokenExpiresAt = expiry
-      }
-    }
+    // Missing credentials may be explicitly revoked. Only the issuance endpoint
+    // may fill them; a list read must never overwrite a concurrent revoke/reissue.
     const date = req.nextUrl.searchParams.get('date')
-    return NextResponse.json(date ? reservations.filter((r) => r.diveDate === date) : reservations)
+    return NextResponse.json(date ? reservations.filter((r) => r.diveDate === date) : reservations, {
+      headers: { 'Cache-Control': 'no-store' },
+    })
   } catch (err) {
     console.error('[GET /api/reservations]', err)
     if (err instanceof RateLimitedError)

@@ -5,7 +5,11 @@ import type { QuestionnaireData, QuestionnaireFormData, Customer } from '@/types
 import { nextCustomerId } from '@/lib/questionnaireUtils'
 import { findReservationByQuestionnaireToken, getQrError } from '@/lib/questionnaireToken'
 import { isQuestionnaireReservationAllowed } from '@/lib/reservationStatus'
-import { completedQuestionnairesForReservation, hasAllGuestQuestionnaires } from '@/lib/questionnaireCompletion'
+import {
+  completedQuestionnairesForReservation,
+  hasAllGuestQuestionnaires,
+  hasQuestionnaireGuestSlot,
+} from '@/lib/questionnaireCompletion'
 import { validateSubmission } from '@/lib/questionnaireSubmission'
 import { normalizeQuestionnaireExperience } from '@/lib/questionnaireExperience'
 import { StoreBusyError, withStoreWriteLock } from '@/lib/storeLock'
@@ -318,6 +322,16 @@ async function handlePost(req: NextRequest): Promise<NextResponse> {
       return NextResponse.json({ error: '生年月日を確認してください' }, { status: 400 })
     }
 
+    // Existing submission IDs are replayed, while every new submission must reserve
+    // one of the guest slots. The legacy stores are protected by the write lock and
+    // PostgreSQL repeats this check inside its reservation-row transaction.
+    if (!USE_POSTGRES && !priorQuestionnaire && !hasQuestionnaireGuestSlot(reservation, questionnaires)) {
+      return NextResponse.json(
+        { error: '予約人数分の問診票はすでに提出されています。予約内容をご確認ください。' },
+        { status: 409, headers: { 'Cache-Control': 'no-store' } },
+      )
+    }
+
     if (USE_POSTGRES) {
       if (!store.submitPublicQuestionnaire) {
         throw new Error('PostgreSQL datastore does not provide transactional questionnaire submission')
@@ -340,6 +354,12 @@ async function handlePost(req: NextRequest): Promise<NextResponse> {
           }
           if (error.code === 'submission_conflict') {
             return NextResponse.json({ error: '送信IDは別の予約で使用済みです' }, { status: 409 })
+          }
+          if (error.code === 'reservation_guest_limit') {
+            return NextResponse.json(
+              { error: '予約人数分の問診票はすでに提出されています。予約内容をご確認ください。' },
+              { status: 409, headers: { 'Cache-Control': 'no-store' } },
+            )
           }
         }
         throw error

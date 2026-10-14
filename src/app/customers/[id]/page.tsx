@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Navigation from '@/components/Navigation'
 import { useAuth } from '@/lib/authContext'
-import { fetchCustomers, fetchReservations, patchCustomer } from '@/lib/api'
+import { fetchCustomers, fetchQuestionnaireReservationLinks, fetchReservations, patchCustomer } from '@/lib/api'
 import { buildDiveHistory } from '@/lib/diveHistory'
 import { changedCustomerFields } from '@/lib/customerEdit'
 import { MSG } from '@/lib/messages'
@@ -13,7 +13,7 @@ import {
   validateCustomerUpdate,
   type CustomerFieldErrors,
 } from '@/lib/customerValidation'
-import type { Customer, Reservation } from '@/types'
+import type { Customer, QuestionnaireReservationLink, Reservation } from '@/types'
 
 /** 編集フォームの入力値（数値もいったん文字列で保持する） */
 interface ProfileForm {
@@ -100,6 +100,7 @@ export default function CustomerDetailPage() {
   const [customer, setCustomer] = useState<Customer | null>(null)
   /** ダイブ履歴用。null=読み込み中、'error'=取得失敗 */
   const [reservations, setReservations] = useState<Reservation[] | 'error' | null>(null)
+  const [questionnaireLinks, setQuestionnaireLinks] = useState<QuestionnaireReservationLink[] | 'error' | null>(null)
 
   // 編集状態
   const [editingProfile, setEditingProfile] = useState(false)
@@ -141,14 +142,19 @@ export default function CustomerDetailPage() {
     fetchReservations()
       .then(setReservations)
       .catch(() => setReservations('error'))
+    if (id) {
+      fetchQuestionnaireReservationLinks(id)
+        .then(setQuestionnaireLinks)
+        .catch(() => setQuestionnaireLinks('error'))
+    }
   }, [id, user, router, applyCustomer])
 
   const diveHistory = useMemo(
     () =>
-      customer && Array.isArray(reservations)
-        ? buildDiveHistory(customer.id, reservations)
+      customer && Array.isArray(reservations) && Array.isArray(questionnaireLinks)
+        ? buildDiveHistory(customer.id, reservations, questionnaireLinks)
         : [],
-    [customer, reservations]
+    [customer, reservations, questionnaireLinks]
   )
 
   useEffect(() => {
@@ -570,9 +576,9 @@ export default function CustomerDetailPage() {
           <p className="text-sm font-semibold text-gray-700 mb-2">
             📆 ダイブ履歴
           </p>
-          {reservations === null ? (
+          {reservations === null || questionnaireLinks === null ? (
             <p className="text-sm text-gray-400">読み込み中…</p>
-          ) : reservations === 'error' ? (
+          ) : reservations === 'error' || questionnaireLinks === 'error' ? (
             <p className="text-sm text-red-600">
               履歴を取得できませんでした。再読み込みしてください。
             </p>

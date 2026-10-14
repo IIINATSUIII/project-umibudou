@@ -3,6 +3,7 @@ import type { QuestionnaireData, Reservation } from '@/types'
 import {
   completedQuestionnairesForReservation,
   hasAllGuestQuestionnaires,
+  hasQuestionnaireGuestSlot,
 } from '../questionnaireCompletion'
 
 const reservation = {
@@ -34,6 +35,18 @@ describe('guest questionnaire completion', () => {
 
   it('does not count a pending row even if the reservation has a questionnaire link', () => {
     expect(hasAllGuestQuestionnaires(reservation, [questionnaire('Q-1', 'pending')])).toBe(false)
+  })
+
+  it('reserves guest capacity for pending submissions and allows the remaining slots', () => {
+    expect(hasQuestionnaireGuestSlot(reservation, [questionnaire('Q-1', 'pending')])).toBe(true)
+    expect(hasQuestionnaireGuestSlot(reservation, [
+      questionnaire('Q-1', 'pending'),
+      questionnaire('Q-2', 'complete'),
+    ])).toBe(false)
+    expect(hasQuestionnaireGuestSlot(
+      { ...reservation, guestCount: 1 },
+      [questionnaire('Q-1', 'pending')],
+    )).toBe(false)
   })
 
   it('treats legacy rows without per-questionnaire state as complete only when the reservation is marked complete', () => {

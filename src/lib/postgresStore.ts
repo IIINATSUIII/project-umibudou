@@ -16,7 +16,7 @@ import { normalizeReservationInput, normalizeReservationPatch } from './reservat
 import { createReservationQuestionnaireToken, questionnaireTokenExpiryForDiveDate } from './reservationQuestionnaireToken'
 import { isQuestionnaireReservationAllowed } from './reservationStatus'
 import { query, withTransaction } from './db'
-import { DataStoreError } from './dataStoreErrors'
+import { DataStoreConflictError, DataStoreError } from './dataStoreErrors'
 import type {
   PublicQuestionnaireSubmission,
   PublicQuestionnaireSubmissionResult,
@@ -107,18 +107,26 @@ async function updateEntity(
   entity: object,
   fields: readonly string[],
   changedFields: object = entity,
+  updatedAt?: string,
 ): Promise<void> {
   const entries = dbEntries(changedFields, fields, true)
     .filter(([column]) => column !== 'id' && column !== 'updated_at')
   if (!entries.length) {
-    const result = await client.query(`UPDATE ${table} SET updated_at = now() WHERE id = $1 RETURNING id`, [id])
+    const result = updatedAt === undefined
+      ? await client.query(`UPDATE ${table} SET updated_at = now() WHERE id = $1 RETURNING id`, [id])
+      : await client.query(`UPDATE ${table} SET updated_at = $2 WHERE id = $1 RETURNING id`, [id, updatedAt])
     if (!result.rowCount) throw new Error(`${entityType} ${id} not found`)
     await enqueueSheets(client, entityType, id, 'upsert')
     return
   }
   const assignments = entries.map(([column], index) => `${column} = $${index + 1}`)
-  assignments.push('updated_at = now()')
   const values = entries.map(([, value]) => value)
+  if (updatedAt === undefined) {
+    assignments.push('updated_at = now()')
+  } else {
+    values.push(updatedAt)
+    assignments.push(`updated_at = $${values.length}`)
+  }
   values.push(id)
   const result = await client.query(
     `UPDATE ${table} SET ${assignments.join(', ')} WHERE id = $${values.length} RETURNING id`,
@@ -551,13 +559,20 @@ export async function addReservation(input: ReservationInput): Promise<Reservati
   return reservation
 }
 
-export async function updateReservation(id: string, input: ReservationInput): Promise<void> {
+export async function updateReservation(
+  id: string,
+  input: ReservationInput,
+  expectedUpdatedAt?: string,
+): Promise<void> {
   await withTransaction(async (client) => {
     const result = await client.query('SELECT * FROM reservations WHERE id = $1 FOR UPDATE', [id])
     if (!result.rows[0]) throw new Error(`Reservation ${id} not found`)
     const existing = mapReservation(result.rows[0])
+    if (expectedUpdatedAt !== undefined && (existing.updatedAt ?? '') !== expectedUpdatedAt) {
+      throw new DataStoreConflictError()
+    }
     const patch = normalizeReservationPatch(input)
-    const updatedAt = new Date().toISOString()
+    const updatedAt = typeof patch.updatedAt === 'string' ? patch.updatedAt : new Date().toISOString()
     const updated = { ...existing, ...patch, updatedAt }
     if (patch.diveDate !== undefined && patch.questionnaireTokenExpiresAt == null) {
       updated.questionnaireTokenExpiresAt = questionnaireTokenExpiryForDiveDate(updated.diveDate)
@@ -566,7 +581,7 @@ export async function updateReservation(id: string, input: ReservationInput): Pr
     if (patch.diveDate !== undefined && patch.questionnaireTokenExpiresAt == null) {
       changes.questionnaireTokenExpiresAt = updated.questionnaireTokenExpiresAt
     }
-    await updateEntity(client, 'reservations', 'reservation', id, updated, RESERVATION_FIELDS as readonly string[], changes)
+    await updateEntity(client, 'reservations', 'reservation', id, updated, RESERVATION_FIELDS as readonly string[], changes, updatedAt)
   })
 }
 
@@ -676,15 +691,23 @@ export async function addCustomer(data: Customer): Promise<void> {
   })
 }
 
-export async function updateCustomer(id: string, data: Partial<Customer>): Promise<void> {
+export async function updateCustomer(
+  id: string,
+  data: Partial<Customer>,
+  expectedUpdatedAt?: string,
+): Promise<void> {
   await withTransaction(async (client) => {
     const existing = await readCustomer(client, id, true)
     if (!existing) throw new Error(`Customer ${id} not found`)
-    const updated: Customer = { ...existing, ...data, updatedAt: new Date().toISOString() }
+    if (expectedUpdatedAt !== undefined && (existing.updatedAt ?? '') !== expectedUpdatedAt) {
+      throw new DataStoreConflictError()
+    }
+    const updatedAt = typeof data.updatedAt === 'string' ? data.updatedAt : new Date().toISOString()
+    const updated: Customer = { ...existing, ...data, updatedAt }
     await updateEntity(client, 'customers', 'customer', id, updated, CUSTOMER_FIELDS as readonly string[], {
       ...data,
-      updatedAt: updated.updatedAt,
-    })
+      updatedAt,
+    }, updatedAt)
     if (data.countedReservationIds !== undefined) {
       await syncCustomerMarkers(client, id, parseIdList(data.countedReservationIds))
     }
@@ -736,6 +759,17 @@ async function submitQuestionnaire(
       const expiry = reservation.questionnaireTokenExpiresAt ? new Date(reservation.questionnaireTokenExpiresAt) : null
       if (!expiry || Number.isNaN(expiry.getTime()) || expiry.getTime() <= Date.now()) {
         throw new DataStoreError('questionnaire_expired')
+      }
+
+      const capacity = Number.isFinite(reservation.guestCount)
+        ? Math.max(1, Math.floor(reservation.guestCount))
+        : 1
+      const countResult = await client.query(
+        'SELECT COUNT(*) AS count FROM questionnaires WHERE reservation_id = $1',
+        [reservation.id],
+      )
+      if (Number(countResult.rows[0]?.count ?? 0) >= capacity) {
+        throw new DataStoreError('reservation_guest_limit')
       }
     }
 

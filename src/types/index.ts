@@ -142,6 +142,12 @@ export type QuestionnaireSummary = Pick<
   'lastNameKana' | 'firstNameKana' | 'phone'
 >
 
+/** 顧客別ダイブ履歴の構築に必要な問診票の関連情報。 */
+export type QuestionnaireReservationLink = Pick<
+  QuestionnaireData,
+  'customerId' | 'reservationId'
+>
+
 /** ゲストが入力する項目。ID・顧客紐付け・QR情報はサーバー側で設定する。 */
 export type QuestionnaireFormData = Omit<
   QuestionnaireData,
