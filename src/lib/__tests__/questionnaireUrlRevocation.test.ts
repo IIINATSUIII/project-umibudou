@@ -8,6 +8,7 @@ import type { Reservation } from '@/types'
 vi.mock('@/lib/dataStore', async () => ({
   store: await vi.importActual<typeof import('../localStore')>('../localStore'),
   USE_POSTGRES: false,
+  USES_SHEETS_STORE: false,
   DataStoreError: class extends Error {},
 }))
 vi.mock('@/lib/googleFormImport', () => ({
