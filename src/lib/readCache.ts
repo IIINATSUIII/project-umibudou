@@ -90,7 +90,7 @@ export async function reserveSharedSheetsReadSlot(now: () => number = Date.now):
       },
     }
     if (documentExists) {
-      await firestore.projects.databases.documents.patch({ name, updateMask: { fieldPaths: ['timestamps'] }, requestBody })
+      await firestore.projects.databases.documents.patch({ name, 'updateMask.fieldPaths': ['timestamps'], requestBody })
     } else {
       await firestore.projects.databases.documents.createDocument({
         parent,
