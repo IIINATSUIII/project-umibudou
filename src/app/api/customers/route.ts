@@ -1,6 +1,6 @@
 import { nextUpdatedAt } from '@/lib/updateVersion'
 import { requireStaffSession, staffJson } from '@/lib/staffAuth'
-import { NextRequest } from 'next/server'
+import { NextRequest, type NextResponse } from 'next/server'
 import { store } from '@/lib/dataStore'
 import { MSG } from '@/lib/messages'
 import {
