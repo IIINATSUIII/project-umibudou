@@ -18,8 +18,9 @@
 | 項目 | 採用版・変更 |
 | --- | --- |
 | Node.js | 24.21.0。既定のマシン環境を変更せず、一時キャッシュの実行ファイルでも検証した |
-| Next.js / eslint-config-next | 16.4.0 |
-| React / React DOM | 19.3.0 |
+| Next.js / eslint-config-next | 16.4.1（10月14日公開のセキュリティ修正版） |
+| React / React DOM | 19.3.1 |
+| Next.js image optimizationのsharp | 0.35.5（SVG最適化RCEの修正要件を満たす） |
 | qrcode.react | 4.2.0 |
 | Vitest / Vite | 5.0.4 / 8.3.4。監査で検出されたテスト基盤のCriticalを解消するため更新 |
 | Google APIs / Google Auth Library | 185.0.0 / 11.3.0。旧SDK経由のuuid等の監査指摘を解消するため更新 |
@@ -36,13 +37,15 @@ React Compiler向けの新しい`set-state-in-effect`ルールは、この移行
 | 修正前の既存テスト | 229件すべて成功 |
 | 認証追加前の回帰テスト | 認証・キャッシュ・設定不備の不足で失敗し、修正対象を検出 |
 | 認証修正のテスト | 403件すべて成功 |
+| クリーンインストール | `.nvmrc`のNode.js 24.21.0で`npm ci`成功 |
 | 更新後のテスト | Node.js 24.21.0で22ファイル・405件すべて成功 |
 | lint | 成功、エラー・警告なし |
 | 型生成・型チェック | 成功 |
-| 本番ビルド | Node.js 24.21.0 / Next.js 16.4.0 / Turbopackで成功 |
+| 本番ビルド | Node.js 24.21.0 / Next.js 16.4.1 / Turbopackで成功 |
 | HTTP検証 | 130リクエストすべて成功 |
+| 依存監査 | production 0件。開発依存にHigh 7件・Moderate 2件、Critical 0件 |
 | ブラウザー | ダミーアカウントのログイン、顧客一覧・詳細、名簿、ログアウト後の保護画面拒否、公開予約送信・QR描画・公開問診への遷移を確認。コンソールのerror / warnなし |
-| PR #72のGitHub Actions | Lint, typecheck, and buildが成功 |
+| PR #72 / #77のGitHub Actions | Lint, typecheck, and buildが成功 |
 
 HTTP検証は、全15操作にCookieなし、不正JWT、署名済みの空メール、期限切れJWT、従来のmiddleware用ヘッダーとproxy用ヘッダーを付けて実行した。90件の拒否応答が401のJSON・no-storeであり、前後でJSON保存データが変わらないことを確認した。HEAD・未対応メソッド・OPTIONS、ログイン・ログアウト、認証済みでも本番でsetupが実行されないことも確認した。
 
@@ -52,10 +55,20 @@ HTTP検証は、全15操作にCookieなし、不正JWT、署名済みの空メ�
 
 ## 依存監査と残る確認
 
-`npm audit --omit=dev`は0件。全依存の監査ではCritical 0件、High 7件、Moderate 2件が残る。残っている経路は開発依存のbraces、micromatch、fast-glob、Tailwind CSS、Next.jsのlintプラグイン、PostCSSセレクタ解析であり、本番依存には含まれない。CSS・glob等の不正入力によるDoSの指摘として記録する。
+10月15日に更新後の依存を再監査した。`npm audit --omit=dev`はCritical / High / Moderateともに0件。全依存の監査はCritical 0件、High 7件、Moderate 2件が残る。残っているのは開発依存のbraces、micromatch、fast-glob、Tailwind CSS、Next.jsのlintプラグイン、PostCSS解析であり、本番依存には含まれない。
 
 互換範囲内の修正は適用した。監査の自動修正案にはTailwind CSS 4へのメジャー移行やeslint-config-next 14への差し戻しが含まれるため、`--force`は使っていない。CSSの移行や上流依存の修正確認は別途検討する。ESLint 9はサポート終了の通知があり、公式プラグインの10系対応と合わせて追跡が必要である。
 
-Next.js 16.4.0は10月13日時点の公開最新版だが、公式は10月14日にCritical 2件・High 1件の上流依存の更新を予定している。公開後に影響範囲と修正版を照合し、必要なバージョン更新と検証を行うまで、Issue #57を閉じず、PRはdraftにする。[公式更新予告](https://nextjs.org/blog/upcoming-nextjs-security-update-october-2026)
+### 2026年10月14日追加セキュリティ更新
+
+公式リリース [Next.js 16.4.1](https://github.com/vercel/next.js/releases/tag/v16.4.1) は、次の3件を修正する。いずれもNext.js 16.4.0が対象で、安定版16.4.1が修正版。
+
+| 深刻度 | 勧告 | 影響 |
+| --- | --- | --- |
+| Critical | [GHSA-673q-mjm6-r5xr](https://github.com/vercel/next.js/security/advisories/GHSA-673q-mjm6-r5xr) | Cache Componentsで複数のtyped arrayを返す `use cache` 関数を使うアプリケーションでRCE |
+| Critical | [GHSA-2464-fhr4-w9xw](https://github.com/vercel/next.js/security/advisories/GHSA-2464-fhr4-w9xw) | glibcベースLinux上のImage Optimizationで使われる依存ライブラリのRCE。Next.js更新でsharp 0.35.5以降が選ばれる |
+| High | [GHSA-p3m5-59mp-jv5r](https://github.com/vercel/next.js/security/advisories/GHSA-p3m5-59mp-jv5r) | App RouterでServer Actionを使う場合、細工したリクエストが同一プロセスのCPUを占有するDoS |
+
+公式の予告は[こちら](https://nextjs.org/blog/upcoming-nextjs-security-update-october-2026)。npm公式レジストリのlatestとNext.jsの公式リリースが一致するNext.js 16.4.1、React / React DOM 19.3.1へ更新した。ロックされたsharp 0.35.5も確認した。更新後の405テスト、lint、型チェック、本番ビルド、130件のHTTP検証が成功した。
 
 実際の本番ホスティング・OS・ヘッダー入口、本番またはテスト用Google Sheets / PostgreSQLとの接続、実機カメラによるQR読取は未確認。今回の実行確認は、自己ホストの使い捨てJSON環境と、既存のデータストア回帰テストの範囲である。
