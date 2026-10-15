@@ -34,6 +34,7 @@ import * as roster from '@/app/api/roster/route'
 import * as setup from '@/app/api/setup/route'
 import * as urls from '@/app/api/reservations/questionnaire-url/route'
 import * as reservations from '@/app/api/reservations/route'
+import * as reservationImport from '@/app/api/reservations/import/route'
 import * as questionnaires from '@/app/api/questionnaires/route'
 import * as checkin from '@/app/api/questionnaires/checkin/route'
 
@@ -47,6 +48,7 @@ const actions = [
   { path: '/api/setup', method: 'POST', handler: setup.POST, body: {}, status: 200 },
   { path: '/api/reservations/questionnaire-url', method: 'POST', handler: urls.POST, body: { id: 'R-test' }, status: 200 },
   { path: '/api/reservations/questionnaire-url', method: 'DELETE', handler: urls.DELETE, body: { id: 'R-test' }, status: 200 },
+  { path: '/api/reservations/import', method: 'POST', handler: reservationImport.POST, body: {}, status: 400 },
   { path: '/api/reservations', method: 'GET', handler: reservations.GET, status: 200 },
   { path: '/api/reservations', method: 'POST', handler: reservations.POST, body: {}, status: 400 },
   { path: '/api/reservations', method: 'PATCH', handler: reservations.PATCH, body: {}, status: 400 },
