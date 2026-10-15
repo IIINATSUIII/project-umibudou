@@ -5,8 +5,11 @@ import { DataStoreError, store, USE_POSTGRES } from '@/lib/dataStore'
 import type { Customer, QuestionnaireData, QuestionnaireFormData } from '@/types'
 import { saveSubmission, SubmissionValidationError, validateSubmission } from '@/lib/questionnaireSubmission'
 import { normalizeQuestionnaireExperience } from '@/lib/questionnaireExperience'
-import { withStoreWriteLock } from '@/lib/storeLock'
+import { StoreBusyError, withStoreWriteLock } from '@/lib/storeLock'
 import { getQrError } from '@/lib/questionnaireToken'
+import { getQuestionnairesForList } from '@/lib/listReads'
+import { RateLimitedError } from '@/lib/withRetry'
+import { MSG } from '@/lib/messages'
 
 export const runtime = 'nodejs'
 
@@ -131,8 +134,26 @@ export async function GET(req: NextRequest) {
         : staffJson({ error: '問診票が見つかりません' }, { status: 404 })
     }
 
+    if (req.nextUrl.searchParams.has('customerId')) {
+      const customerId = req.nextUrl.searchParams.get('customerId')?.trim() ?? ''
+      if (!customerId || customerId.length > 200) {
+        return staffJson({ error: '顧客IDが不正です' }, { status: 400 })
+      }
+      const links = (await store.getQuestionnaires())
+        .filter((questionnaire) => questionnaire.customerId === customerId)
+        .map(({ customerId: linkedCustomerId, reservationId }) => ({
+          customerId: linkedCustomerId,
+          reservationId,
+        }))
+      return staffJson(links, { headers: { 'Cache-Control': 'no-store' } })
+    }
+
     const query = req.nextUrl.searchParams.get('q')?.trim() ?? ''
-    if (!query) return staffJson(await store.getQuestionnaires())
+    // 一覧（ポーリング対象）は短期キャッシュ経由で読む（Issue #68）。?fresh=1 はQR照合の事前ロード用に最新を読む
+    if (!query) {
+      const fresh = req.nextUrl.searchParams.get('fresh') === '1'
+      return staffJson(await getQuestionnairesForList({ fresh }))
+    }
     if (query.length > 200) {
       return staffJson({ error: '検索語が長すぎます' }, { status: 400 })
     }
@@ -155,6 +176,8 @@ export async function GET(req: NextRequest) {
     })))
   } catch (err) {
     console.error('[GET /api/questionnaires]', err)
+    if (err instanceof RateLimitedError)
+      return staffJson({ error: MSG.RATE_LIMITED }, { status: 503 })
     return staffJson({ error: 'Failed to fetch questionnaires' }, { status: 500 })
   }
 }
@@ -292,7 +315,16 @@ export async function PATCH(req: NextRequest) {
 
   let response: NextResponse | null = null
   const resolve = async () => {
-    response = await resolveExistingCustomer(body)
+    try {
+      response = await withStoreWriteLock(() => resolveExistingCustomer(body))
+    } catch (err) {
+      if (err instanceof StoreBusyError) {
+        response = staffJson({ error: err.message }, { status: 503 })
+      } else {
+        console.error('[PATCH /api/questionnaires]', err)
+        response = staffJson({ error: 'Failed to resolve questionnaire' }, { status: 500 })
+      }
+    }
   }
   const pending = resolutionQueue.then(resolve, resolve)
   resolutionQueue = pending.then(() => undefined, () => undefined)

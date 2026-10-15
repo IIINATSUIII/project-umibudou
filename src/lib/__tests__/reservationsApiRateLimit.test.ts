@@ -8,7 +8,7 @@ const mock = vi.hoisted(() => ({
   createReservation: vi.fn(),
   patchReservation: vi.fn(),
 }))
-vi.mock('@/lib/dataStore', () => ({ store: { getReservations: mock.getReservations } }))
+vi.mock('@/lib/dataStore', () => ({ store: { getReservations: mock.getReservations }, USES_SHEETS_STORE: false }))
 vi.mock('@/lib/session', () => ({
   SESSION_COOKIE: 'odp_session',
   verifySessionToken: async (token: string) => token === 'staff-session' ? { email: 'staff@example.com' } : null,

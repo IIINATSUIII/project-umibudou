@@ -15,6 +15,17 @@ export class SessionConfigurationError extends Error {
   }
 }
 
+export class AuthConfigurationError extends Error {
+  constructor() {
+    super('STAFF_CREDENTIALS に有効な認証情報が設定されていません')
+    this.name = 'AuthConfigurationError'
+  }
+}
+
+export function isNonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0
+}
+
 function getSecret(): Uint8Array {
   const s = process.env.SESSION_SECRET
   if (!s?.trim()) throw new SessionConfigurationError()
@@ -23,7 +34,8 @@ function getSecret(): Uint8Array {
 
 /** JWT を生成してクッキー用の文字列を返す */
 export async function createSessionToken(email: string): Promise<string> {
-  if (typeof email !== 'string' || !email.trim()) throw new TypeError('A non-empty staff email is required')
+  if (!isNonEmptyString(email)) throw new TypeError('セッションのメールアドレスが不正です')
+
   return new SignJWT({ email })
     .setProtectedHeader({ alg: 'HS256' })
     .setIssuedAt()
@@ -31,7 +43,7 @@ export async function createSessionToken(email: string): Promise<string> {
     .sign(getSecret())
 }
 
-/** JWT を検証してペイロードを返す（無効なら null） */
+/** JWT の署名・期限・利用者情報を検証する（無効なら null） */
 export async function verifySessionToken(
   token: string
 ): Promise<{ email: string } | null> {
@@ -50,16 +62,24 @@ export async function verifySessionToken(
   }
 }
 
-/** スタッフ認証情報を検証する（.env.local の STAFF_CREDENTIALS を参照） */
+/** スタッフ認証情報を検証する（有効な設定がなければ構成エラー） */
 export function validateCredentials(email: unknown, password: unknown): boolean {
-  if (typeof email !== 'string' || !email.trim() || typeof password !== 'string' || !password.trim()) return false
-  // 書式: "staff@okidive.com:pass1|staff2@okidive.com:pass2"
-  const raw = process.env.STAFF_CREDENTIALS ?? ''
-  const users = raw.split('|').map((u) => {
-    const [e, p] = u.split(':')
-    return { email: e?.trim(), password: p?.trim() }
+  if (!isNonEmptyString(email) || !isNonEmptyString(password)) return false
+
+  // 書式: "メール:パスワード|メール2:パスワード2"
+  const users = (process.env.STAFF_CREDENTIALS ?? '').split('|').flatMap((entry) => {
+    const separator = entry.indexOf(':')
+    if (separator < 0) return []
+
+    const configuredEmail = entry.slice(0, separator).trim()
+    const configuredPassword = entry.slice(separator + 1).trim()
+    if (!isNonEmptyString(configuredEmail) || !isNonEmptyString(configuredPassword)) return []
+
+    return [{ email: configuredEmail, password: configuredPassword }]
   })
-  return users.some((u) => u.email === email && u.password === password)
+
+  if (users.length === 0) throw new AuthConfigurationError()
+  return users.some((user) => user.email === email && user.password === password)
 }
 
 export { SESSION_COOKIE }

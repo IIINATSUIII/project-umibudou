@@ -57,6 +57,8 @@ export async function POST(req: NextRequest) {
       const reservation = reservations.find((item) => item.id === q.reservationId)
       if (!reservation) return { error: '予約情報が見つかりません' }
       if (!isReservationActive(reservation)) return { error: '予約情報が無効です' }
+      const today = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' })
+      if (reservation.diveDate !== today) return { error: '本日の予約ではないため受付できません。' }
       const existing = roster.find((item) => item.questionnaireId === q.id)
       if (existing) {if(!q.qrUsed) await store.updateQuestionnaire(q.id,{qrUsed:true});return { ok: true, entry: existing, alreadyExists: true }}
       const customer = customers.find((item) => item.id === q.customerId) ?? customers.find((item) => normalizePhone(item.phone) === normalizePhone(q.phone) || `${item.lastName} ${item.firstName}` === `${q.lastName} ${q.firstName}`)
@@ -75,7 +77,11 @@ export async function POST(req: NextRequest) {
     })
     if (result.error) {
       const errorMessage = result.error
-      const status = errorMessage.includes('MSG-22') ? 409 : errorMessage.includes('問診情報') || errorMessage.includes('予約情報') ? 404 : 400
+      const status = errorMessage.includes('MSG-22') || errorMessage.includes('本日の予約')
+        ? 409
+        : errorMessage.includes('問診情報') || errorMessage.includes('予約情報')
+          ? 404
+          : 400
       return staffJson({ error: errorMessage }, { status })
     }
     return staffJson(result)
