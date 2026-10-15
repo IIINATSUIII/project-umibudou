@@ -30,7 +30,7 @@ const DEFAULT_HEADER_ALIASES: Record<ReservationField, string[]> = {
   notes: ['備考', 'ご要望', 'ご要望・メモ', 'メッセージ', 'その他'],
 }
 
-function normalizeHeader(value: string): string {
+export function normalizeHeader(value: string): string {
   return value
     .normalize('NFKC')
     .replace(/[\s　]/g, '')
@@ -68,7 +68,7 @@ function cell(row: string[], index: number): string {
   return index >= 0 ? String(row[index] ?? '').trim() : ''
 }
 
-function parseDate(value: string): string | null {
+export function parseDate(value: string): string | null {
   const text = value.trim()
   let match = text.match(/^(\d{4})[./年-](\d{1,2})[./月-](\d{1,2})日?/)
   if (match) {
@@ -95,7 +95,7 @@ function toIsoDate(year: number, month: number, day: number): string | null {
   return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
 }
 
-function parseTime(value: string): string | null {
+export function parseTime(value: string): string | null {
   const text = value.trim()
   const colon = text.match(/(午前|午後)?\s*(\d{1,2})[:：](\d{2})/)
   const japanese = text.match(/(午前|午後)\s*(\d{1,2})時(?:\s*(\d{1,2})分)?/)
