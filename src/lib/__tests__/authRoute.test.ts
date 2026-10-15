@@ -3,7 +3,7 @@ import { NextRequest } from 'next/server'
 import { SignJWT } from 'jose'
 import * as session from '../session'
 import { DELETE, GET, POST } from '../../app/api/auth/route'
-import { middleware } from '../../middleware'
+import { proxy as middleware } from '@/proxy'
 
 const EMAIL = 'staff@example.com'
 const PASSWORD = 'fixture-password'
