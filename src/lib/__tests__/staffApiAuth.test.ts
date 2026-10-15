@@ -80,8 +80,8 @@ beforeEach(() => {
   vi.stubEnv('SESSION_SECRET', secret)
   vi.stubEnv('NODE_ENV', 'development')
   vi.stubEnv('ENABLE_SHEETS_SETUP', 'true')
-  vi.spyOn(console, 'error').mockImplementation(() => undefined)
   vi.resetAllMocks()
+  vi.spyOn(console, 'error').mockImplementation(() => undefined)
   for (const spy of Object.values(dependencies.store)) spy.mockResolvedValue([])
   dependencies.store.getReservations.mockResolvedValue([{
     id: 'R-test', diveDate: '2099-01-02', status: 'STS-03',

@@ -20,7 +20,7 @@ JWTは既存のHTTP-only Cookie `odp_session`を使用する。HS256の署名、
 
 未認証・無効JWTは `401 { "error": "Unauthorized" }`、署名鍵の設定不備は `503 { "error": "AUTH_UNAVAILABLE" }`。無効なCookieは削除する。秘密値・JWT・リクエスト本文を認証エラーのログへ出力しない。スタッフAPIのJSON応答には `Cache-Control: no-store` を付ける。
 
-画面の未認証アクセスは `/login` へ誘導する。公開APIは `/api/public/` 配下、ログインAPIは `/api/auth` の完全一致で区分する。`/api/publicity`、`/api/auth-extra` 等を公開扱いにしない。`/questionnaire/scan` とその配下は保護する。
+`src/proxy.ts`で画面の未認証アクセスを `/login` へ誘導する。公開APIは `/api/public/` 配下、ログインAPIは `/api/auth` の完全一致で区分する。`/api/publicity`、`/api/auth-extra` 等を公開扱いにしない。`/questionnaire/scan` とその配下は保護する。公開リッチメニュー画像は `/line-rich-menu.png` の完全一致だけを例外とする。
 
 公開予約・公開問診・QRの既存フローは、スタッフCookieなしで利用できる。問診・受付QRは既存の予約トークン、有効期限、予約状態、使用済み状態の検証を維持する。`/api/cron/sheets-outbox` は `CRON_SECRET` による独立したBearer認証を行う。
 
@@ -38,11 +38,13 @@ JWTは既存のHTTP-only Cookie `odp_session`を使用する。HS256の署名、
 
 ## 検証と変更時のルール
 
-`staffApiAuth.test.ts` は、middlewareを通さず全15操作を呼び出し、未認証・不正Cookie・迂回ヘッダー・不正JSON・空メールの署名済みJWTを拒否することと、データ処理が呼ばれないことを確認する。正常系は実際のjoseで署名したセッションを使う。
+`staffApiAuth.test.ts` は、proxyを通さず全15操作を呼び出し、未認証・不正Cookie・迂回ヘッダー・不正JSON・空メールの署名済みJWTを拒否することと、データ処理が呼ばれないことを確認する。正常系は実際のjoseで署名したセッションを使う。
 
 `staffAuth.test.ts` は、署名・期限・メール・アルゴリズム、Cookie、画面とAPIのパス境界、ログイン・ユーザー照会を確認する。`cronAuth.test.ts` と既存の公開問診テストで、スタッフ認証以外の入口を検証する。
 
 APIを追加するときは、公開・認証・cron・スタッフのいずれかへ明示的に分類し、認証契約テストを更新する。スタッフ向けの新しい操作には認証前の処理がないことを確認する。
+
+`npm run build` の後に `npm run test:security` を実行すると、本番サーバーをループバックへ一時起動し、ダミーの認証情報と独立したJSON保存先で130件のHTTP検証を行う。Google接続設定は空へ置き換え、`DATA_STORE=json`に固定する。本番データへ接続しない。終了時にサーバーと生成したダミーデータを片付ける。`--keep-server`を付けた場合は、ブラウザー確認後にEnterで終了する。
 
 ## フレームワークのセキュリティ更新
 
