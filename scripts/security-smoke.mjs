@@ -113,7 +113,7 @@ try {
 
   const booking = (await call('POST', '/api/public/bookings', {
     body: { guestName: '検証 太郎', guestPhone: '090-0000-0000', guestEmail: 'guest@example.com',
-      diveDate: '2099-01-02', timeSlot: 'morning', courseId: 'CRS-001', guestCount: 1 }, status: 200,
+      diveDate: new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' }), timeSlot: 'morning', courseId: 'CRS-001', guestCount: 1 }, status: 200,
   })).body
   const list = (await call('GET', '/api/reservations', { cookie, status: 200 })).body
   const reservation = list.find(item => item.id === booking.id)
