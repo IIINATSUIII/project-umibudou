@@ -1,6 +1,6 @@
 # Issue #57 実装と検証結果
 
-確認日: 2026年10月13日（日本時間）
+確認日: 2026年10月15日（日本時間）
 
 基点: main `c0188b7135a36ea3115bad6ac60dd87401787b6e`
 関連: [Issue #57](https://github.com/IIINATSUIII/project-umibudou/issues/57)、[スタッフAPI認証 PR #72](https://github.com/IIINATSUIII/project-umibudou/pull/72)
@@ -45,7 +45,7 @@ React Compiler向けの新しい`set-state-in-effect`ルールは、この移行
 | HTTP検証 | 130リクエストすべて成功 |
 | 依存監査 | production 0件。開発依存にHigh 7件・Moderate 2件、Critical 0件 |
 | ブラウザー | ダミーアカウントのログイン、顧客一覧・詳細、名簿、ログアウト後の保護画面拒否、公開予約送信・QR描画・公開問診への遷移を確認。コンソールのerror / warnなし |
-| PR #72 / #77のGitHub Actions | Lint, typecheck, and buildが成功 |
+| PR #77のGitHub Actions | セキュリティ更新コミット `08c322a` で全ステップ成功（[実行結果](https://github.com/IIINATSUIII/project-umibudou/actions/runs/38660591733)） |
 
 HTTP検証は、全15操作にCookieなし、不正JWT、署名済みの空メール、期限切れJWT、従来のmiddleware用ヘッダーとproxy用ヘッダーを付けて実行した。90件の拒否応答が401のJSON・no-storeであり、前後でJSON保存データが変わらないことを確認した。HEAD・未対応メソッド・OPTIONS、ログイン・ログアウト、認証済みでも本番でsetupが実行されないことも確認した。
 
