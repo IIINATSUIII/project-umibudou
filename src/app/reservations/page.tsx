@@ -100,7 +100,7 @@ export default function ReservationsPage() {
   }
 
   async function reloadAfterImport() {
-    try { setReservations(await fetchReservations()) } catch { /* 次回の自動更新で反映される */ }
+    try { await reloadReservationsFresh() } catch { /* 次回の自動更新で反映される */ }
   }
 
   if (loading) return <div className="min-h-screen flex items-center justify-center text-gray-400 text-sm">読み込み中…</div>
