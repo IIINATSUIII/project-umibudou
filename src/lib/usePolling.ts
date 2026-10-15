@@ -20,7 +20,10 @@ export function nextPollDelay(consecutiveFailures: number): number {
 
 export function usePolling(load: () => Promise<void>, enabled: boolean): void {
   const loadRef = useRef(load)
-  loadRef.current = load
+
+  useEffect(() => {
+    loadRef.current = load
+  }, [load])
 
   useEffect(() => {
     if (!enabled) return
