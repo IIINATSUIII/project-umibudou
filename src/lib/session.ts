@@ -8,6 +8,13 @@ import { SignJWT, jwtVerify } from 'jose'
 const SESSION_COOKIE = 'odp_session'
 const EXPIRY = '7d'
 
+export class SessionConfigurationError extends Error {
+  constructor() {
+    super('SESSION_SECRET is not configured')
+    this.name = 'SessionConfigurationError'
+  }
+}
+
 export class AuthConfigurationError extends Error {
   constructor() {
     super('STAFF_CREDENTIALS に有効な認証情報が設定されていません')
@@ -21,13 +28,13 @@ export function isNonEmptyString(value: unknown): value is string {
 
 function getSecret(): Uint8Array {
   const s = process.env.SESSION_SECRET
-  if (!s) throw new Error('SESSION_SECRET が設定されていません')
+  if (!s?.trim()) throw new SessionConfigurationError()
   return new TextEncoder().encode(s)
 }
 
 /** JWT を生成してクッキー用の文字列を返す */
 export async function createSessionToken(email: string): Promise<string> {
-  if (!isNonEmptyString(email)) throw new Error('セッションのメールアドレスが不正です')
+  if (!isNonEmptyString(email)) throw new TypeError('セッションのメールアドレスが不正です')
 
   return new SignJWT({ email })
     .setProtectedHeader({ alg: 'HS256' })
@@ -40,9 +47,15 @@ export async function createSessionToken(email: string): Promise<string> {
 export async function verifySessionToken(
   token: string
 ): Promise<{ email: string } | null> {
+  // Configuration errors are operational failures, not invalid user tokens.
+  const secret = getSecret()
   try {
-    const { payload } = await jwtVerify(token, getSecret())
-    if (!isNonEmptyString(payload.email)) return null
+    const { payload } = await jwtVerify(token, secret, {
+      algorithms: ['HS256'],
+      requiredClaims: ['exp', 'email'],
+    })
+    if (typeof payload.email !== 'string' || !payload.email.trim()) return null
+    if (typeof payload.exp !== 'number' || !Number.isFinite(payload.exp)) return null
     return { email: payload.email }
   } catch {
     return null

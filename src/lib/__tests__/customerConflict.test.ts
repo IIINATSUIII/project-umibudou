@@ -14,6 +14,16 @@ vi.mock('@/lib/storeLock', () => ({
 import { PATCH } from '@/app/api/customers/route'
 import { DataStoreConflictError } from '../dataStoreErrors'
 
+vi.mock('@/lib/staffAuth', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/staffAuth')>('@/lib/staffAuth')
+  return {
+    ...actual,
+    requireStaffSession: vi.fn().mockResolvedValue({ ok: true, session: { email: 'staff@example.com' } }),
+  }
+})
+
+
+
 const customer: Customer = {
   id: 'C-1', lastName: '山田', firstName: '太郎', lastNameKana: 'ヤマダ', firstNameKana: 'タロウ',
   phone: '090-1234-5678', email: 'taro@example.com', lastVisit: '2026-10-01', visitCount: 1,

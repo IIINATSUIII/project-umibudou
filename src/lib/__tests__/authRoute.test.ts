@@ -115,7 +115,7 @@ describe('POST /api/auth', () => {
   it('署名鍵が欠落しても成功やCookie発行にならない', async () => {
     vi.stubEnv('SESSION_SECRET', undefined)
     const response = await POST(postRequest(VALID_BODY))
-    expect(response.status).toBe(500)
+    expect(response.status).toBe(503)
     expect(response.headers.get('set-cookie')).toBeNull()
     expect((await response.json()).error).toEqual(expect.any(String))
   })
