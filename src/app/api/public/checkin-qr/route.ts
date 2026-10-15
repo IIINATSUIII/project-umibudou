@@ -2,10 +2,6 @@ import { timingSafeEqual } from 'crypto'
 import { NextRequest, NextResponse } from 'next/server'
 import { store } from '@/lib/dataStore'
 import { isConfirmedReservationStatus } from '@/lib/reservationStatus'
-import {
-  deriveReservationQuestionnaireToken,
-  questionnaireTokenExpiryForDiveDate,
-} from '@/lib/reservationQuestionnaireToken'
 
 function matchesToken(provided: string, expected: string): boolean {
   const providedBytes = Buffer.from(provided)
@@ -33,12 +29,12 @@ export async function POST(req: NextRequest) {
 
     const reservations = await store.getReservations()
     const reservation = reservations.find((item) => item.id === reservationId && isConfirmedReservationStatus(item.status))
-    const expectedToken = reservation && (reservation.questionnaireToken ?? deriveReservationQuestionnaireToken(reservation.id))
+    const expectedToken = reservation?.questionnaireToken
     if (!reservation || !expectedToken || !matchesToken(reservationToken, expectedToken)) {
       return NextResponse.json({ error: '予約を確認できませんでした。予約時の案内をご確認ください。' }, { status: 404 })
     }
 
-    const tokenExpiry = reservation.questionnaireTokenExpiresAt ?? questionnaireTokenExpiryForDiveDate(reservation.diveDate)
+    const tokenExpiry = reservation.questionnaireTokenExpiresAt
     const tokenExpiryMs = tokenExpiry ? new Date(tokenExpiry).getTime() : Number.NaN
     if (!Number.isFinite(tokenExpiryMs) || tokenExpiryMs <= Date.now()) {
       return NextResponse.json({ error: '予約確認コードの有効期限が切れています。ショップへお問い合わせください。' }, { status: 410 })
@@ -57,7 +53,7 @@ export async function POST(req: NextRequest) {
       }
     })
 
-    const questionnaireUrl = `/questionnaire/${encodeURIComponent(reservation.id)}?token=${encodeURIComponent(expectedToken)}`
+    const questionnaireUrl = `/questionnaire/${encodeURIComponent(expectedToken)}`
 
     return NextResponse.json({
       reservation: {

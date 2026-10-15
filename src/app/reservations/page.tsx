@@ -6,7 +6,8 @@ import Link from 'next/link'
 import WeatherWidget from '@/components/WeatherWidget'
 import Navigation from '@/components/Navigation'
 import { useAuth } from '@/lib/authContext'
-import { fetchReservations, fetchQuestionnaires, patchReservation, ApiRequestError } from '@/lib/api'
+import { useReservationLists } from '@/lib/useReservationLists'
+import { patchReservation, ApiRequestError } from '@/lib/api'
 import { getStatusName } from '@/lib/masters'
 import {
   cancelledReservationStatus,
@@ -40,13 +41,10 @@ function statusLabel(status: string): string {
 export default function ReservationsPage() {
   const user = useAuth()
   const router = useRouter()
-  const [reservations, setReservations] = useState<Reservation[]>([])
   const [actionError,setActionError]=useState('')
-  const [questionnaires, setQuestionnaires] = useState<QuestionnaireData[]>([])
   const [successMessage, setSuccessMessage] = useState('')
   // 空文字 = 全件表示。日付を選ぶとその日のみ表示
   const [dateFilter, setDateFilter] = useState('')
-  const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     if (new URLSearchParams(window.location.search).get('saved') === '1') {
@@ -56,19 +54,11 @@ export default function ReservationsPage() {
   }, [])
 
   useEffect(() => {
-    if (user === undefined) return
-    if (!user) { router.push('/login'); return }
-    const load = () => Promise.all([fetchReservations(), fetchQuestionnaires()]).then(([res, qs]) => {
-      setReservations(res)
-      setQuestionnaires(qs)
-      setLoading(false)
-    }).catch(() => { setActionError('データを読み込めませんでした。更新して再度お試しください。'); setLoading(false) })
-    load()
-    // 客側フォームからの申し込みを自動反映（10秒ごと＋ウィンドウ復帰時）
-    const iv = setInterval(load, 10000)
-    window.addEventListener('focus', load)
-    return () => { clearInterval(iv); window.removeEventListener('focus', load) }
+    if (user === null) router.push('/login')
   }, [user, router])
+
+  const { reservations, setReservations, questionnaires, loading, loadError, reloadReservationsFresh } =
+    useReservationLists(Boolean(user))
 
   function questionnaireIdFor(reservationId: string): string | undefined {
     return questionnaires.find((q) => q.reservationId === reservationId)?.id
@@ -91,9 +81,7 @@ export default function ReservationsPage() {
       setActionError('')
     } catch (err) {
       setActionError(err instanceof Error ? err.message : '保存できませんでした')
-      if (err instanceof ApiRequestError && err.status === 409) {
-        try { setReservations(await fetchReservations()) } catch { /* keep the visible stale row */ }
-      }
+      if (err instanceof ApiRequestError && err.status === 409) await reloadReservationsFresh()
     }
   }
 
@@ -107,9 +95,7 @@ export default function ReservationsPage() {
       setActionError('')
     } catch (err) {
       setActionError(err instanceof Error ? err.message : '保存できませんでした')
-      if (err instanceof ApiRequestError && err.status === 409) {
-        try { setReservations(await fetchReservations()) } catch { /* keep the visible stale row */ }
-      }
+      if (err instanceof ApiRequestError && err.status === 409) await reloadReservationsFresh()
     }
   }
 
@@ -124,6 +110,7 @@ export default function ReservationsPage() {
       <Navigation />
       <WeatherWidget />
       {actionError && <p role="alert" className="p-4 text-red-700">{actionError}</p>}
+      {loadError && <p role="status" className="p-4 text-amber-700">{loadError}</p>}
       <main className="max-w-5xl mx-auto px-4 py-6 pb-20 md:pb-6 space-y-4">
 
         <div className="flex flex-wrap items-center gap-3">

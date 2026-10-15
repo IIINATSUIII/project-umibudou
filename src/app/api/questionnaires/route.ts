@@ -1,14 +1,19 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, type NextResponse } from 'next/server'
+import { requireStaffSession, staffJson } from '@/lib/staffAuth'
 import { createHash } from 'crypto'
 import { DataStoreError, store, USE_POSTGRES } from '@/lib/dataStore'
-import { SESSION_COOKIE, verifySessionToken } from '@/lib/session'
 import type { Customer, QuestionnaireData, QuestionnaireFormData } from '@/types'
 import { saveSubmission, SubmissionValidationError, validateSubmission } from '@/lib/questionnaireSubmission'
 import { normalizeQuestionnaireExperience } from '@/lib/questionnaireExperience'
-import { withStoreWriteLock } from '@/lib/storeLock'
+import { StoreBusyError, withStoreWriteLock } from '@/lib/storeLock'
 import { getQrError } from '@/lib/questionnaireToken'
+import { getQuestionnairesForList } from '@/lib/listReads'
+import { RateLimitedError } from '@/lib/withRetry'
+import { MSG } from '@/lib/messages'
 
 export const runtime = 'nodejs'
+
+export const dynamic = 'force-dynamic'
 
 function parseIdList(value?: string): string[] {
   try {
@@ -43,11 +48,6 @@ function healthNotes(questionnaire: QuestionnaireData): string {
     questionnaire.medication         && `服薬：${questionnaire.medicationName}`,
     questionnaire.latexAllergy       && 'ラテックスアレルギー',
   ].filter(Boolean).join('、') || '特記なし'
-}
-
-async function isStaff(req: NextRequest): Promise<boolean> {
-  const token = req.cookies.get(SESSION_COOKIE)?.value
-  return Boolean(token && await verifySessionToken(token))
 }
 
 let resolutionQueue: Promise<void> = Promise.resolve()
@@ -122,32 +122,49 @@ function toPostgresQuestionnaireForm(body: Record<string, unknown>):
 
 /** GET /api/questionnaires?q=... — 条件を指定して問診票を検索 */
 export async function GET(req: NextRequest) {
-  try {
-    if (!await isStaff(req)) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
+  const auth = await requireStaffSession(req)
+  if (!auth.ok) return auth.response
 
+  try {
     const id = req.nextUrl.searchParams.get('id')?.trim() ?? ''
     if (id) {
       const questionnaire = await store.getQuestionnaireById(id)
       return questionnaire
-        ? NextResponse.json(questionnaire)
-        : NextResponse.json({ error: '問診票が見つかりません' }, { status: 404 })
+        ? staffJson(questionnaire)
+        : staffJson({ error: '問診票が見つかりません' }, { status: 404 })
+    }
+
+    if (req.nextUrl.searchParams.has('customerId')) {
+      const customerId = req.nextUrl.searchParams.get('customerId')?.trim() ?? ''
+      if (!customerId || customerId.length > 200) {
+        return staffJson({ error: '顧客IDが不正です' }, { status: 400 })
+      }
+      const links = (await store.getQuestionnaires())
+        .filter((questionnaire) => questionnaire.customerId === customerId)
+        .map(({ customerId: linkedCustomerId, reservationId }) => ({
+          customerId: linkedCustomerId,
+          reservationId,
+        }))
+      return staffJson(links, { headers: { 'Cache-Control': 'no-store' } })
     }
 
     const query = req.nextUrl.searchParams.get('q')?.trim() ?? ''
-    if (!query) return NextResponse.json(await store.getQuestionnaires())
+    // 一覧（ポーリング対象）は短期キャッシュ経由で読む（Issue #68）。?fresh=1 はQR照合の事前ロード用に最新を読む
+    if (!query) {
+      const fresh = req.nextUrl.searchParams.get('fresh') === '1'
+      return staffJson(await getQuestionnairesForList({ fresh }))
+    }
     if (query.length > 200) {
-      return NextResponse.json({ error: '検索語が長すぎます' }, { status: 400 })
+      return staffJson({ error: '検索語が長すぎます' }, { status: 400 })
     }
     const matches = await store.searchQuestionnaires(query)
     const qrMatch = matches.find(
       (questionnaire) => questionnaire.qrToken === query
     )
     if (qrMatch && getQrError(qrMatch)) {
-      return NextResponse.json({ error: getQrError(qrMatch) }, { status: 410 })
+      return staffJson({ error: getQrError(qrMatch) }, { status: 410 })
     }
-    return NextResponse.json(matches.map((questionnaire) => ({
+    return staffJson(matches.map((questionnaire) => ({
       id: questionnaire.id,
       reservationId: questionnaire.reservationId,
       submittedAt: questionnaire.submittedAt,
@@ -159,20 +176,22 @@ export async function GET(req: NextRequest) {
     })))
   } catch (err) {
     console.error('[GET /api/questionnaires]', err)
-    return NextResponse.json({ error: 'Failed to fetch questionnaires' }, { status: 500 })
+    if (err instanceof RateLimitedError)
+      return staffJson({ error: MSG.RATE_LIMITED }, { status: 503 })
+    return staffJson({ error: 'Failed to fetch questionnaires' }, { status: 500 })
   }
 }
 
 /** POST /api/questionnaires — 問診票提出 */
 export async function POST(req: NextRequest) {
-  if (!await isStaff(req)) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
+  const auth = await requireStaffSession(req)
+  if (!auth.ok) return auth.response
+
 
   try {
     const input: unknown = await req.json().catch(() => null)
     if (!input || typeof input !== 'object' || Array.isArray(input)) {
-      return NextResponse.json({ error: '入力形式が不正です' }, { status: 400 })
+      return staffJson({ error: '入力形式が不正です' }, { status: 400 })
     }
     const body = input as Record<string, unknown>
     if (typeof body.reservationId === 'string') {
@@ -181,7 +200,7 @@ export async function POST(req: NextRequest) {
           (item) => item.id === body.reservationId,
         )
         if (!reservation) {
-          return NextResponse.json({ error: '予約が見つかりません' }, { status: 404 })
+          return staffJson({ error: '予約が見つかりません' }, { status: 404 })
         }
 
         if (USE_POSTGRES) {
@@ -190,7 +209,7 @@ export async function POST(req: NextRequest) {
           }
           const prepared = toPostgresQuestionnaireForm(body)
           if ('errors' in prepared) {
-            return NextResponse.json(
+            return staffJson(
               { error: '入力内容を確認してください', errors: prepared.errors },
               { status: 400 },
             )
@@ -200,7 +219,7 @@ export async function POST(req: NextRequest) {
             ? body.submissionId.trim()
             : staffSubmissionId(reservation.id)
           if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(submissionId)) {
-            return NextResponse.json({ error: '送信IDが不正です' }, { status: 400 })
+            return staffJson({ error: '送信IDが不正です' }, { status: 400 })
           }
 
           try {
@@ -210,7 +229,7 @@ export async function POST(req: NextRequest) {
               formData: prepared.formData,
             })
             const questionnaire = result.questionnaire
-            return NextResponse.json({
+            return staffJson({
               ok: true,
               questionnaireId: questionnaire.id,
               qrToken: questionnaire.qrToken,
@@ -219,10 +238,10 @@ export async function POST(req: NextRequest) {
           } catch (err) {
             if (err instanceof DataStoreError) {
               if (err.code === 'reservation_not_found') {
-                return NextResponse.json({ error: '予約が見つかりません' }, { status: 404 })
+                return staffJson({ error: '予約が見つかりません' }, { status: 404 })
               }
               if (err.code === 'submission_conflict') {
-                return NextResponse.json({ error: '送信IDは別の予約で使用済みです' }, { status: 409 })
+                return staffJson({ error: '送信IDは別の予約で使用済みです' }, { status: 409 })
               }
             }
             throw err
@@ -230,7 +249,7 @@ export async function POST(req: NextRequest) {
         }
 
         const questionnaire = await saveSubmission(reservation, body)
-        return NextResponse.json({
+        return staffJson({
           ok: true,
           questionnaireId: questionnaire.id,
           qrToken: questionnaire.qrToken,
@@ -240,81 +259,90 @@ export async function POST(req: NextRequest) {
     }
 
     const questionnaire = await store.addQuestionnaire(body as Omit<QuestionnaireData, 'id'>)
-    return NextResponse.json({ ok: true, questionnaireId: questionnaire.id })
+    return staffJson({ ok: true, questionnaireId: questionnaire.id })
   } catch (err) {
     if (err instanceof SubmissionValidationError) {
-      return NextResponse.json(
+      return staffJson(
         { error: err.message, errors: err.fields },
         { status: 400 },
       )
     }
     console.error('[POST /api/questionnaires]', err)
-    return NextResponse.json({ error: 'Failed to save questionnaire' }, { status: 500 })
+    return staffJson({ error: 'Failed to save questionnaire' }, { status: 500 })
   }
 }
 
 /** PATCH /api/questionnaires — スタッフが本人確認後に既存顧客へ問診票を反映 */
 export async function PATCH(req: NextRequest) {
-  if (!await isStaff(req)) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
+  const auth = await requireStaffSession(req)
+  if (!auth.ok) return auth.response
+
 
   const body = await req.json().catch(() => null)
   if (!body || typeof body !== 'object' || Array.isArray(body)) {
-    return NextResponse.json({ error: '入力内容を確認してください' }, { status: 400 })
+    return staffJson({ error: '入力内容を確認してください' }, { status: 400 })
   }
   if (typeof body.questionnaireId !== 'string' || typeof body.customerId !== 'string') {
     if (typeof body.id !== 'string') {
-      return NextResponse.json({ error: '問診IDが必要です' }, { status: 400 })
+      return staffJson({ error: '問診IDが必要です' }, { status: 400 })
     }
     const delta: Partial<QuestionnaireData> = {}
     if (body.doctorClearance !== undefined) {
       if (!['持参あり', 'なし', ''].includes(body.doctorClearance)) {
-        return NextResponse.json({ error: '許可書確認の値が不正です' }, { status: 400 })
+        return staffJson({ error: '許可書確認の値が不正です' }, { status: 400 })
       }
       delta.doctorClearance = body.doctorClearance
     }
     if (body.staffCheckStatus !== undefined) {
       if (!['未確認', '要対応', '確認済'].includes(body.staffCheckStatus)) {
-        return NextResponse.json({ error: '確認状態が不正です' }, { status: 400 })
+        return staffJson({ error: '確認状態が不正です' }, { status: 400 })
       }
       delta.staffCheckStatus = body.staffCheckStatus
     }
     if (body.staffCheckNote !== undefined) {
       if (typeof body.staffCheckNote !== 'string' || body.staffCheckNote.length > 1000) {
-        return NextResponse.json({ error: 'スタッフメモが不正です' }, { status: 400 })
+        return staffJson({ error: 'スタッフメモが不正です' }, { status: 400 })
       }
       delta.staffCheckNote = body.staffCheckNote
     }
     try {
       await store.updateQuestionnaire(body.id, delta)
-      return NextResponse.json({ ok: true })
+      return staffJson({ ok: true })
     } catch {
-      return NextResponse.json({ error: '保存できませんでした' }, { status: 500 })
+      return staffJson({ error: '保存できませんでした' }, { status: 500 })
     }
   }
 
   let response: NextResponse | null = null
   const resolve = async () => {
-    response = await resolveExistingCustomer(body)
+    try {
+      response = await withStoreWriteLock(() => resolveExistingCustomer(body))
+    } catch (err) {
+      if (err instanceof StoreBusyError) {
+        response = staffJson({ error: err.message }, { status: 503 })
+      } else {
+        console.error('[PATCH /api/questionnaires]', err)
+        response = staffJson({ error: 'Failed to resolve questionnaire' }, { status: 500 })
+      }
+    }
   }
   const pending = resolutionQueue.then(resolve, resolve)
   resolutionQueue = pending.then(() => undefined, () => undefined)
   await pending
-  return response ?? NextResponse.json({ error: 'Failed to resolve questionnaire' }, { status: 500 })
+  return response ?? staffJson({ error: 'Failed to resolve questionnaire' }, { status: 500 })
 }
 
 async function resolveExistingCustomer(body: unknown): Promise<NextResponse> {
   try {
     if (!body || typeof body !== 'object' || Array.isArray(body)) {
-      return NextResponse.json({ error: '入力内容を確認してください' }, { status: 400 })
+      return staffJson({ error: '入力内容を確認してください' }, { status: 400 })
     }
 
     const values = body as Record<string, unknown>
     const questionnaireId = typeof values.questionnaireId === 'string' ? values.questionnaireId.trim() : ''
     const customerId = typeof values.customerId === 'string' ? values.customerId.trim() : ''
     if (!questionnaireId || questionnaireId.length > 64 || !customerId || customerId.length > 64) {
-      return NextResponse.json({ error: '問診票IDと顧客IDを指定してください' }, { status: 400 })
+      return staffJson({ error: '問診票IDと顧客IDを指定してください' }, { status: 400 })
     }
 
     if (USE_POSTGRES) {
@@ -323,40 +351,40 @@ async function resolveExistingCustomer(body: unknown): Promise<NextResponse> {
       }
       const result = await store.resolveQuestionnaireForCustomer(questionnaireId, customerId)
       if (result.status === 'resolved') {
-        return NextResponse.json({ ok: true, questionnaire: result.questionnaire })
+        return staffJson({ ok: true, questionnaire: result.questionnaire })
       }
       if (result.status === 'not_found') {
-        return NextResponse.json({ error: '問診票が見つかりません' }, { status: 404 })
+        return staffJson({ error: '問診票が見つかりません' }, { status: 404 })
       }
       if (result.status === 'customer_not_found') {
-        return NextResponse.json({ error: '顧客が見つかりません' }, { status: 404 })
+        return staffJson({ error: '顧客が見つかりません' }, { status: 404 })
       }
       if (result.status === 'customer_conflict') {
-        return NextResponse.json({ error: 'この問診票は別の顧客IDに紐付け済みです' }, { status: 409 })
+        return staffJson({ error: 'この問診票は別の顧客IDに紐付け済みです' }, { status: 409 })
       }
-      return NextResponse.json({ error: '本人確認が必要な問診票ではありません' }, { status: 409 })
+      return staffJson({ error: '本人確認が必要な問診票ではありません' }, { status: 409 })
     }
 
     const questionnaires = await store.getQuestionnaires()
     const questionnaire = questionnaires.find((item) => item.id === questionnaireId)
     if (!questionnaire) {
-      return NextResponse.json({ error: '問診票が見つかりません' }, { status: 404 })
+      return staffJson({ error: '問診票が見つかりません' }, { status: 404 })
     }
 
     if (questionnaire.customerId === customerId && questionnaire.staffReviewStatus !== '要対応') {
-      return NextResponse.json({ ok: true, questionnaire })
+      return staffJson({ ok: true, questionnaire })
     }
     if (questionnaire.staffReviewStatus !== '要対応') {
-      return NextResponse.json({ error: '本人確認が必要な問診票ではありません' }, { status: 409 })
+      return staffJson({ error: '本人確認が必要な問診票ではありません' }, { status: 409 })
     }
     if (questionnaire.customerId && questionnaire.customerId !== customerId) {
-      return NextResponse.json({ error: 'この問診票は別の顧客IDに紐付け済みです' }, { status: 409 })
+      return staffJson({ error: 'この問診票は別の顧客IDに紐付け済みです' }, { status: 409 })
     }
 
     const customers = await store.getCustomers()
     const customer = customers.find((item) => item.id === customerId)
     if (!customer) {
-      return NextResponse.json({ error: '顧客が見つかりません' }, { status: 404 })
+      return staffJson({ error: '顧客が見つかりません' }, { status: 404 })
     }
 
     // 先に問診票へ顧客IDを記録する。後続の顧客更新が失敗して再試行されても
@@ -401,9 +429,9 @@ async function resolveExistingCustomer(body: unknown): Promise<NextResponse> {
       staffReviewStatus: '確認済',
       staffReviewNotes: `本人確認済み。顧客ID ${customerId} へ反映しました。`,
     })
-    return NextResponse.json({ ok: true, questionnaire: resolved })
+    return staffJson({ ok: true, questionnaire: resolved })
   } catch (err) {
     console.error('[PATCH /api/questionnaires]', err)
-    return NextResponse.json({ error: 'Failed to resolve questionnaire' }, { status: 500 })
+    return staffJson({ error: 'Failed to resolve questionnaire' }, { status: 500 })
   }
 }

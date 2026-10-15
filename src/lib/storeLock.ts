@@ -13,6 +13,9 @@ export async function withStoreWriteLock<T>(
   work: () => Promise<T>
 ): Promise<T> {
   if (context.getStore()) return work()
+  // PostgreSQL mutations use row locks and transactions. A local or Firestore
+  // lock is neither shared by every Function instance nor needed for DB writes.
+  if (process.env.DATA_STORE === 'postgres') return work()
   const owner = randomUUID()
   const sheets = !!(
     process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL &&

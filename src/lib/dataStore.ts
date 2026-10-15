@@ -42,6 +42,7 @@ export interface DataStore {
   /** 一括登録（任意）。未実装のストアでは addReservation を順に呼ぶ。 */
   addReservations?(data: ReservationInput[]): Promise<Reservation[]>
   updateReservation(id: string, data: ReservationInput): Promise<void>
+  updateReservation(id: string, data: ReservationInput, expectedUpdatedAt?: string): Promise<void>
   getQuestionnaires(): Promise<QuestionnaireData[]>
   addQuestionnaire(data: Omit<QuestionnaireData, 'id'>): Promise<QuestionnaireData>
   searchQuestionnaires(query: string): Promise<QuestionnaireData[]>
@@ -50,7 +51,7 @@ export interface DataStore {
   getCustomers(): Promise<Customer[]>
   searchCustomers(query: string): Promise<Customer[]>
   addCustomer(data: Customer): Promise<void>
-  updateCustomer(id: string, data: Partial<Customer>): Promise<void>
+  updateCustomer(id: string, data: Partial<Customer>, expectedUpdatedAt?: string): Promise<void>
   getRoster(): Promise<RosterEntry[]>
   addRoster(data: RosterEntry): Promise<void | RosterEntry>
   /** PostgreSQL provides cross-instance transactional implementations; legacy stores use their existing flow. */
@@ -83,3 +84,6 @@ export const store: DataStore = USE_POSTGRES
     : configuredStore === 'sheets' || USE_SHEETS
       ? sheets
       : local
+
+/** 共有サービスアカウントの読取枠（既定60回/分）を持つSheetsが主ストアか（Issue #68） */
+export const USES_SHEETS_STORE = store === sheets

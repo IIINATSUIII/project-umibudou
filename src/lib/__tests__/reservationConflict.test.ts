@@ -3,7 +3,7 @@ import { NextRequest } from 'next/server'
 import { patchReservation as patchFromScreen, ApiRequestError } from '../api'
 
 const mock = vi.hoisted(() => ({ patchReservation: vi.fn(), getReservations: vi.fn() }))
-vi.mock('@/lib/dataStore', () => ({ store: { getReservations: mock.getReservations } }))
+vi.mock('@/lib/dataStore', () => ({ store: { getReservations: mock.getReservations }, USES_SHEETS_STORE: false }))
 vi.mock('@/lib/session', () => ({
   SESSION_COOKIE: 'odp_session',
   verifySessionToken: async (token: string) => token === 'staff-session' ? { email: 'staff@example.com' } : null,
@@ -95,10 +95,12 @@ describe('PATCH /api/reservations(サーバー側の競合検知)', () => {
       })
     )
   beforeEach(() => {
+    vi.stubEnv('SESSION_SECRET', 'test-only-session-secret')
     vi.spyOn(console, 'error').mockImplementation(() => undefined)
     mock.patchReservation.mockReset()
     mock.getReservations.mockReset().mockResolvedValue([{ id: 'R-1', status: 'STS-03' }])
   })
+  afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks() })
 
   it('expectedUpdatedAt を省略した更新は400で拒否し、書き込まない(必須)', async () => {
     const res = await call({ id: 'R-1', status: 'STS-03' })

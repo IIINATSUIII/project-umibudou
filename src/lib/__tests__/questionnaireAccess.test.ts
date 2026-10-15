@@ -14,18 +14,22 @@ vi.mock('@/lib/dataStore', () => ({ store: {
   getQuestionnaires: memory.getQuestionnaires,
   updateReservation: async (id: string, delta: Partial<Reservation>) => Object.assign(memory.reservations.find(r => r.id === id)!, delta),
   submitPublicQuestionnaire: memory.submitPublicQuestionnaire,
-}, USE_POSTGRES: true, DataStoreError: class DataStoreError extends Error {} }))
+}, USE_POSTGRES: true, DataStoreError: class DataStoreError extends Error {
+  constructor(public readonly code: string) { super(code) }
+} }))
 vi.mock('@/lib/storeLock', () => ({ withStoreWriteLock: async (work: () => Promise<unknown>) => work(), StoreBusyError: class extends Error {} }))
 vi.mock('@/lib/session', () => ({
   SESSION_COOKIE: 'odp_session',
   verifySessionToken: async (token: string) => token === 'staff-session' ? { email: 'staff@example.com' } : null,
 }))
 import { GET, POST } from '@/app/api/public/questionnaires/route'
+import { GET as staffQuestionnaireGet } from '@/app/api/questionnaires/route'
 import { POST as issue, DELETE as revoke } from '@/app/api/reservations/questionnaire-url/route'
 import { middleware } from '@/middleware'
-import { findReservationByQuestionnaireToken, getQuestionnaireExpiry, getQrError } from '../questionnaireToken'
+import { findReservationByQuestionnaireToken, getQuestionnaireExpiry, getQrError, getQuestionnaireScanError } from '../questionnaireToken'
 import { MSG } from '../messages'
 import { RateLimitedError } from '../withRetry'
+import { DataStoreError } from '@/lib/dataStore'
 
 const token = 'input-token-with-at-least-128-bits'
 const submissionId = '00000000-0000-4000-8000-000000000001'
@@ -77,6 +81,10 @@ const request = (body: unknown) => new NextRequest('http://localhost/api/public/
   headers: { 'Content-Type': 'application/json' },
 })
 const read = (value: string) => GET(new NextRequest('http://localhost/api/public/questionnaires?accessToken=' + encodeURIComponent(value)))
+const staffRequest = (body: unknown) => new NextRequest('http://localhost/api/reservations/questionnaire-url', {
+  method: 'POST', body: JSON.stringify(body),
+  headers: { 'Content-Type': 'application/json', cookie: 'odp_session=staff-session' },
+})
 beforeEach(() => {
   vi.useFakeTimers(); vi.setSystemTime(new Date('2026-10-06T00:00:00Z'))
   vi.stubEnv('SESSION_SECRET', 'test-only-secret')
@@ -93,6 +101,7 @@ it.each([{ reservationId: 'R-1' }, { reservationToken: token }, { token }, { acc
   expect(memory.submitPublicQuestionnaire).not.toHaveBeenCalled()
 })
 it('resolves the reservation from accessToken even when a different reservationId is supplied', async () => {
+  memory.reservations[0].guestCount = 2
   const response = await POST(request({ accessToken: token, reservationId: 'attacker-selected' }))
   expect(response.status).toBe(200)
   expect(memory.submitPublicQuestionnaire).toHaveBeenCalledWith(expect.objectContaining({
@@ -102,8 +111,38 @@ it('resolves the reservation from accessToken even when a different reservationI
   }))
   expect(await response.json()).toMatchObject({ questionnaireId: 'M-1', qrToken: 'independent-reception-token' })
 })
+it('rejects incomplete public submissions before calling the persistence adapter', async () => {
+  const response = await POST(request({ accessToken: token, firstName: '' }))
+
+  expect(response.status).toBe(400)
+  expect(await response.json()).toMatchObject({ errors: { firstName: expect.any(String) } })
+  expect(memory.submitPublicQuestionnaire).not.toHaveBeenCalled()
+})
+it('rejects a new guest submission after all reservation slots are taken', async () => {
+  memory.submitPublicQuestionnaire.mockRejectedValueOnce(new DataStoreError('reservation_guest_limit'))
+  const response = await POST(request({ accessToken: token }))
+
+  expect(response.status).toBe(409)
+  expect(await response.json()).toMatchObject({ error: expect.stringContaining('予約人数分') })
+  expect(memory.submitPublicQuestionnaire).toHaveBeenCalled()
+})
 it.each(['R-1', 'independent-reception-token', ''])('rejects GET using %s', async value => {
   expect((await read(value)).status).toBe(404)
+})
+it('returns only customer and reservation links for a customer history lookup', async () => {
+  memory.qs = [
+    { ...memory.qs[0], customerId: 'C-1', lastName: '表示しない' },
+    { ...memory.qs[0], id: 'M-2', reservationId: 'R-2', customerId: 'C-2' },
+  ]
+  memory.getQuestionnaires.mockResolvedValue(memory.qs)
+
+  const response = await staffQuestionnaireGet(new NextRequest(
+    'http://localhost/api/questionnaires?customerId=C-1',
+    { headers: { cookie: 'odp_session=staff-session' } },
+  ))
+
+  expect(response.status).toBe(200)
+  expect(await response.json()).toEqual([{ customerId: 'C-1', reservationId: 'R-1' }])
 })
 it('returns MSG-17 with no-store when public questionnaire status GET is rate limited', async () => {
   memory.getReservations.mockRejectedValueOnce(new RateLimitedError('Sheets API rate limited'))
@@ -118,7 +157,7 @@ it.each(['STS-04', 'STS-06', 'cancelled'])('rejects cancelled or unavailable res
   memory.reservations[0].status = status
   expect((await read(token)).status).toBe(404)
   expect((await POST(request({ accessToken: token }))).status).toBe(404)
-  expect((await issue(request({ id: 'R-1' }))).status).toBe(404)
+  expect((await issue(staffRequest({ id: 'R-1' }))).status).toBe(404)
 })
 it.each(['', 'invalid', '2026-10-06T00:00:00Z'])('rejects absent, malformed or boundary expiry %s', async expiry => {
   memory.reservations[0].questionnaireTokenExpiresAt = expiry
@@ -130,6 +169,12 @@ it('checks the current dive date and fails closed for invalid dates', () => {
     expect(findReservationByQuestionnaireToken([{ ...memory.reservations[0], diveDate }], token)).toBeUndefined()
   }
   expect(getQuestionnaireExpiry('2026-12-31')).toBe('2026-12-31T15:00:00.000Z')
+})
+it('maps missing, expired, and used QR scans to their documented messages', () => {
+  expect(getQuestionnaireScanError(undefined, 'unknown', 'QR読取')).toContain('MSG-11')
+  expect(getQuestionnaireScanError({ ...memory.qs[0], qrUsed: true }, memory.qs[0].qrToken!, 'QR読取')).toContain('MSG-22')
+  expect(getQuestionnaireScanError({ ...memory.qs[0], qrExpiresAt: '2026-10-05T15:00:00.000Z' }, memory.qs[0].qrToken!, 'QR読取')).toContain('MSG-10')
+  expect(getQuestionnaireScanError({ ...memory.qs[0], qrExpiresAt: '2026-10-05T15:00:00.000Z' }, memory.qs[0].id, '手動照合')).toBeNull()
 })
 it.each([{ qrUsed: true }, { qrExpiresAt: '2026-10-06T00:00:00Z' }, { qrExpiresAt: 'invalid' }, { qrToken: '' }])('does not return unusable QR from GET or POST %j', async delta => {
   Object.assign(memory.qs[0], delta)
@@ -162,19 +207,22 @@ it('restores completed QR only through input token and does not expose pending s
 })
 it('reissue and revocation invalidate the old input credential without mutating consent or reception QR', async () => {
   const original = structuredClone(memory.qs)
-  const result = await (await issue(request({ id: 'R-1', reissue: true }))).json()
+  const result = await (await issue(staffRequest({ id: 'R-1', reissue: true }))).json()
   expect(result.questionnaireToken).not.toBe(token)
   expect(result.questionnaireToken).not.toBe(memory.qs[0].qrToken)
   expect(Buffer.from(result.questionnaireToken, 'base64url').length).toBe(32)
   expect((await read(token)).status).toBe(404)
   expect((await read(result.questionnaireToken)).status).toBe(200)
-  expect((await revoke(request({ id: 'R-1' }))).status).toBe(200)
+  expect((await revoke(staffRequest({ id: 'R-1' }))).status).toBe(200)
   expect((await read(result.questionnaireToken)).status).toBe(404)
   expect(memory.qs).toEqual(original)
 })
 it('protects staff scan and issuance endpoints while leaving token pages public', async () => {
-  for (const path of ['/questionnaire/scan', '/questionnaire/scan/', '/api/reservations/questionnaire-url', '/api/questionnaires']) {
+  for (const path of ['/questionnaire/scan', '/questionnaire/scan/']) {
     expect((await middleware(new NextRequest('http://localhost' + path))).status).toBe(307)
+  }
+  for (const path of ['/api/reservations/questionnaire-url', '/api/questionnaires', '/api/questionnaires/checkin']) {
+    expect((await middleware(new NextRequest('http://localhost' + path))).status).toBe(401)
   }
   expect((await middleware(new NextRequest('http://localhost/questionnaire/' + token))).status).toBe(200)
 })
