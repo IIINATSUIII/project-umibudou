@@ -42,6 +42,7 @@ describe('スタッフ登録完了メール', () => {
     const request = fetchMock.mock.calls[0]?.[1]
     const body = JSON.parse(String(request?.body)) as { to: string[]; text: string; html: string }
     expect(body.to).toEqual(['staff@example.com'])
+    expect(body.text).toContain('登録メールアドレス: staff@example.com')
     expect(body.text).toContain('https://example.com/login')
     expect(body.html).toContain('テストスタッフ')
     expect(body.text).not.toContain('password')

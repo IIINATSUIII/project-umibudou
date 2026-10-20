@@ -34,12 +34,14 @@ export async function sendStaffRegistrationEmail(
   if (!apiKey || !from) return { sent: false, reason: 'not_configured' }
 
   const safeName = escapeHtml(input.displayName)
+  const safeEmail = escapeHtml(input.to)
   const safeLoginUrl = escapeHtml(input.loginUrl)
   const safeRole = escapeHtml(roleLabel(input.role))
   const text = [
     `${input.displayName} 様`,
     '',
     '沖ダイブ・パートナーのスタッフアカウントが作成されました。',
+    `登録メールアドレス: ${input.to}`,
     `権限: ${roleLabel(input.role)}`,
     '',
     `ログイン: ${input.loginUrl}`,
@@ -50,6 +52,7 @@ export async function sendStaffRegistrationEmail(
   const html = `
     <p>${safeName} 様</p>
     <p>沖ダイブ・パートナーのスタッフアカウントが作成されました。</p>
+    <p>登録メールアドレス: ${safeEmail}</p>
     <p>権限: ${safeRole}</p>
     <p><a href="${safeLoginUrl}">ログイン画面を開く</a></p>
     <p>このメールにパスワードは記載していません。心当たりがない場合は管理者へ連絡してください。</p>
