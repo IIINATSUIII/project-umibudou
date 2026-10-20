@@ -6,6 +6,13 @@
 import { SignJWT, jwtVerify } from 'jose'
 
 const SESSION_COOKIE = 'odp_session'
+export const SESSION_COOKIE_OPTIONS = {
+  httpOnly: true,
+  secure: process.env.NODE_ENV === 'production',
+  sameSite: 'lax' as const,
+  path: '/',
+  maxAge: 60 * 60 * 24 * 7,
+}
 const EXPIRY = '7d'
 
 export type StaffRole = 'admin' | 'staff'

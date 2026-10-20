@@ -54,6 +54,7 @@ export default function DashboardPage() {
   const user = useAuth()
   const router = useRouter()
   const [actionError,setActionError]=useState('')
+  const [registrationNotice,setRegistrationNotice]=useState('')
 
   const today    = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' })
   const tomorrowDate = new Date()
@@ -62,6 +63,13 @@ export default function DashboardPage() {
 
   useEffect(() => {
     if (user === null) router.push('/login')
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('registered') === '1') {
+      setRegistrationNotice(params.get('mail') === 'sent'
+        ? 'アカウントを作成し、登録したメールアドレスへ案内メールを送信しました。'
+        : 'アカウントを作成してログインしましたが、案内メールは送信できませんでした。メール設定を確認してください。')
+      window.history.replaceState({}, '', '/dashboard')
+    }
   }, [user, router])
 
   const { reservations, setReservations, questionnaires, loading, loadError, reloadReservationsFresh } =
@@ -100,6 +108,7 @@ export default function DashboardPage() {
   return (
     <div className="min-h-screen">
       <Navigation />
+      {registrationNotice && <p className={`p-4 ${registrationNotice.includes('送信しました') ? 'text-green-700 bg-green-50' : 'text-amber-700 bg-amber-50'}`}>{registrationNotice}</p>}
       {actionError && <p role="alert" className="p-4 text-red-700">{actionError}</p>}
       {loadError && <p role="status" className="p-4 text-amber-700">{loadError}</p>}
       <main className="max-w-5xl mx-auto px-4 py-6 pb-20 md:pb-6 space-y-6">
@@ -226,3 +235,4 @@ function LoadingScreen() {
     </div>
   )
 }
+

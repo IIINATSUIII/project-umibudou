@@ -79,7 +79,8 @@ export default function LoginPage() {
         return
       }
       const mailStatus = data.mail?.sent === true ? 'sent' : 'not-sent'
-      router.push(`/login?registered=1&mail=${mailStatus}`)
+      await refreshAuth()
+      router.push(`/dashboard?registered=1&mail=${mailStatus}`)
       return
     }
 

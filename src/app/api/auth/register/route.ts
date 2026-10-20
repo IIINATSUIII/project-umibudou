@@ -1,4 +1,5 @@
 import { NextRequest } from 'next/server'
+import { createSessionToken, SESSION_COOKIE, SESSION_COOKIE_OPTIONS } from '@/lib/session'
 import { staffJson } from '@/lib/staffAuth'
 import { sendStaffRegistrationEmail } from '@/lib/staffEmail'
 import {
@@ -70,9 +71,17 @@ export async function POST(req: NextRequest) {
     if (!mail.sent) {
       console.warn(`[POST /api/auth/register] staff email was not sent: ${mail.reason}`)
     }
+    const sessionToken = user.id
+      ? await createSessionToken(user.email, {
+        userId: user.id,
+        role: user.role,
+        sessionVersion: user.sessionVersion,
+      })
+      : await createSessionToken(user.email, { role: user.role })
     const response = staffJson({ ok: true, user: {
       email: user.email, displayName: user.displayName, role: user.role,
     }, mail }, { status: 201 })
+    response.cookies.set(SESSION_COOKIE, sessionToken, SESSION_COOKIE_OPTIONS)
     return response
   } catch (error) {
     if (error instanceof InvalidInvitationError) return staffJson({ error: '招待リンクが無効または期限切れです' }, { status: 410 })

@@ -5,6 +5,7 @@ import {
   isNonEmptyString,
   validateCredentials,
   SESSION_COOKIE,
+  SESSION_COOKIE_OPTIONS,
   SessionConfigurationError,
 } from '@/lib/session'
 import { resolveStaffToken, staffJson } from '@/lib/staffAuth'
@@ -22,14 +23,6 @@ import { clearLoginFailures, isLoginRateLimited, recordLoginFailure } from '@/li
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
-
-const COOKIE_OPTS = {
-  httpOnly: true,   // JS からアクセス不可（XSS対策）
-  secure: process.env.NODE_ENV === 'production',
-  sameSite: 'lax' as const,
-  path: '/',
-  maxAge: 60 * 60 * 24 * 7, // 7日間
-}
 
 function invalidLoginRequest() {
   return staffJson(
@@ -118,7 +111,7 @@ export async function POST(req: NextRequest) {
     const res = staffJson(user.id
       ? { ok: true, email: user.email, role: user.role }
       : { ok: true, email: user.email })
-    res.cookies.set(SESSION_COOKIE, token, COOKIE_OPTS)
+    res.cookies.set(SESSION_COOKIE, token, SESSION_COOKIE_OPTIONS)
     return res
   } catch (error) {
     // 認証設定・パスワード・JWTを応答やログへ含めない。
