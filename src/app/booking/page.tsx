@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { QRCodeCanvas } from 'qrcode.react'
 import { COURSES } from '@/lib/masters'
 import type { Reservation } from '@/types'
@@ -25,6 +25,7 @@ export default function BookingPage() {
   const [questionnaireToken,setQuestionnaireToken]=useState('')
   const [resId, setResId] = useState('')
   const [error, setError] = useState('')
+  const requestKey = useRef('')
 
   function set<K extends keyof typeof form>(key: K, value: typeof form[K]) {
     setForm((f) => ({ ...f, [key]: value }))
@@ -38,11 +39,15 @@ export default function BookingPage() {
     setError('')
     setSending(true)
     try {
+    if (!requestKey.current) requestKey.current = crypto.randomUUID()
     const res = await fetch('/api/public/bookings', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(form),
-    })
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': requestKey.current,
+        },
+        body: JSON.stringify(form),
+      })
     if (res.ok) {
       const data = await res.json()
       if(typeof data.questionnaireToken!=='string') throw new Error('問診票URLを取得できませんでした'); setQuestionnaireToken(data.questionnaireToken); setResId(data.id)

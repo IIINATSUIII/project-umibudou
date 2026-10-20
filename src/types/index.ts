@@ -27,6 +27,38 @@ export interface Reservation {
   legacyChannel?: string
   divePoint?: string          // ダイブポイント
   staffNote?: string          // スタッフメモ／キャンセル理由
+  /** 公開予約POSTの再送を同じ予約へ収束させるためのキー。 */
+  publicRequestKey?: string
+}
+
+export type ReservationEmailStatus =
+  | 'pending'
+  | 'sending'
+  | 'sent'
+  | 'failed'
+  | 'dead_letter'
+
+/** 予約受付メールの永続Outbox。本文に必要な値はスナップショットとして保持する。 */
+export interface ReservationEmail {
+  id: string
+  reservationId: string
+  requestKey: string
+  recipientEmail: string
+  guestName: string
+  diveDate: string
+  timeSlot: Reservation['timeSlot']
+  courseId: string
+  courseName: string
+  guestCount: number
+  status: ReservationEmailStatus
+  attemptCount: number
+  availableAt: string
+  createdAt: string
+  lastAttemptAt?: string
+  lockedUntil?: string
+  sentAt?: string
+  providerMessageId?: string
+  lastError?: string
 }
 
 /** コースマスタ（Courses シート） */

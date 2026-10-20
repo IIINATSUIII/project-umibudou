@@ -96,9 +96,23 @@ GOOGLE_SPREADSHEET_ID=your_spreadsheet_id
 - サービスアカウントの作成手順・シート構成は [03_基本設計書_DB設計編.md](03_基本設計書_DB設計編.md) を参照
 - 未設定の間は自動的にローカル保存（`data/*.json`）にフォールバックします
 
+## 6. 予約受付メール（任意）
+
+申込者への受付完了メールを有効にする場合は、Resendで送信ドメインを認証し、次の環境変数を設定します。
+
+```env
+RESEND_API_KEY=re_xxxxxxxxxxxxxxxxxxxxxxxxx
+RESEND_FROM_EMAIL="海ぶどうギャング <noreply@example.com>"
+CRON_SECRET=ランダムな長い文字列
+```
+
+Google Sheets構成では、設定後にスタッフ認証済みで `POST /api/setup` を実行し、「予約受付メール」シートを追加します。`POST /api/cron/reservation-emails` を外部スケジューラーから `Authorization: Bearer ${CRON_SECRET}` 付きで定期実行してください。
+
+送信失敗はOutboxへ記録し、最大12回まで指数バックオフで自動再送します。12回失敗した場合はデッドレター化され、`POST /api/reservations/email-retry` に予約IDを渡して手動再送できます。
+
 ---
 
-## 6. トラブルシューティング
+## 7. トラブルシューティング
 
 | 症状 | 対処 |
 |------|------|
@@ -109,7 +123,7 @@ GOOGLE_SPREADSHEET_ID=your_spreadsheet_id
 
 ---
 
-## 7. 関連ドキュメント
+## 8. 関連ドキュメント
 
 - [00_GitHub初心者ガイド.md](00_GitHub初心者ガイド.md) — Git / GitHub が初めての人向け
 - [01_要件定義書.md](01_要件定義書.md)

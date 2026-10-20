@@ -7,6 +7,7 @@ const PUBLIC_PATHS = [
   '/booking',      // 客側：予約申し込みフォーム
   '/api/auth',
   '/api/public',   // 客側：予約申し込み・問診票提出API
+  '/api/cron/reservation-emails', // CRON_SECRETで保護するメールOutbox
   '/_next',
   '/favicon',
 ]

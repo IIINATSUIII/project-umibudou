@@ -4,7 +4,7 @@ const mock=vi.hoisted(()=>({values:{} as Record<string,string[][]>,requests:[] a
 vi.mock('googleapis',()=>({google:{
   auth:{GoogleAuth:class {}},
   sheets:()=>({spreadsheets:{
-    get:async()=>({data:{sheets:['予約','問診票','顧客台帳','名簿'].map((title,sheetId)=>({properties:{title,sheetId,gridProperties:{rowCount:1000,columnCount:70}}}))}}),
+    get:async()=>({data:{sheets:['予約','問診票','顧客台帳','名簿','予約受付メール'].map((title,sheetId)=>({properties:{title,sheetId,gridProperties:{rowCount:1000,columnCount:70}}}))}}),
     values:{
       get:async({range}:{range:string})=>({data:{values:mock.values[range.slice(1,-1)]}}),
       append:vi.fn(),
@@ -15,7 +15,7 @@ vi.mock('googleapis',()=>({google:{
         mock.requests.push(request)
         if(request.duplicateSheet) mock.backupCount++
         if(request.updateCells) {
-          const name=['予約','問診票','顧客台帳','名簿'][request.updateCells.range.sheetId]
+          const name=['予約','問診票','顧客台帳','名簿','予約受付メール'][request.updateCells.range.sheetId]
           mock.values[name]=request.updateCells.rows.map(r=>r.values.map(v=>v.userEnteredValue.stringValue))
         }
       }
@@ -32,7 +32,7 @@ beforeEach(()=>{
     '予約':[LEGACY_RESERVATION_HEADERS,['R-7','2026-10-06','14:30','体験ダイビング','山田太郎','2','09012345678','phone','confirmed','M-7','送迎']],
     '問診票':[[...LEGACY_QUESTIONNAIRE_HEADERS,'postalCode','email','hypertension','medicalCertificate'],
       [...LEGACY_QUESTIONNAIRE_HEADERS.map(h=>({id:'M-7',reservationId:'R-7',lastName:'山田',firstName:'太郎',heartDisease:'TRUE',agreeRisk:'TRUE',agreeMedical:'TRUE',agreePhoto:'FALSE',sleepHours:'6',totalDives:'0'} as Record<string,string>)[h] || ''),'9000001','taro@example.com','TRUE','FALSE']],
-    '顧客台帳':[HEADERS.CUSTOMERS], '名簿':[HEADERS.ROSTER],
+    '顧客台帳':[HEADERS.CUSTOMERS], '名簿':[HEADERS.ROSTER], '予約受付メール':[],
   }
 })
 it('旧シートの読み取りは列名を使い、移行前の書き込みを止める',async()=>{

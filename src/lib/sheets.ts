@@ -1,6 +1,7 @@
 import { google } from 'googleapis'
 import type {
   Reservation,
+  ReservationEmail,
   QuestionnaireData,
   Customer,
   RosterEntry,
@@ -22,6 +23,7 @@ const names: Record<StoreKind, string> = {
   QUESTIONNAIRES: '問診票',
   CUSTOMERS: '顧客台帳',
   ROSTER: '名簿',
+  RESERVATION_EMAILS: '予約受付メール',
 }
 const spreadsheetId = () => process.env.GOOGLE_SPREADSHEET_ID!
 const quote = (name: string) => `'${name.replace(/'/g, "''")}'`
@@ -139,6 +141,10 @@ export const searchCustomers = async (q: string) =>
   (await getCustomers()).filter((v) => matchesCustomer(v, q))
 export const getRoster = () => read<RosterEntry>('ROSTER')
 export const addRoster = (v: RosterEntry) => add('ROSTER', v)
+export const getReservationEmails = () => read<ReservationEmail>('RESERVATION_EMAILS')
+export const addReservationEmail = (v: ReservationEmail) => add('RESERVATION_EMAILS', v)
+export const updateReservationEmail = (id: string, v: Partial<ReservationEmail>) =>
+  update<ReservationEmail>('RESERVATION_EMAILS', id, v)
 
 /** バックアップの複製後、一回の原子的batchUpdateで列名と全行を移行する。 */
 export async function initializeSheets() {
