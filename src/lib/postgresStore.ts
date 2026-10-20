@@ -7,6 +7,7 @@ import type {
   QuestionnaireData,
   QuestionnaireFormData,
   Reservation,
+  ReservationEmail,
   ReservationInput,
   RosterEntry,
 } from '@/types'
@@ -32,7 +33,19 @@ const RESERVATION_FIELDS: (keyof Reservation)[] = [
   'diveDate', 'time', 'timeSlot', 'courseId', 'courseName', 'guestCount', 'status',
   'staffId', 'staffName', 'channel', 'questionnaireId', 'questionnaireIds',
   'questionnaireToken', 'questionnaireTokenExpiresAt', 'questionnaireCompleted', 'divePoint', 'staffNote',
+  'publicRequestKey',
 ]
+
+const RESERVATION_EMAIL_FIELDS: (keyof ReservationEmail)[] = [
+  'id', 'reservationId', 'requestKey', 'recipientEmail', 'guestName', 'diveDate',
+  'timeSlot', 'courseId', 'courseName', 'guestCount', 'status', 'attemptCount',
+  'availableAt', 'createdAt', 'lastAttemptAt', 'lockedUntil', 'sentAt',
+  'providerMessageId', 'lastError',
+]
+
+const RESERVATION_EMAIL_PATCH_FIELDS = RESERVATION_EMAIL_FIELDS.filter(
+  (field) => !['id', 'reservationId', 'requestKey', 'recipientEmail', 'createdAt'].includes(field),
+)
 
 const QUESTIONNAIRE_FIELDS: (keyof QuestionnaireData)[] = [
   'id', 'reservationId', 'submittedAt', 'customerId', 'submissionId',
@@ -56,6 +69,7 @@ const CUSTOMER_FIELDS: (keyof Customer)[] = [
 
 const DATE_TIME_FIELDS = new Set([
   'createdAt', 'updatedAt', 'questionnaireTokenExpiresAt', 'submittedAt', 'consentAt', 'qrExpiresAt', 'registeredAt',
+  'availableAt', 'lastAttemptAt', 'lockedUntil', 'sentAt',
 ])
 
 function columnName(field: string): string {
@@ -207,6 +221,31 @@ function mapReservation(row: Row): Reservation {
     questionnaireCompleted: booleanValue(row, 'questionnaire_completed'),
     divePoint: optionalString(row, 'dive_point'),
     staffNote: optionalString(row, 'staff_note'),
+    publicRequestKey: optionalString(row, 'public_request_key'),
+  }
+}
+
+function mapReservationEmail(row: Row): ReservationEmail {
+  return {
+    id: stringValue(row, 'id'),
+    reservationId: stringValue(row, 'reservation_id'),
+    requestKey: stringValue(row, 'request_key'),
+    recipientEmail: stringValue(row, 'recipient_email'),
+    guestName: stringValue(row, 'guest_name'),
+    diveDate: stringValue(row, 'dive_date'),
+    timeSlot: stringValue(row, 'time_slot', 'unspecified') as ReservationEmail['timeSlot'],
+    courseId: stringValue(row, 'course_id'),
+    courseName: stringValue(row, 'course_name'),
+    guestCount: numberValue(row, 'guest_count', 1),
+    status: stringValue(row, 'status') as ReservationEmail['status'],
+    attemptCount: numberValue(row, 'attempt_count', 0),
+    availableAt: dateTimeString(row, 'available_at') ?? '',
+    createdAt: dateTimeString(row, 'created_at') ?? '',
+    lastAttemptAt: dateTimeString(row, 'last_attempt_at'),
+    lockedUntil: dateTimeString(row, 'locked_until'),
+    sentAt: dateTimeString(row, 'sent_at'),
+    providerMessageId: optionalString(row, 'provider_message_id'),
+    lastError: optionalString(row, 'last_error'),
   }
 }
 
@@ -557,6 +596,167 @@ export async function addReservation(input: ReservationInput): Promise<Reservati
     await insertEntity(client, 'reservations', 'reservation', reservation, RESERVATION_FIELDS as readonly string[])
   })
   return reservation
+}
+
+function samePublicReservation(existing: Reservation, incoming: Reservation): boolean {
+  return existing.guestName === incoming.guestName &&
+    existing.guestPhone === incoming.guestPhone &&
+    existing.guestEmail === incoming.guestEmail &&
+    existing.diveDate === incoming.diveDate &&
+    existing.timeSlot === incoming.timeSlot &&
+    existing.courseId === incoming.courseId &&
+    existing.guestCount === incoming.guestCount &&
+    (existing.divePoint ?? '') === (incoming.divePoint ?? '') &&
+    (existing.staffNote ?? '') === (incoming.staffNote ?? '')
+}
+
+const IMMUTABLE_EMAIL_FIELDS: (keyof ReservationEmail)[] = [
+  'id', 'reservationId', 'requestKey', 'recipientEmail', 'guestName', 'diveDate',
+  'timeSlot', 'courseId', 'courseName', 'guestCount',
+]
+
+async function insertReservationEmail(client: PoolClient, email: ReservationEmail): Promise<void> {
+  const statement = insertSql('reservation_emails', dbEntries(email, RESERVATION_EMAIL_FIELDS))
+  const result = await client.query(
+    `${statement.sql} ON CONFLICT (reservation_id) DO NOTHING RETURNING id`,
+    statement.values,
+  )
+  if (result.rowCount) return
+  const existing = await client.query('SELECT * FROM reservation_emails WHERE reservation_id = $1', [email.reservationId])
+  if (!existing.rows[0]) throw new Error('Reservation email insert conflict')
+  const saved = mapReservationEmail(existing.rows[0])
+  if (IMMUTABLE_EMAIL_FIELDS.some((field) => saved[field] !== email[field])) {
+    throw new Error('Reservation email snapshot conflict')
+  }
+}
+
+/** Persist a public booking and its receipt in one transaction across all instances. */
+export async function createPublicReservationWithReceipt(
+  reservation: Reservation,
+  email: ReservationEmail,
+): Promise<{ status: 'created' | 'replayed' | 'conflict'; reservation: Reservation }> {
+  if (!reservation.publicRequestKey || reservation.publicRequestKey !== email.requestKey ||
+      reservation.id !== email.reservationId || !reservation.guestEmail) {
+    throw new Error('Public reservation receipt does not match its reservation')
+  }
+  return withTransaction(async (client) => {
+    // Serializes retries for one key; the unique index is the final backstop.
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [reservation.publicRequestKey])
+    const found = await client.query(
+      'SELECT * FROM reservations WHERE public_request_key = $1 FOR UPDATE',
+      [reservation.publicRequestKey],
+    )
+    if (found.rows[0]) {
+      const existing = mapReservation(found.rows[0])
+      if (!samePublicReservation(existing, reservation)) return { status: 'conflict', reservation: existing }
+      await insertReservationEmail(client, {
+        ...email,
+        id: `RE-${existing.id}`,
+        reservationId: existing.id,
+      })
+      return { status: 'replayed', reservation: existing }
+    }
+    await insertEntity(client, 'reservations', 'reservation', reservation, RESERVATION_FIELDS as readonly string[])
+    await insertReservationEmail(client, email)
+    return { status: 'created', reservation }
+  })
+}
+
+export async function getReservationEmails(): Promise<ReservationEmail[]> {
+  const result = await query('SELECT * FROM reservation_emails ORDER BY created_at, id')
+  return result.rows.map(mapReservationEmail)
+}
+
+export async function addReservationEmail(email: ReservationEmail): Promise<void> {
+  await withTransaction((client) => insertReservationEmail(client, email))
+}
+
+export async function updateReservationEmail(id: string, patch: Partial<ReservationEmail>): Promise<void> {
+  const entries = dbEntries(patch, RESERVATION_EMAIL_PATCH_FIELDS, true)
+  if (!entries.length) return
+  const assignments = entries.map(([column], index) => `${column} = $${index + 1}`)
+  const result = await query(
+    `UPDATE reservation_emails SET ${assignments.join(', ')} WHERE id = $${entries.length + 1}`,
+    [...entries.map(([, value]) => value), id],
+  )
+  if (!result.rowCount) throw new Error(`Reservation email ${id} not found`)
+}
+
+/** Claim one due receipt without letting another worker claim the same row. */
+export async function claimReservationEmail(
+  nowMs: number,
+  maxAttempts: number,
+  leaseMs: number,
+): Promise<ReservationEmail | undefined> {
+  const now = new Date(nowMs).toISOString()
+  const until = new Date(nowMs + leaseMs).toISOString()
+  return withTransaction(async (client) => {
+    const result = await client.query(
+      `WITH candidate AS (
+         SELECT id FROM reservation_emails
+         WHERE attempt_count < $2 AND available_at <= $1
+           AND (status IN ('pending', 'failed') OR
+             (status = 'sending' AND (locked_until IS NULL OR locked_until <= $1)))
+         ORDER BY created_at, id
+         FOR UPDATE SKIP LOCKED LIMIT 1
+       )
+       UPDATE reservation_emails AS email
+       SET status = 'sending', attempt_count = email.attempt_count + 1,
+           last_attempt_at = $1, locked_until = $3
+       FROM candidate WHERE email.id = candidate.id
+       RETURNING email.*`,
+      [now, maxAttempts, until],
+    )
+    return result.rows[0] ? mapReservationEmail(result.rows[0]) : undefined
+  })
+}
+
+/** Complete or release a lease only if this worker still owns its exact attempt. */
+export async function updateReservationEmailIfClaimed(
+  id: string,
+  attemptCount: number,
+  lockedUntil: string,
+  patch: Partial<ReservationEmail>,
+): Promise<boolean> {
+  const entries = dbEntries(patch, RESERVATION_EMAIL_PATCH_FIELDS, true)
+  if (!entries.length) return false
+  const assignments = entries.map(([column], index) => `${column} = $${index + 1}`)
+  const values = entries.map(([, value]) => value)
+  const result = await query(
+    `UPDATE reservation_emails SET ${assignments.join(', ')}
+     WHERE id = $${values.length + 1} AND status = 'sending'
+       AND attempt_count = $${values.length + 2}
+       AND locked_until = $${values.length + 3}`,
+    [...values, id, attemptCount, lockedUntil],
+  )
+  return Boolean(result.rowCount)
+}
+
+/** Requeue under a row lock, without taking an active worker's lease. */
+export async function retryReservationEmailByReservationId(
+  reservationId: string,
+): Promise<'requeued' | 'already_sent' | 'not_found' | 'in_progress'> {
+  return withTransaction(async (client) => {
+    const result = await client.query(
+      'SELECT status, locked_until FROM reservation_emails WHERE reservation_id = $1 FOR UPDATE',
+      [reservationId],
+    )
+    const row = result.rows[0]
+    if (!row) return 'not_found'
+    if (row.status === 'sent') return 'already_sent'
+    const lockedUntil = dateTimeString(row, 'locked_until')
+    if (row.status === 'sending' && lockedUntil && Date.parse(lockedUntil) > Date.now()) {
+      return 'in_progress'
+    }
+    await client.query(
+      `UPDATE reservation_emails
+       SET status = 'pending', attempt_count = 0, available_at = now(),
+           locked_until = NULL, last_attempt_at = NULL, last_error = NULL
+       WHERE reservation_id = $1`,
+      [reservationId],
+    )
+    return 'requeued'
+  })
 }
 
 export async function updateReservation(
