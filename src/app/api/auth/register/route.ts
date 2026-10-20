@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server'
 import { staffJson } from '@/lib/staffAuth'
+import { sendStaffRegistrationEmail } from '@/lib/staffEmail'
 import {
   DuplicateStaffAccountError,
   canUseLocalStaffAuth,
@@ -15,6 +16,15 @@ import {
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
+
+function getLoginUrl(req: NextRequest): string {
+  const configuredBaseUrl = process.env.APP_BASE_URL?.trim()
+  try {
+    return new URL('/login', configuredBaseUrl || new URL(req.url).origin).toString()
+  } catch {
+    return new URL('/login', 'http://127.0.0.1:3030').toString()
+  }
+}
 
 async function createOpenStaffUser(input: { email: string; displayName: string; password: string }) {
   if (!hasStaffDatabase()) return createLocalStaffUser(input)
@@ -51,9 +61,18 @@ export async function POST(req: NextRequest) {
     const user = token
       ? await redeemStaffInvitation({ token, displayName, password })
       : await createOpenStaffUser({ email, displayName, password })
+    const mail = await sendStaffRegistrationEmail({
+      to: user.email,
+      displayName: user.displayName,
+      role: user.role,
+      loginUrl: getLoginUrl(req),
+    })
+    if (!mail.sent) {
+      console.warn(`[POST /api/auth/register] staff email was not sent: ${mail.reason}`)
+    }
     const response = staffJson({ ok: true, user: {
       email: user.email, displayName: user.displayName, role: user.role,
-    } }, { status: 201 })
+    }, mail }, { status: 201 })
     return response
   } catch (error) {
     if (error instanceof InvalidInvitationError) return staffJson({ error: '招待リンクが無効または期限切れです' }, { status: 410 })

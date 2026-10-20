@@ -59,6 +59,11 @@ SESSION_SECRET=replace_with_random_hex
 
 # STAFF_CREDENTIALSからDBへ移行する最初の管理者
 STAFF_ADMIN_EMAIL=admin@okidive.com
+
+# スタッフ登録完了メール（Resend）
+RESEND_API_KEY=re_your_api_key
+EMAIL_FROM=沖ダイブ・パートナー <noreply@example.com>
+APP_BASE_URL=http://127.0.0.1:3030
 ```
 
 `SESSION_SECRET` の生成：
@@ -91,7 +96,8 @@ npm run db:migrate
 - 登録画面からの自由なスタッフ登録ができます。招待なしで登録したアカウントは一般スタッフ権限になり、管理者が必要に応じて権限を変更できます。
 - 管理者はスタッフの権限変更、停止・再開、招待の取消ができます。
 - 最後に残った有効な管理者は停止・降格できません。
-- メール送信はまだ行わず、管理画面で発行したリンクを安全な経路で共有します。
+- `RESEND_API_KEY`、`EMAIL_FROM`、`APP_BASE_URL`を設定すると、登録完了時に登録メールアドレスへログイン案内を送信します。パスワードは送信しません。
+- 招待リンク自体のメール自動送信は行わず、管理画面で発行したリンクを安全な経路で共有します。未設定・送信失敗時もアカウント作成は完了し、画面に警告を表示します。
 - `STAFF_CREDENTIALS` と `STAFF_ADMIN_EMAIL` は移行完了後に本番環境から削除してください。パスワードの平文をリポジトリへ保存しないでください。
 
 実装の認証境界とAPI一覧は [スタッフ認証仕様](docs/security/staff-invite-auth.md) を参照してください。
@@ -168,6 +174,9 @@ Vercel ダッシュボード → Settings → Environment Variables で以下を
 | `STAFF_ADMIN_EMAIL` | 初回移行する管理者メール |
 | `DATABASE_URL` | PostgreSQL接続URL |
 | `SESSION_SECRET` | ランダム 32 バイト hex |
+| `RESEND_API_KEY` | Resend APIキー |
+| `EMAIL_FROM` | Resendで認証済みの送信元 |
+| `APP_BASE_URL` | メール内ログインリンクのベースURL |
 | `GOOGLE_SERVICE_ACCOUNT_EMAIL` | サービスアカウントのメール |
 | `GOOGLE_PRIVATE_KEY` | `"-----BEGIN PRIVATE KEY-----\n..."` |
 | `GOOGLE_SPREADSHEET_ID` | スプレッドシート ID |

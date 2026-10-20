@@ -19,13 +19,20 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
+  const [noticeTone, setNoticeTone] = useState<'success' | 'warning'>('success')
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
     if (params.get('registered') === '1') {
       setMode('login')
-      setNotice('アカウントを作成しました。登録したメールアドレスとパスワードでログインしてください。')
+      if (params.get('mail') === 'sent') {
+        setNotice('アカウントを作成し、登録したメールアドレスへ案内メールを送信しました。')
+        setNoticeTone('success')
+      } else {
+        setNotice('アカウントは作成されましたが、案内メールを送信できませんでした。管理者に確認してください。')
+        setNoticeTone('warning')
+      }
     }
     const token = params.get('invite')
     if (!token) return
@@ -51,6 +58,7 @@ export default function LoginPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setError('')
+    setNotice('')
     setLoading(true)
     if (mode === 'register') {
       const response = await fetch('/api/auth/register', {
@@ -70,7 +78,8 @@ export default function LoginPage() {
         setError(data.error || 'アカウントを作成できませんでした')
         return
       }
-      router.push('/login?registered=1')
+      const mailStatus = data.mail?.sent === true ? 'sent' : 'not-sent'
+      router.push(`/login?registered=1&mail=${mailStatus}`)
       return
     }
 
@@ -104,7 +113,7 @@ export default function LoginPage() {
           </button>
         </div>
 
-        {notice && <p className="mb-4 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-800">{notice}</p>}
+        {notice && <p className={`mb-4 rounded-lg px-3 py-2 text-sm ${noticeTone === 'success' ? 'bg-green-50 text-green-800' : 'bg-amber-50 text-amber-800'}`}>{notice}</p>}
 
         <form onSubmit={handleSubmit} className="space-y-4">
           {mode === 'register' && (
