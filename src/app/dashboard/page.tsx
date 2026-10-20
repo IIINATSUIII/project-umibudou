@@ -65,9 +65,12 @@ export default function DashboardPage() {
     if (user === null) router.push('/login')
     const params = new URLSearchParams(window.location.search)
     if (params.get('registered') === '1') {
-      setRegistrationNotice(params.get('mail') === 'sent'
+      const mailStatus = params.get('mail')
+      setRegistrationNotice(mailStatus === 'sent'
         ? 'アカウントを作成し、登録したメールアドレスへ案内メールを送信しました。'
-        : 'アカウントを作成してログインしましたが、案内メールは送信できませんでした。メール設定を確認してください。')
+        : mailStatus === 'not-configured'
+          ? 'アカウントを作成してログインしました。メール未送信です。RESEND_API_KEYとEMAIL_FROMを設定してください。'
+          : 'アカウントを作成してログインしましたが、メールサービスへの送信に失敗しました。送信元ドメインとResendの設定を確認してください。')
       window.history.replaceState({}, '', '/dashboard')
     }
   }, [user, router])

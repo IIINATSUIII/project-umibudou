@@ -78,7 +78,11 @@ export default function LoginPage() {
         setError(data.error || 'アカウントを作成できませんでした')
         return
       }
-      const mailStatus = data.mail?.sent === true ? 'sent' : 'not-sent'
+      const mailStatus = data.mail?.sent === true
+        ? 'sent'
+        : data.mail?.reason === 'not_configured'
+          ? 'not-configured'
+          : 'send-failed'
       await refreshAuth()
       router.push(`/dashboard?registered=1&mail=${mailStatus}`)
       return
