@@ -150,3 +150,4 @@ describe('GET /api/auth と保護画面・ログアウト', () => {
     expect(access.headers.get('location')).toBe('http://localhost/login')
   })
 })
+

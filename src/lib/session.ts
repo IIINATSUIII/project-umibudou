@@ -8,6 +8,15 @@ import { SignJWT, jwtVerify } from 'jose'
 const SESSION_COOKIE = 'odp_session'
 const EXPIRY = '7d'
 
+export type StaffRole = 'admin' | 'staff'
+
+export type SessionPayload = {
+  email: string
+  userId?: string
+  role?: StaffRole
+  sessionVersion?: number
+}
+
 export class SessionConfigurationError extends Error {
   constructor() {
     super('SESSION_SECRET is not configured')
@@ -33,10 +42,13 @@ function getSecret(): Uint8Array {
 }
 
 /** JWT を生成してクッキー用の文字列を返す */
-export async function createSessionToken(email: string): Promise<string> {
+export async function createSessionToken(
+  email: string,
+  claims?: Omit<SessionPayload, 'email'>,
+): Promise<string> {
   if (!isNonEmptyString(email)) throw new TypeError('セッションのメールアドレスが不正です')
 
-  return new SignJWT({ email })
+  return new SignJWT({ email, ...claims })
     .setProtectedHeader({ alg: 'HS256' })
     .setIssuedAt()
     .setExpirationTime(EXPIRY)
@@ -46,7 +58,7 @@ export async function createSessionToken(email: string): Promise<string> {
 /** JWT の署名・期限・利用者情報を検証する（無効なら null） */
 export async function verifySessionToken(
   token: string
-): Promise<{ email: string } | null> {
+): Promise<SessionPayload | null> {
   // Configuration errors are operational failures, not invalid user tokens.
   const secret = getSecret()
   try {
@@ -56,7 +68,21 @@ export async function verifySessionToken(
     })
     if (typeof payload.email !== 'string' || !payload.email.trim()) return null
     if (typeof payload.exp !== 'number' || !Number.isFinite(payload.exp)) return null
-    return { email: payload.email }
+    const result: SessionPayload = { email: payload.email }
+    if (payload.userId !== undefined) {
+      if (typeof payload.userId !== 'string' || !payload.userId.trim()) return null
+      result.userId = payload.userId
+    }
+    if (payload.role !== undefined) {
+      if (payload.role !== 'admin' && payload.role !== 'staff') return null
+      result.role = payload.role
+    }
+    if (payload.sessionVersion !== undefined) {
+      if (typeof payload.sessionVersion !== 'number' || !Number.isInteger(payload.sessionVersion) || payload.sessionVersion < 0) return null
+      result.sessionVersion = payload.sessionVersion
+    }
+    if (result.userId && (result.role === undefined || result.sessionVersion === undefined)) return null
+    return result
   } catch {
     return null
   }
@@ -83,3 +109,4 @@ export function validateCredentials(email: unknown, password: unknown): boolean 
 }
 
 export { SESSION_COOKIE }
+

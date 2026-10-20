@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { logout } from '@/lib/auth'
-import { useAuthRefresh } from '@/lib/authContext'
+import { useAuthRefresh, useAuthUser } from '@/lib/authContext'
 
 const links = [
   {href:'/roster',label:'📋 名簿'},
@@ -17,6 +17,7 @@ export default function Navigation() {
   const pathname = usePathname()
   const router = useRouter()
   const refreshAuth = useAuthRefresh()
+  const user = useAuthUser()
 
   async function handleLogout() {
     await logout()
@@ -30,7 +31,7 @@ export default function Navigation() {
         <span className="font-bold text-lg tracking-tight">🤿 沖ダイブ・パートナー</span>
 
         <div className="hidden md:flex gap-1">
-          {links.map((l) => (
+          {[...links, ...(user?.role === 'admin' ? [{ href: '/staff', label: '⚙️ スタッフ管理' }] : [])].map((l) => (
             <Link
               key={l.href}
               href={l.href}
@@ -55,7 +56,7 @@ export default function Navigation() {
 
       {/* モバイル用ボトムナビ */}
       <div className="md:hidden fixed bottom-0 left-0 right-0 bg-ocean-700 flex z-50">
-        {links.map((l) => (
+        {[...links, ...(user?.role === 'admin' ? [{ href: '/staff', label: '⚙️ スタッフ' }] : [])].map((l) => (
           <Link
             key={l.href}
             href={l.href}
@@ -71,3 +72,4 @@ export default function Navigation() {
     </nav>
   )
 }
+

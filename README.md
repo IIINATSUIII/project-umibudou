@@ -21,7 +21,7 @@ bash scripts/setup.sh
 npm run dev   # → http://127.0.0.1:3030
 ```
 
-セットアップスクリプトは「依存インストール → `.env.local` 作成 → `SESSION_SECRET` 自動生成 → 型チェック」まで自動で行います。あとは `.env.local` の `STAFF_CREDENTIALS` に自分のログイン用メール:パスワードを設定するだけです。
+セットアップスクリプトは「依存インストール → `.env.local` 作成 → `SESSION_SECRET` 自動生成 → 型チェック」まで自動で行います。DBを使わないローカル確認では `.env.local` の `STAFF_CREDENTIALS` に自分のログイン用メール:パスワードを設定できます。
 
 **Google Sheets の設定は不要で開発を始められます** — 未設定の場合は `data/*.json` へのローカル保存＋モックデータで全画面が動作します。
 
@@ -48,7 +48,7 @@ npm run dev                         # → http://127.0.0.1:3030
 
 ### スタッフ認証（必須）
 
-外部サービス不要。`.env.local` にメールとパスワードを直接書きます。
+DB未接続のローカル確認では外部サービス不要です。`.env.local` の `STAFF_CREDENTIALS` は移行前の互換ログインとして利用します。開発環境でPostgreSQLが未起動の場合、登録したスタッフは`data/staff-users.json`へ保存されます。本番のスタッフ登録はPostgreSQLを使用します。
 
 ```env
 # パイプ | で複数スタッフを追加可能
@@ -56,6 +56,9 @@ STAFF_CREDENTIALS=staff@okidive.com:your_password|admin@okidive.com:admin_pass
 
 # JWT 署名キー（32バイト以上のランダム文字列）
 SESSION_SECRET=replace_with_random_hex
+
+# STAFF_CREDENTIALSからDBへ移行する最初の管理者
+STAFF_ADMIN_EMAIL=admin@okidive.com
 ```
 
 `SESSION_SECRET` の生成：
@@ -74,11 +77,30 @@ node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 
 旧実装ではパスワード内の2個目以降の `:` が切り捨てられていました。今後は設定したパスワード全体でログインしてください。
 
+### スタッフアカウント
+
+PostgreSQLを設定してからマイグレーションを実行すると、ログイン画面の「アカウント作成」からスタッフが招待なしで登録できます。管理者からメールアドレスと権限を指定して登録してもらう場合は、画面上の「スタッフ管理」から招待リンクを発行することもできます。
+
+```bash
+npm run db:migrate
+```
+
+初回だけ、`STAFF_CREDENTIALS` と `STAFF_ADMIN_EMAIL` に同じ既存管理者のメールアドレスを設定してログインしてください。ログイン成功時にそのアカウントはscryptハッシュ付きで `staff_users` へ移行され、以後はDBのアカウントを使用します。招待なしで登録したスタッフは、ログイン画面の「アカウント作成」からメールアドレス・氏名・5文字以上のパスワードを登録します。
+
+- 招待リンクは24時間で期限切れになり、一度登録すると再利用できません。
+- 登録画面からの自由なスタッフ登録ができます。招待なしで登録したアカウントは一般スタッフ権限になり、管理者が必要に応じて権限を変更できます。
+- 管理者はスタッフの権限変更、停止・再開、招待の取消ができます。
+- 最後に残った有効な管理者は停止・降格できません。
+- メール送信はまだ行わず、管理画面で発行したリンクを安全な経路で共有します。
+- `STAFF_CREDENTIALS` と `STAFF_ADMIN_EMAIL` は移行完了後に本番環境から削除してください。パスワードの平文をリポジトリへ保存しないでください。
+
+実装の認証境界とAPI一覧は [スタッフ認証仕様](docs/security/staff-invite-auth.md) を参照してください。
+
 ### 認証の仕組み
 
 ```
 POST /api/auth  { email, password }
-  → STAFF_CREDENTIALS と照合
+  → staff_usersのscryptハッシュと照合（初回のみSTAFF_CREDENTIALSから移行）
   → 一致したら JWT を生成し HTTP-only Cookie（odp_session）にセット
   → Next.js Middleware がすべてのページリクエストで Cookie を検証
   → 無効なら /login にリダイレクト
@@ -143,6 +165,8 @@ Vercel ダッシュボード → Settings → Environment Variables で以下を
 | 変数名 | 値 |
 |---|---|
 | `STAFF_CREDENTIALS` | `staff@okidive.com:pass\|staff2@okidive.com:pass2` |
+| `STAFF_ADMIN_EMAIL` | 初回移行する管理者メール |
+| `DATABASE_URL` | PostgreSQL接続URL |
 | `SESSION_SECRET` | ランダム 32 バイト hex |
 | `GOOGLE_SERVICE_ACCOUNT_EMAIL` | サービスアカウントのメール |
 | `GOOGLE_PRIVATE_KEY` | `"-----BEGIN PRIVATE KEY-----\n..."` |
@@ -173,11 +197,15 @@ src/
 ├── app/
 │   ├── api/
 │   │   ├── auth/route.ts           ← POST ログイン / DELETE ログアウト / GET 現在ユーザー
+│   │   ├── auth/register/          ← 招待なし／招待リンクのスタッフ登録
+│   │   ├── auth/invitations/       ← 管理者向け招待の作成・一覧・取消
+│   │   └── auth/staff/             ← 管理者向けスタッフ権限・停止管理
 │   │   ├── reservations/route.ts   ← 予約 CRUD（Google Sheets）
 │   │   ├── questionnaires/route.ts ← 問診票 CRUD
 │   │   ├── customers/route.ts      ← 顧客台帳 CRUD
 │   │   └── setup/route.ts          ← バックアップ付きスキーマ移行（POST）
-│   ├── login/                      ← ログイン画面
+│   ├── login/                      ← ログイン / スタッフ登録画面
+│   ├── staff/                      ← 管理者向けスタッフ管理画面
 │   ├── dashboard/                  ← 予約サマリー + 海況
 │   ├── reservations/               ← 予約一覧・登録
 │   ├── questionnaire/[id]/         ← 問診票入力（ダイバー向け・認証不要）
@@ -211,7 +239,7 @@ Google Sheets（予約シート）
 
 ```
 POST /api/auth { email, password }
-  → validateCredentials()（STAFF_CREDENTIALS 照合）
+  → staff_usersのscryptハッシュ照合（初回のみSTAFF_CREDENTIALSから移行）
   → createSessionToken()（JWT 生成）
   → HTTP-only Cookie にセット（odp_session）
 
@@ -220,3 +248,4 @@ POST /api/auth { email, password }
   → スタッフAPIはハンドラーでも requireStaffSession() を実行
   → 無効ならAPIは401のJSON、画面は /login にリダイレクト
 ```
+
