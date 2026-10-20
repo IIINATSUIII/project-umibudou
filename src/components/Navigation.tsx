@@ -6,6 +6,7 @@ import { logout } from '@/lib/auth'
 import { useAuthRefresh } from '@/lib/authContext'
 
 const links = [
+  {href:'/roster',label:'📋 名簿'},
   { href: '/dashboard',          label: '🏠 ダッシュボード' },
   { href: '/reservations',       label: '📅 予約管理' },
   { href: '/customers',          label: '👥 顧客台帳' },

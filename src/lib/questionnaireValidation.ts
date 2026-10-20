@@ -1,44 +1,55 @@
-/** Shared validation for SC-05 sections 3–5. Legacy records remain readable. */
-export const SLEEP_OPTIONS = ['6時間以上', '4時間以上6時間未満', '4時間未満'] as const
-export const CARD_OPTIONS = ['未取得', 'OW', 'AOW', 'Rescue', 'DM', 'Inst'] as const
-export const ORG_OPTIONS = ['PADI', 'NAUI', 'SSI', 'BSAC', 'その他'] as const
-export const DIVE_OPTIONS = ['1ヶ月以内', '半年以内', '1年以内', '1年以上', '初めて'] as const
-export const TODAY_FIELDS = ['sleepCategory', 'alcoholLastNight', 'alcoholToday', 'condition', 'conditionDetails', 'flightWithin48h'] as const
-export type FieldErrors = Record<string, string>
+export const HEALTH_FIELDS = [
+  ['heartDisease', '心臓・循環器系疾患（心臓病・不整脈）'],
+  ['hypertension', '高血圧'],
+  ['respiratoryDisease', '呼吸器系疾患（喘息・肺疾患）'],
+  ['earDisease', '耳・副鼻腔の疾患'],
+  ['epilepsy', 'てんかん・失神の既往'],
+  ['diabetes', '糖尿病'],
+  ['pregnant', '妊娠中'],
+  ['panicDisorder', 'パニック障害・閉所恐怖症'],
+  ['latexAllergy', 'ラテックスアレルギー'],
+] as const
 
-export function validateQuestionnaireExperience(value: unknown): FieldErrors {
-  const b: Record<string, unknown> = value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
-  const errors: FieldErrors = {}
-  const choice = (key: string, options: readonly string[], optional = false) => {
-    if (optional && (b[key] === '' || b[key] === undefined)) return
-    if (typeof b[key] !== 'string' || !options.includes(b[key] as string)) errors[key] = '選択肢から回答してください。'
-  }
-  choice('sleepCategory', SLEEP_OPTIONS)
-  for (const key of ['alcoholLastNight', 'alcoholToday', 'flightWithin48h']) {
-    if (typeof b[key] !== 'boolean') errors[key] = 'あり・なしを選択してください。'
-  }
-  choice('condition', ['good', 'normal', 'bad'])
-  if (b.condition === 'bad' && (typeof b.conditionDetails !== 'string' || !b.conditionDetails.trim())) {
-    errors.conditionDetails = '体調の詳細を入力してください。'
-  }
-  if (b.conditionDetails !== undefined && (typeof b.conditionDetails !== 'string' || b.conditionDetails.length > 1000)) {
-    errors.conditionDetails = '体調の詳細は1000文字以内で入力してください。'
-  }
-  choice('cCardType', CARD_OPTIONS)
-  if (typeof b.hasCCard !== 'boolean' || b.hasCCard !== (b.cCardType !== '未取得')) errors.cCardType = 'Cカードの有無・種別を選択してください。'
-  choice('cCardOrg', ORG_OPTIONS, true)
-  if (b.hasCCard === false && b.cCardOrg !== '' && b.cCardOrg !== undefined) errors.cCardOrg = '未取得の場合は認定団体を空欄にしてください。'
-  choice('lastDivePeriod', DIVE_OPTIONS)
-  if (b.totalDives !== null && b.totalDives !== undefined &&
-      (typeof b.totalDives !== 'number' || !Number.isSafeInteger(b.totalDives) || b.totalDives < 0)) {
-    errors.totalDives = '総本数は0以上の整数で入力してください。'
-  }
-  return errors
+export type FieldErrors = Record<string, string>
+export const BASIC_FIELDS = ['lastName', 'firstName', 'lastNameKana', 'firstNameKana', 'birthDate', 'postalCode', 'address', 'phone', 'email', 'emergencyName', 'emergencyRelation', 'emergencyPhone', 'gender'] as const
+
+export function todayInJapan(): string {
+  return new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
 }
 
-/** Only call after validation. Clear obsolete/hidden values before persisting. */
-export function normalizeQuestionnaireExperience<T extends Record<string, unknown>>(b: T) {
-  return { ...b, sleepHours: null, lastDiveDate: '', totalDives: b.totalDives ?? null,
-    cCardOrg: b.hasCCard ? (b.cCardOrg ?? '') : '',
-    conditionDetails: b.condition === 'bad' ? (b.conditionDetails as string).trim() : '' }
+export function calculateAge(birthDate: string, referenceDate = todayInJapan()): number | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(birthDate) || birthDate > referenceDate) return null
+  const parsed = new Date(`${birthDate}T00:00:00Z`)
+  if (!Number.isFinite(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== birthDate || birthDate.startsWith('0000')) return null
+  return Number(referenceDate.slice(0, 4)) - Number(birthDate.slice(0, 4)) - (referenceDate.slice(5) < birthDate.slice(5) ? 1 : 0)
+}
+
+export function validateQuestionnaire(input: unknown, section: 'basic' | 'health' | 'all' = 'all'): FieldErrors {
+  const data = input && typeof input === 'object' && !Array.isArray(input) ? input as Record<string, unknown> : {}
+  const errors: FieldErrors = {}
+  const required = '必須項目が入力されていません。'
+  const value = (key: string) => typeof data[key] === 'string' ? (data[key] as string).trim() : ''
+  if (section !== 'health') {
+    for (const key of BASIC_FIELDS) {
+      if (key !== 'gender' && !value(key)) errors[key] = required
+    }
+    for (const key of ['lastNameKana', 'firstNameKana']) {
+      if (value(key) && !/^[ァ-ヺー　 ]+$/.test(value(key))) errors[key] = '全角カタカナで入力してください。'
+    }
+    if (value('birthDate') && calculateAge(value('birthDate')) === null) errors.birthDate = '生年月日を正しく入力してください。'
+    if (!['male', 'female', 'other', 'unanswered'].includes(value('gender'))) errors.gender = '性別を正しく選択してください。'
+    if (value('postalCode') && !/^\d{3}-?\d{4}$/.test(value('postalCode'))) errors.postalCode = '郵便番号は半角数字7桁で入力してください。'
+    for (const key of ['phone', 'emergencyPhone']) {
+      if (value(key) && !/^\d+(?:-\d+)*$/.test(value(key))) errors[key] = '電話番号は半角数字とハイフンで入力してください。'
+    }
+    if (value('email') && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value('email'))) errors.email = 'メールアドレスの形式が正しくありません。'
+  }
+  if (section !== 'basic') {
+    for (const key of [...HEALTH_FIELDS.map(([key]) => key), 'medication', 'medicalCertificate']) {
+      if (typeof data[key] !== 'boolean') errors[key] = required
+    }
+    if (data.medication === true && !value('medicationName')) errors.medicationName = required
+  }
+  const order = [...BASIC_FIELDS, ...HEALTH_FIELDS.map(([key]) => key), 'medication', 'medicationName', 'medicalCertificate']
+  return Object.fromEntries(order.filter((key) => errors[key]).map((key) => [key, errors[key]]))
 }
