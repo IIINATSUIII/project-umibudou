@@ -18,6 +18,8 @@ import {
 } from '@/lib/reservationValidation'
 import { normalizeReservationInput, normalizeReservationPatch } from '@/lib/reservationNormalization'
 import {
+  appendCancellationAudit,
+  cancellationAudit,
   cancelledReservationStatus,
   isCancelledReservationStatus,
   isCancellableReservationStatus,
@@ -184,6 +186,15 @@ export async function PATCH(req: NextRequest) {
         return staffJson({ error: 'この予約はキャンセルできません' }, { status: 409 })
       }
       delta.status = cancelledReservationStatus(current)
+      delta.staffNote = appendCancellationAudit(current, new Date().toISOString())
+    }
+    // Retain cancellation evidence when a later edit replaces the note.
+    if (!isCancelledReservationStatus(delta.status ?? '') && typeof delta.staffNote === 'string') {
+      const current = (await store.getReservations()).find((r) => r.id === id)
+      const audit = current && cancellationAudit(current)
+      if (audit && !delta.staffNote.includes(`[予約取消履歴:${audit.phase}:${audit.at}]`)) {
+        delta.staffNote = [delta.staffNote.trim(), `[予約取消履歴:${audit.phase}:${audit.at}]`].filter(Boolean).join('\n')
+      }
     }
     const updatedAt = await patchReservation(id, delta, expectedUpdatedAt)
     return staffJson({ ok: true, updatedAt })
