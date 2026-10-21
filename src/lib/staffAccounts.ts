@@ -203,38 +203,6 @@ export async function getLocalStaffUserByEmail(email: string): Promise<{ user: S
   return row ? { user: mapLocalStaffUser(row), passwordHash: row.passwordHash } : null
 }
 
-export async function createLocalStaffUser(input: {
-  email: string
-  displayName: string
-  password: string
-}): Promise<StaffUser> {
-  if (!canUseLocalStaffAuth()) throw new StaffAuthDatabaseError('Local staff auth is disabled in production')
-  const email = input.email.trim()
-  const normalizedEmail = normalizeStaffEmail(email)
-  if (!isValidStaffEmail(normalizedEmail)) throw new Error('INVALID_STAFF_EMAIL')
-  if (!isValidDisplayName(input.displayName)) throw new Error('INVALID_DISPLAY_NAME')
-  const passwordHash = await hashStaffPassword(input.password)
-  return withLocalStaffWriteLock(async () => {
-    const rows = await readLocalStaffUsers()
-    if (rows.some((row) => row.email.trim().toLowerCase() === normalizedEmail)) {
-      throw new DuplicateStaffAccountError()
-    }
-    const user: LocalStaffUser = {
-      id: id('LOCAL-STU'),
-      email,
-      displayName: input.displayName.trim(),
-      passwordHash,
-      role: 'staff',
-      status: 'active',
-      sessionVersion: 0,
-      lastLoginAt: null,
-    }
-    rows.push(user)
-    await writeLocalStaffUsers(rows)
-    return mapLocalStaffUser(user)
-  })
-}
-
 export async function touchLocalStaffLogin(email: string): Promise<void> {
   if (!canUseLocalStaffAuth()) return
   await withLocalStaffWriteLock(async () => {
@@ -351,33 +319,6 @@ export async function ensureLegacyStaffUser(email: string, password: string): Pr
   }
 }
 
-/** 招待なしの公開登録で一般スタッフアカウントを作成する。 */
-export async function createStaffUser(input: {
-  email: string
-  displayName: string
-  password: string
-}): Promise<StaffUser> {
-  ensureDatabase()
-  const email = input.email.trim()
-  const normalizedEmail = normalizeStaffEmail(email)
-  if (!isValidStaffEmail(normalizedEmail)) throw new Error('INVALID_STAFF_EMAIL')
-  if (!isValidDisplayName(input.displayName)) throw new Error('INVALID_DISPLAY_NAME')
-  const passwordHash = await hashStaffPassword(input.password)
-  try {
-    const result = await query<StaffUserRow>(
-      `INSERT INTO staff_users
-         (id, email, normalized_email, display_name, password_hash, role, status)
-       VALUES ($1, $2, $3, $4, $5, 'staff', 'active')
-       RETURNING id, email, display_name, password_hash, role, status, session_version, last_login_at`,
-      [id('STU'), email, normalizedEmail, input.displayName.trim(), passwordHash]
-    )
-    return mapUser(result.rows[0])
-  } catch (error) {
-    if ((error as { code?: string }).code === '23505') throw new DuplicateStaffAccountError()
-    throw error
-  }
-}
-
 export async function touchStaffLogin(userId: string): Promise<void> {
   ensureDatabase()
   await query('UPDATE staff_users SET last_login_at = now() WHERE id = $1', [userId])
@@ -452,6 +393,10 @@ export async function redeemStaffInvitation(input: {
   password: string
 }): Promise<StaffUser> {
   ensureDatabase()
+  const preflight = await findInvitationByToken(input.token)
+  if (!preflight || preflight.usedAt || preflight.revokedAt || new Date(preflight.expiresAt).getTime() <= Date.now()) {
+    throw new InvalidInvitationError()
+  }
   const passwordHash = await hashStaffPassword(input.password)
   return withTransaction(async (client) => {
     const invitationResult = await client.query<InvitationRow>(
@@ -497,6 +442,8 @@ export async function updateStaffUser(input: {
 }): Promise<StaffUser> {
   ensureDatabase()
   return withTransaction(async (client) => {
+    // Serialize role/status changes so concurrent admin demotions cannot remove every admin.
+    await client.query('SELECT pg_advisory_xact_lock(1902592027, 0)')
     const current = await client.query<StaffUserRow>(
       `SELECT id, email, display_name, password_hash, role, status, session_version, last_login_at
          FROM staff_users WHERE id = $1 FOR UPDATE`, [input.id]

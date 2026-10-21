@@ -128,8 +128,8 @@ export default function LoginPage() {
                 : inviteState === 'valid'
                   ? '招待リンクを確認しました。登録内容を入力してください。'
                   : inviteState === 'invalid'
-                    ? '招待リンクは使えません。招待なしで新規登録できます。'
-                    : '招待リンクなしでスタッフ登録できます。'}
+                    ? '招待リンクは無効または期限切れです。管理者へ新しいリンクを依頼してください。'
+                    : 'スタッフ登録には管理者からの招待リンクが必要です。'}
             </div>
           )}
           {mode === 'register' && (
@@ -187,7 +187,7 @@ export default function LoginPage() {
 
           <button
             type="submit"
-            disabled={loading}
+            disabled={loading || (mode === 'register' && inviteState !== 'valid')}
             className="w-full bg-ocean-600 text-white py-2.5 rounded-lg font-medium text-sm hover:bg-ocean-700 transition-colors disabled:opacity-50"
           >
             {loading ? (mode === 'register' ? '作成中…' : 'ログイン中…') : (mode === 'register' ? 'アカウントを作成' : 'ログイン')}

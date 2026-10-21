@@ -72,8 +72,8 @@ export default function StaffPage() {
         {message && <p className="text-sm text-green-700 bg-green-50 rounded-lg px-3 py-2">{message}</p>}
 
         <section className="bg-white rounded-xl shadow-sm p-5">
-          <h2 className="font-semibold text-gray-800 mb-1">スタッフを招待（任意）</h2>
-          <p className="text-xs text-gray-500 mb-3">スタッフは招待なしでもログイン画面から登録できます。権限を指定して登録してもらう場合だけ招待リンクを使います。</p>
+          <h2 className="font-semibold text-gray-800 mb-1">スタッフを招待</h2>
+          <p className="text-xs text-gray-500 mb-3">スタッフ登録には招待リンクが必要です。招待リンクは一度だけ表示されるため、安全な方法で本人へ共有してください。</p>
           <form onSubmit={createInvite} className="flex flex-col sm:flex-row gap-2">
             <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required placeholder="staff@example.com" className="flex-1 border rounded-lg px-3 py-2 text-sm" />
             <select value={role} onChange={(e) => setRole(e.target.value as 'admin' | 'staff')} className="border rounded-lg px-3 py-2 text-sm"><option value="staff">スタッフ</option><option value="admin">管理者</option></select>
