@@ -1,5 +1,6 @@
 export type ReservationTimeSlot = 'morning' | 'afternoon' | 'full' | 'unspecified'
 export type ReservationChannel = 'hp' | 'email' | 'phone' | 'ota' | 'sns' | 'google_form'
+export type ReservationCancellationPhase = 'before' | 'after'
 
 /** 正準予約データ。旧API/シート名は ReservationInput の境界変換で吸収する。 */
 export interface Reservation {
@@ -34,6 +35,12 @@ export interface Reservation {
   legacyChannel?: string
   divePoint?: string
   staffNote?: string
+  /** キャンセル時点。既存の履歴なしデータでは未設定のまま保持する。 */
+  cancellationPhase?: ReservationCancellationPhase
+  /** キャンセル処理を確定した日時（ISO 8601）。 */
+  cancelledAt?: string
+  /** スタッフが任意で残すキャンセル理由。 */
+  cancellationReason?: string
 }
 
 /** 旧 date/course/phone/notes 入力を許す移行期間中のAPI境界型。 */
