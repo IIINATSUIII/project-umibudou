@@ -48,37 +48,47 @@ async function claimNext(now: number): Promise<ClaimedEmail | undefined> {
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id))[0]
     if (!next) return undefined
     const attempt = next.attemptCount + 1
+    const lockedUntil = new Date(now + LEASE_MS).toISOString()
     await store.updateReservationEmail(next.id, {
       status: 'sending',
       attemptCount: attempt,
       lastAttemptAt: new Date(now).toISOString(),
-      lockedUntil: new Date(now + LEASE_MS).toISOString(),
+      lockedUntil,
     })
-    return { ...next, status: 'sending', attemptCount: attempt, attempt }
+    return { ...next, status: 'sending', attemptCount: attempt, lockedUntil, attempt }
   })
 }
 
-async function markSent(email: ClaimedEmail, providerMessageId: string, now: number): Promise<void> {
-  await withStoreWriteLock(() => store.updateReservationEmail(email.id, {
-    status: 'sent',
-    sentAt: new Date(now).toISOString(),
-    providerMessageId,
-    lockedUntil: '',
-    lastError: '',
-  }))
+async function markSent(email: ClaimedEmail, providerMessageId: string, now: number): Promise<boolean> {
+  return withStoreWriteLock(async () => {
+    const current = (await store.getReservationEmails()).find((item) => item.id === email.id)
+    if (current?.status !== 'sending' || current.attemptCount !== email.attemptCount || current.lockedUntil !== email.lockedUntil) return false
+    await store.updateReservationEmail(email.id, {
+      status: 'sent',
+      sentAt: new Date(now).toISOString(),
+      providerMessageId,
+      lockedUntil: '',
+      lastError: '',
+    })
+    return true
+  })
 }
 
-async function markFailed(email: ClaimedEmail, error: unknown, now: number): Promise<boolean> {
+async function markFailed(email: ClaimedEmail, error: unknown, now: number): Promise<'ignored' | 'failed' | 'dead_letter'> {
   const deadLetter = email.attempt >= MAX_ATTEMPTS
-  await withStoreWriteLock(() => store.updateReservationEmail(email.id, {
-    status: deadLetter ? 'dead_letter' : 'failed',
-    availableAt: deadLetter
-      ? new Date(now).toISOString()
-      : new Date(now + retryDelayMs(email.attempt)).toISOString(),
-    lockedUntil: '',
-    lastError: safeErrorKind(error),
-  }))
-  return deadLetter
+  return withStoreWriteLock(async () => {
+    const current = (await store.getReservationEmails()).find((item) => item.id === email.id)
+    if (current?.status !== 'sending' || current.attemptCount !== email.attemptCount || current.lockedUntil !== email.lockedUntil) return 'ignored'
+    await store.updateReservationEmail(email.id, {
+      status: deadLetter ? 'dead_letter' : 'failed',
+      availableAt: deadLetter
+        ? new Date(now).toISOString()
+        : new Date(now + retryDelayMs(email.attempt)).toISOString(),
+      lockedUntil: '',
+      lastError: safeErrorKind(error),
+    })
+    return deadLetter ? 'dead_letter' : 'failed'
+  })
 }
 
 async function deadLetterExpiredFinalAttempt(now: number): Promise<number> {
@@ -122,11 +132,11 @@ export async function runReservationEmailOutbox(
     result.claimed += 1
     try {
       const providerMessageId = await sendReservationReceiptEmail(email)
-      await markSent(email, providerMessageId, now)
-      result.sent += 1
+      if (await markSent(email, providerMessageId, now)) result.sent += 1
     } catch (error) {
-      result.failed += 1
-      if (await markFailed(email, error, now)) result.deadLettered += 1
+      const marked = await markFailed(email, error, now)
+      if (marked !== 'ignored') result.failed += 1
+      if (marked === 'dead_letter') result.deadLettered += 1
     }
   }
   return result
