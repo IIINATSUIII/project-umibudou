@@ -6,13 +6,12 @@ cd "$(dirname "$0")/.."
 
 echo "=== 沖ダイブ・パートナー セットアップ ==="
 
-# 1. Node.js バージョン確認（Next.js 14 は Node 18.17 以上が必要）
+# 1. Node.js バージョン確認（開発・CI・本番はNode.js 24 LTSを使用）
 node_version=$(node --version | sed 's/^v//')
 echo "Node.js: v$node_version"
 major=${node_version%%.*}
-minor=$(echo "$node_version" | cut -d. -f2)
-if [ "$major" -lt 18 ] || { [ "$major" -eq 18 ] && [ "$minor" -lt 17 ]; }; then
-  echo "NG: Node.js 18.17 以上が必要です。https://nodejs.org からインストールしてください。" >&2
+if [ "$major" -ne 24 ]; then
+  echo "NG: Node.js 24 LTS（.nvmrc参照）が必要です。https://nodejs.org からインストールしてください。" >&2
   exit 1
 fi
 

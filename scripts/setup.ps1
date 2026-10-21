@@ -6,13 +6,12 @@ Set-Location (Join-Path $PSScriptRoot "..")
 
 Write-Host "=== 沖ダイブ・パートナー セットアップ ===" -ForegroundColor Cyan
 
-# 1. Node.js バージョン確認（Next.js 14 は Node 18.17 以上が必要）
+# 1. Node.js バージョン確認（開発・CI・本番はNode.js 24 LTSを使用）
 $nodeVersion = (node --version) -replace "^v", ""
 Write-Host "Node.js: v$nodeVersion"
 $major = [int]($nodeVersion.Split(".")[0])
-$minor = [int]($nodeVersion.Split(".")[1])
-if ($major -lt 18 -or ($major -eq 18 -and $minor -lt 17)) {
-    Write-Host "NG: Node.js 18.17 以上が必要です。https://nodejs.org からインストールしてください。" -ForegroundColor Red
+if ($major -ne 24) {
+    Write-Host "NG: Node.js 24 LTS（.nvmrc参照）が必要です。https://nodejs.org からインストールしてください。" -ForegroundColor Red
     exit 1
 }
 

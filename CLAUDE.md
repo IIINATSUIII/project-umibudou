@@ -4,8 +4,8 @@
 
 ## 技術スタック
 
-- Next.js 14 (App Router) + TypeScript + Tailwind CSS
-- 認証: 独自 JWT（`jose`、HTTP-only Cookie `odp_session`、`src/middleware.ts` でルート保護）
+- Next.js 16 (App Router) + React 19 + TypeScript + Tailwind CSS、Node.js 24 LTS
+- 認証: 独自 JWT（`jose`、HTTP-only Cookie `odp_session`、`src/proxy.ts` と各スタッフAPIハンドラーで検証）
 - データストア: Google Sheets API（`googleapis`、サーバーサイドのみ）
   - **Sheets 未設定時は `data/*.json` へのローカル永続化＋モックデータで動作する**（`src/lib/localStore.ts` / `mockData.ts`）
 - 外部 API: 気象庁オープンデータ（`src/lib/weather.ts`、沖縄の天気・波浪）
@@ -14,7 +14,7 @@
 
 | コマンド | 内容 |
 |---|---|
-| `npm run dev` | 開発サーバー（http://localhost:3000） |
+| `npm run dev` | 開発サーバー（http://127.0.0.1:3030） |
 | `npm run typecheck` | `tsc --noEmit` 型チェック |
 | `npm run lint` | ESLint |
 | `npm run build` | 本番ビルド |
@@ -38,9 +38,10 @@
 
 - Google Sheets へのアクセスは **必ず API Route（サーバーサイド）経由**。サービスアカウント鍵・`GOOGLE_PRIVATE_KEY` をクライアントコードに出さない。
 - 環境変数は `.env.local`（コミット禁止）。新しい変数を追加したら `.env.local.example` と README も更新する。
-- ダイバー（ゲスト）向け画面 `/questionnaire/[id]` は認証不要。それ以外のページは middleware で保護される。ルート保護の対象を変える場合は `src/middleware.ts` の matcher を確認。
+- ダイバー（ゲスト）向け画面 `/questionnaire/[id]` は認証不要。スタッフ画面はproxyで保護される。ルート保護の対象を変える場合は `src/proxy.ts` のmatcherと公開パス境界を確認。
+- スタッフAPIは必ず各ハンドラーの先頭で `requireStaffSession()` を実行し、本文解析・データ処理・ロックより前に拒否する。個人情報のJSON応答には `staffJson()` を使う。新しいAPIを追加したら `staffApiAuth.test.ts` の認証分類と拒否テストも更新する。
 - 問診票 URL の ID は推測困難なランダム ID を使うこと（要件定義書 §6）。
-- `src/app/api/setup/route.ts` はシート初期化用。本番デプロイ前に削除する。
+- `src/app/api/setup/route.ts` はシート初期化用。スタッフ認証に加え、開発環境で `ENABLE_SHEETS_SETUP=true` の場合だけ実行できる。本番で有効にする抜け道を追加しない。
 
 ## 検証
 

@@ -98,6 +98,40 @@ export async function patchReservation(
   return body.updatedAt
 }
 
+/** OTA予約CSV取込の結果（サーバー src/lib/otaCsvImport.ts と同じ形） */
+export type OtaCsvRow = {
+  line: number
+  status: 'ready' | 'imported' | 'duplicate' | 'invalid'
+  guestName?: string
+  diveDate?: string
+  courseName?: string
+  reservationId?: string
+  messages: string[]
+}
+export type OtaCsvImportResult = {
+  dryRun: boolean
+  imported: number
+  ready: number
+  duplicates: number
+  invalid: number
+  rows: OtaCsvRow[]
+}
+
+/** OTA予約CSVを取り込む。dryRun=true は保存せず判定結果だけを返す */
+export async function importOtaCsv(csv: string, dryRun: boolean): Promise<OtaCsvImportResult> {
+  const res = await fetch('/api/reservations/import', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ csv, dryRun }),
+  })
+  const body = await res.json().catch(() => ({}))
+  if (!res.ok) {
+    const message = [body?.error, body?.detail].filter(Boolean).join(' ')
+    throw new ApiRequestError(message || 'CSVを取り込めませんでした', res.status)
+  }
+  return body
+}
+
 // ─── 問診票 ───────────────────────────────────────────────────
 
 export function fetchQuestionnaires(options?: FetchListOptions): Promise<QuestionnaireData[]>

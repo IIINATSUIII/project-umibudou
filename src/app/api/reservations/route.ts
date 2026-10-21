@@ -1,4 +1,5 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest } from 'next/server'
+import { requireStaffSession, staffJson } from '@/lib/staffAuth'
 import { store } from '@/lib/dataStore'
 import { importGoogleFormBookings } from '@/lib/googleFormImport'
 import { getReservationsForList } from '@/lib/listReads'
@@ -26,14 +27,13 @@ import { RateLimitedError } from '@/lib/withRetry'
 import { StoreBusyError, withStoreWriteLock } from '@/lib/storeLock'
 import type { ReservationInput, ReservationTimeSlot } from '@/types'
 
-async function isStaff(req: NextRequest): Promise<boolean> {
-  const token = req.cookies.get(SESSION_COOKIE)?.value
-  return Boolean(token && await verifySessionToken(token))
-}
+export const dynamic = 'force-dynamic'
 
 /** GET /api/reservations — 予約一覧取得 */
 export async function GET(req: NextRequest) {
-  if (!await isStaff(req)) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const auth = await requireStaffSession(req)
+  if (!auth.ok) return auth.response
+
   try {
     const result = await importGoogleFormBookings()
     if (result.errors.length) console.warn('[GET /api/reservations] Googleフォーム取込:', result.errors)
@@ -42,14 +42,12 @@ export async function GET(req: NextRequest) {
     // Missing credentials may be explicitly revoked. Only the issuance endpoint may fill them;
     // list reads must never overwrite a concurrent revoke or reissue.
     const date = req.nextUrl.searchParams.get('date')
-    return NextResponse.json(date ? reservations.filter((r) => r.diveDate === date) : reservations, {
-      headers: { 'Cache-Control': 'no-store' },
-    })
+    return staffJson(date ? reservations.filter((r) => r.diveDate === date) : reservations)
   } catch (err) {
     console.error('[GET /api/reservations]', err)
     if (err instanceof RateLimitedError)
-      return NextResponse.json({ error: MSG.RATE_LIMITED }, { status: 503 })
-    return NextResponse.json(
+      return staffJson({ error: MSG.RATE_LIMITED }, { status: 503 })
+    return staffJson(
       { error: 'Failed to fetch reservations' },
       { status: 500 }
     )
@@ -58,11 +56,13 @@ export async function GET(req: NextRequest) {
 
 /** POST /api/reservations — staff reservation creation */
 export async function POST(req: NextRequest) {
-  if (!await isStaff(req)) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const auth = await requireStaffSession(req)
+  if (!auth.ok) return auth.response
+
   try {
     const body: unknown = await req.json().catch(() => null)
     if (!body || typeof body !== 'object' || Array.isArray(body)) {
-      return NextResponse.json({ error: '入力内容を確認してください' }, { status: 400 })
+      return staffJson({ error: '入力内容を確認してください' }, { status: 400 })
     }
     const values = body as Record<string, unknown>
     const hasExactLegacyTime = typeof values.time === 'string' && values.time.trim() !== ''
@@ -70,7 +70,7 @@ export async function POST(req: NextRequest) {
     if (isNewForm) {
       const validation = validateNewReservationInput(body, { allowOta: false })
       if (!validation.ok) {
-        return NextResponse.json({
+        return staffJson({
           error: 'VALIDATION_ERROR',
           message: validation.message,
           fields: validation.fields,
@@ -80,7 +80,7 @@ export async function POST(req: NextRequest) {
         ...validation.data,
         status: validation.data.status ?? CONFIRMED_STATUS_ID,
       })
-      return NextResponse.json({ ok: true, id: reservation.id })
+      return staffJson({ ok: true, id: reservation.id })
     }
 
     // Issue #5 and older clients may send date/course/phone/notes and an exact HH:MM.
@@ -93,19 +93,19 @@ export async function POST(req: NextRequest) {
     const guestCount = Number(values.guestCount)
     const guestEmail = typeof values.guestEmail === 'string' ? values.guestEmail.trim() : ''
     if (typeof diveDate !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(diveDate) || !Number.isFinite(Date.parse(`${diveDate}T00:00:00Z`))) {
-      return NextResponse.json({ error: 'ダイブ日を正しく入力してください' }, { status: 400 })
+      return staffJson({ error: 'ダイブ日を正しく入力してください' }, { status: 400 })
     }
     if (typeof courseName !== 'string' || !courseName.trim() || courseName.length > 200 || !guestName || guestName.length > 50 || typeof guestPhone !== 'string' || !guestPhone.trim() || guestPhone.length > 20) {
-      return NextResponse.json({ error: '必須項目が未入力です' }, { status: 400 })
+      return staffJson({ error: '必須項目が未入力です' }, { status: 400 })
     }
     if (!Number.isInteger(guestCount) || guestCount < 1 || guestCount > 20 || !['morning', 'afternoon', 'full', 'unspecified'].includes(String(slot))) {
-      return NextResponse.json({ error: '人数または時間帯を確認してください' }, { status: 400 })
+      return staffJson({ error: '人数または時間帯を確認してください' }, { status: 400 })
     }
     if (guestEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(guestEmail)) {
-      return NextResponse.json({ error: 'メールアドレスの形式が正しくありません' }, { status: 400 })
+      return staffJson({ error: 'メールアドレスの形式が正しくありません' }, { status: 400 })
     }
     if (typeof values.time === 'string' && values.time && !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(values.time)) {
-      return NextResponse.json({ error: '時間が不正です' }, { status: 400 })
+      return staffJson({ error: '時間が不正です' }, { status: 400 })
     }
     const now = new Date().toISOString()
     const input: ReservationInput = {
@@ -130,72 +130,74 @@ export async function POST(req: NextRequest) {
     }
     const reservation = normalizeReservationInput(input)
     const saved = await withStoreWriteLock(() => store.addReservation(reservation))
-    return NextResponse.json({ ok: true, id: saved.id })
+    return staffJson({ ok: true, id: saved.id })
   } catch (err) {
     if (err instanceof ReservationValidationError) {
-      return NextResponse.json({ error: 'VALIDATION_ERROR', message: err.message, fields: err.fields }, { status: 400 })
+      return staffJson({ error: 'VALIDATION_ERROR', message: err.message, fields: err.fields }, { status: 400 })
     }
     if (err instanceof RateLimitedError) {
-      return NextResponse.json({ error: MSG.RATE_LIMITED }, { status: 503 })
+      return staffJson({ error: MSG.RATE_LIMITED }, { status: 503 })
     }
     if (err instanceof StoreBusyError) {
-      return NextResponse.json({ error: '保存処理中です。時間をおいて再度お試しください。' }, { status: 503 })
+      return staffJson({ error: '保存処理中です。時間をおいて再度お試しください。' }, { status: 503 })
     }
     console.error('[POST /api/reservations]', err)
-    return NextResponse.json({ error: 'Failed to add reservation' }, { status: 500 })
+    return staffJson({ error: 'Failed to add reservation' }, { status: 500 })
   }
 }
 
 /** PATCH /api/reservations — conflict-checked update with legacy cancellation support */
 export async function PATCH(req: NextRequest) {
-  if (!await isStaff(req)) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const auth = await requireStaffSession(req)
+  if (!auth.ok) return auth.response
+
   try {
     const body: unknown = await req.json().catch(() => null)
     if (!body || typeof body !== 'object' || Array.isArray(body)) {
-      return NextResponse.json({ error: '入力形式が不正です' }, { status: 400 })
+      return staffJson({ error: '入力形式が不正です' }, { status: 400 })
     }
     const values = body as Record<string, unknown>
     const id = typeof values.id === 'string' ? values.id.trim() : ''
     const expectedUpdatedAt = typeof values.expectedUpdatedAt === 'string' ? values.expectedUpdatedAt : undefined
-    if (!id) return NextResponse.json({ error: '予約IDを指定してください' }, { status: 400 })
-    if (!expectedUpdatedAt) return NextResponse.json({ error: '読込時の更新日時が必要です' }, { status: 400 })
+    if (!id) return staffJson({ error: '予約IDを指定してください' }, { status: 400 })
+    if (!expectedUpdatedAt) return staffJson({ error: '読込時の更新日時が必要です' }, { status: 400 })
     const allowed = ['status', 'staffId', 'staffNote', 'divePoint', 'diveDate', 'date', 'time', 'timeSlot', 'courseId', 'courseName', 'course', 'guestName', 'guestPhone', 'phone', 'guestEmail', 'guestCount', 'notes']
     const rawDelta = Object.fromEntries(Object.entries(values).filter(([key]) => allowed.includes(key)))
     if (Object.keys(rawDelta).length === 0) {
-      return NextResponse.json({ error: '更新項目がありません' }, { status: 400 })
+      return staffJson({ error: '更新項目がありません' }, { status: 400 })
     }
     if (Object.entries(rawDelta).some(([key, value]) => key === 'guestCount'
       ? typeof value !== 'number' || !Number.isInteger(value) || value < 1 || value > 20
       : typeof value !== 'string')) {
-      return NextResponse.json({ error: '更新値が不正です' }, { status: 400 })
+      return staffJson({ error: '更新値が不正です' }, { status: 400 })
     }
     const delta = normalizeReservationPatch(rawDelta as ReservationInput)
     if (typeof delta.status === 'string') {
       const knownStatus = STATUSES.some((status) => status.id === delta.status)
         || ['pending', 'confirmed', 'cancelled', 'canceled'].includes(delta.status)
-      if (!knownStatus) return NextResponse.json({ error: 'ステータスが不正です' }, { status: 400 })
+      if (!knownStatus) return staffJson({ error: 'ステータスが不正です' }, { status: 400 })
     }
     if (isCancelledReservationStatus(delta.status ?? '')) {
       const current = (await store.getReservations()).find((reservation) => reservation.id === id)
-      if (!current) return NextResponse.json({ error: '予約が見つかりません' }, { status: 404 })
+      if (!current) return staffJson({ error: '予約が見つかりません' }, { status: 404 })
       if (!isCancellableReservationStatus(current.status)) {
-        return NextResponse.json({ error: 'この予約はキャンセルできません' }, { status: 409 })
+        return staffJson({ error: 'この予約はキャンセルできません' }, { status: 409 })
       }
       delta.status = cancelledReservationStatus(current)
     }
     const updatedAt = await patchReservation(id, delta, expectedUpdatedAt)
-    return NextResponse.json({ ok: true, updatedAt })
+    return staffJson({ ok: true, updatedAt })
   } catch (err) {
     console.error('[PATCH /api/reservations]', err)
     if (err instanceof ReservationConflictError) {
-      return NextResponse.json({ error: err.message, conflict: true }, { status: 409 })
+      return staffJson({ error: err.message, conflict: true }, { status: 409 })
     }
     if (err instanceof RateLimitedError) {
-      return NextResponse.json({ error: MSG.RATE_LIMITED }, { status: 503 })
+      return staffJson({ error: MSG.RATE_LIMITED }, { status: 503 })
     }
     if (err instanceof StoreBusyError) {
-      return NextResponse.json({ error: '保存処理中です。時間をおいて再度お試しください。' }, { status: 503 })
+      return staffJson({ error: '保存処理中です。時間をおいて再度お試しください。' }, { status: 503 })
     }
-    return NextResponse.json({ error: 'Failed to update reservation' }, { status: 500 })
+    return staffJson({ error: 'Failed to update reservation' }, { status: 500 })
   }
 }

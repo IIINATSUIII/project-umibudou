@@ -1,12 +1,12 @@
 # 🤿 沖ダイブ・パートナー
 
-ダイビングショップ運営支援 Web アプリ — Next.js 14 + JWT 認証 + Google Sheets
+ダイビングショップ運営支援 Web アプリ — Next.js 16 + JWT 認証 + Google Sheets
 
 ---
 
 ## クイックスタート（チームメンバー向け）
 
-前提: **Node.js 18.17 以上**（`.nvmrc` 参照）と Git。
+前提: **Node.js 24 LTS**（`.nvmrc` 参照）と Git。開発・CI・本番を24系にそろえてください。
 
 ```bash
 git clone <このリポジトリのURL>
@@ -18,7 +18,7 @@ powershell -ExecutionPolicy Bypass -File scripts\setup.ps1
 # Mac / Linux / WSL / Git Bash
 bash scripts/setup.sh
 
-npm run dev   # → http://localhost:3000
+npm run dev   # → http://127.0.0.1:3030
 ```
 
 セットアップスクリプトは「依存インストール → `.env.local` 作成 → `SESSION_SECRET` 自動生成 → 型チェック」まで自動で行います。あとは `.env.local` の `STAFF_CREDENTIALS` に自分のログイン用メール:パスワードを設定するだけです。
@@ -39,7 +39,7 @@ Git / GitHub が初めてのメンバーは [docs/00_GitHub初心者ガイド.md
 cd oki-dive-partner
 npm install
 cp .env.local.example .env.local   # 下記を参考に値を設定
-npm run dev                         # → http://localhost:3000
+npm run dev                         # → http://127.0.0.1:3030
 ```
 
 ---
@@ -106,13 +106,21 @@ Sheetsへの書き込みはFirestoreの分散ロックを使用します。同�
 
 ### スプレッドシートの初期化・移行
 
+この保守APIは `npm run dev` で起動した開発環境専用です。必要なバックアップと設定を確認し、`.env.local` の `ENABLE_SHEETS_SETUP=true` を明示的に設定してサーバーを再起動してください。ログイン後、同じブラウザーの開発者コンソールから `fetch('/api/setup', { method: 'POST' })` で実行できます。作業後は設定をfalseへ戻してください。
+
 ```
-POST http://localhost:3000/api/setup
+POST http://127.0.0.1:3030/api/setup
 ```
 
 スタッフとしてログインしたセッションでPOSTすると、「予約」「問診票」「顧客台帳」「名簿」を初期化・移行します。既存シートは複製してバックアップし、ヘッダー名を使って全行を移行します。予約データでは `diveDate` を日付の正準フィールドとして扱い、旧 `date` / `course` / `phone` / `notes` 列も読み替えます。ステータスは旧文字列と `STS-01`〜`STS-06` を保存値のまま扱います。既存予約にはスタッフが予約一覧を開いた際に問診URL用トークンを発行します。移行後は旧スキーマへの書き込みが拒否されます。GETではデータを変更しません。更新前に保存した予約QRは問診ページを開けないため、新しい問診URLを参加者へ共有してください。運用開始前に [レビュー修正・移行手順](docs/reviews/2026-10-06-review-fixes.md) を確認してください。
 
-**本番環境では実行後に `src/app/api/setup/route.ts` を削除するか、アクセスを制限してください。**
+**本番では `ENABLE_SHEETS_SETUP=true` でも実行できません。** 未認証は401、認証済みでも本番または無効設定なら404です。本番用Sheetsの保守は、バックアップを確認したうえで、設定を限定したローカルの開発環境から明示的に行ってください。
+
+### スタッフAPIの認証
+
+顧客・予約・問診・名簿・問診URL発行/失効・setupの全操作は、各ハンドラーの先頭で共通の `requireStaffSession()` を実行します。proxyが実行されなくても、未認証はデータ取得・更新・ロックの前に401のJSONで拒否します。署名鍵の設定不備は503です。個人情報を含むスタッフAPIの応答には `Cache-Control: no-store` を設定します。
+
+公開予約・公開問診・受付QRにはスタッフのログインを要求せず、従来の予約トークン検証を維持します。cronは独立した `CRON_SECRET` のBearer認証で保護します。保護画面の未認証アクセスはログインへ誘導します。[認証仕様と検証](docs/security/staff-api-auth.md)
 
 ### Google Forms予約の自動取込（任意）
 
@@ -148,7 +156,9 @@ Vercel ダッシュボード → Settings → Environment Variables で以下を
 2. `npm ci` による依存関係のインストール
 3. `npm run lint` によるLint
 4. `npm run typecheck` による型チェック
-5. `npm run build` による本番ビルド確認
+5. `npm test` による回帰テスト
+6. `npm run build` による本番ビルド確認
+7. `npm run test:security` による使い捨てJSONデータでのHTTP検証
 
 GitHubリポジトリの **Settings → Branches** で、`main`へのマージ条件にActionsのジョブ **Lint, typecheck, and build** を必須チェックとして追加すると、チェックに失敗した変更のマージを防止できます。
 
@@ -181,7 +191,7 @@ src/
 │   ├── api.ts           ← クライアント側 fetch 関数
 │   ├── mockData.ts      ← フォールバック用モックデータ
 │   └── weather.ts       ← 気象庁オープンデータ（沖縄）
-├── middleware.ts         ← Edge Middleware：JWT Cookie でルート保護
+├── proxy.ts              ← Node.js Proxy：画面のログイン誘導とAPIの401応答
 └── types/index.ts        ← 型定義
 ```
 
@@ -206,6 +216,7 @@ POST /api/auth { email, password }
   → HTTP-only Cookie にセット（odp_session）
 
 以降のリクエスト:
-  → middleware.ts が Cookie を検証
-  → 無効なら /login にリダイレクト
+  → proxy.ts が Cookie を検証
+  → スタッフAPIはハンドラーでも requireStaffSession() を実行
+  → 無効ならAPIは401のJSON、画面は /login にリダイレクト
 ```

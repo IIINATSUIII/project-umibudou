@@ -25,10 +25,7 @@ vi.mock('@/lib/dataStore', () => ({
   },
 }))
 vi.mock('@/lib/storeLock', () => ({
-  withStoreWriteLock: async (work: () => Promise<unknown>) => work(),
-}))
-
-import { POST } from './route'
+  withStoreWriteLock: async (work: () => Promise<unknown>) => work(),})); import { POST } from './route'; vi.mock('@/lib/staffAuth', async () => ({ ...(await vi.importActual<typeof import('@/lib/staffAuth')>('@/lib/staffAuth')), requireStaffSession: vi.fn().mockResolvedValue({ ok: true, session: { email: 'staff@example.com' } }) }))
 
 const qrToken = 'fresh-questionnaire-qr-token-1234567890'
 const request = (method: 'QR読取' | '手動照合') => new NextRequest('http://localhost/api/roster', {

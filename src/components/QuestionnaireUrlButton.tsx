@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { issueQuestionnaireUrl } from '@/lib/api'
 import { buildCheckinPath } from '@/lib/checkinLink'
 
@@ -11,6 +12,7 @@ export default function QuestionnaireUrlButton({
   reservationId: string
   onError: (message: string) => void
 }) {
+  const router = useRouter()
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
   async function issue(action: 'open' | 'copy' | 'reissue' | 'checkin') {
@@ -31,7 +33,7 @@ export default function QuestionnaireUrlButton({
       const url = action === 'checkin'
         ? `${window.location.origin}${buildCheckinPath(reservationId, issued.questionnaireToken)}`
         : `${window.location.origin}/questionnaire/${encodeURIComponent(issued.questionnaireToken)}`
-      if (action === 'open') window.location.assign(url)
+      if (action === 'open') router.push(url)
       else {
         await navigator.clipboard.writeText(url)
         setMessage(

@@ -55,13 +55,16 @@ function CheckinQr() {
   const [loading, setLoading] = useState(false)
   const [savedCount, setSavedCount] = useState(0)
   const started = useRef(false)
+  const lookupGeneration = useRef(0)
 
   /** 複数の予約をまとめて確認する。1件でも表示できれば、表示できなかった分のエラーは出さない。 */
   const lookup = useCallback(async (credentials: CheckinCredential[]) => {
+    const generation = ++lookupGeneration.current
     setError('')
     setResults([])
     setLoading(true)
     const outcomes = await Promise.all(credentials.map(fetchCheckin))
+    if (generation !== lookupGeneration.current) return
     const shown = outcomes.flatMap((outcome) => (outcome.ok ? [outcome.data] : []))
     setResults(shown)
     if (shown.length === 0) {
@@ -111,10 +114,13 @@ function CheckinQr() {
   }
 
   function forgetSaved() {
+    // Ignore any in-flight lookup so it cannot restore the token after deletion.
+    lookupGeneration.current += 1
     clearSavedCheckins(storage())
     setSavedCount(0)
     setResults([])
     setError('')
+    setLoading(false)
   }
 
   return (

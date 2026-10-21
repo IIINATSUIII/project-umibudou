@@ -2,7 +2,7 @@ name: CI
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, codex/issue-57-staff-api-auth]
   push:
     branches: [main]
   workflow_dispatch:
@@ -48,3 +48,6 @@ jobs:
 
       - name: Create production build
         run: npm run build
+
+      - name: Verify staff authentication over HTTP
+        run: npm run test:security
