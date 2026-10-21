@@ -21,6 +21,7 @@ const expiry = () => Math.floor(Date.now() / 1000) + 3600
 beforeEach(() => {
   vi.stubEnv('SESSION_SECRET', secret)
   vi.stubEnv('STAFF_CREDENTIALS', `${staffEmail}:test-password`)
+  vi.stubEnv('STAFF_ADMIN_EMAIL', '')
   vi.spyOn(console, 'error').mockImplementation(() => undefined)
 })
 afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks() })
@@ -137,7 +138,9 @@ describe('authentication API uses the same validated sessions', () => {
     const cookie = response.cookies.get(SESSION_COOKIE)!.value
     expect(response.headers.get('set-cookie')).toContain('HttpOnly')
     expect(response.headers.get('set-cookie')).toContain('SameSite=lax')
-    expect(await (await currentUser(request('/api/auth', cookie))).json()).toEqual({ user: { email: staffEmail } })
+    expect(await (await currentUser(request('/api/auth', cookie))).json()).toEqual({
+      user: { email: staffEmail, role: 'staff' },
+    })
     expect((await logout()).headers.get('set-cookie')).toContain(`${SESSION_COOKIE}=`)
   })
 

@@ -187,8 +187,13 @@ it('classifies every exported API operation so a newly added route cannot silent
   visit(root)
   const nonStaff = [
     'GET /api/auth', 'POST /api/auth', 'DELETE /api/auth',
+    'POST /api/auth/register', 'GET /api/auth/invitations/preview',
+    // 管理APIは各ハンドラー内でrequireAdminSessionを実行するため、認証分類上明示する。
+    'GET /api/auth/invitations', 'POST /api/auth/invitations',
+    'DELETE /api/auth/invitations/[id]', 'GET /api/auth/staff', 'PATCH /api/auth/staff',
     'POST /api/public/bookings', 'GET /api/public/questionnaires', 'POST /api/public/questionnaires',
     'POST /api/public/checkin-qr', 'GET /api/cron/sheets-outbox', 'POST /api/cron/sheets-outbox',
   ]
   expect(exported.sort()).toEqual([...actions.map(action => `${action.method} ${action.path}`), ...nonStaff].sort())
 })
+
