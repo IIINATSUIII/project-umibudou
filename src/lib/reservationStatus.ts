@@ -77,3 +77,21 @@ export function cancelledReservationStatus(current: Reservation): string {
     ? ISSUE_5_RESERVATION_STATUS.cancelled
     : 'cancelled'
 }
+
+// Cancellation phase is recorded in the persisted staff note field.
+const AUDIT = /\[予約取消履歴:(before|after):([^\]]+)\]/g
+export type ReservationCategory = 'all' | 'confirmed' | 'progress' | 'before' | 'after'
+export function cancellationAudit(r: Reservation): { phase: 'before' | 'after'; at: string } | null {
+  const match = [...(r.staffNote ?? '').matchAll(AUDIT)].at(-1)
+  return match ? { phase: match[1] as 'before' | 'after', at: match[2] } : null
+}
+export function appendCancellationAudit(r: Reservation, at: string): string {
+  const phase = isConfirmedReservationStatus(r.status) ? 'after' : 'before'
+  return [r.staffNote?.trim(), `[予約取消履歴:${phase}:${at}]`].filter(Boolean).join('\n')
+}
+export function reservationMatchesCategory(r: Reservation, category: ReservationCategory): boolean {
+  if (category === 'all') return true
+  if (category === 'confirmed') return isConfirmedReservationStatus(r.status)
+  if (category === 'progress') return isPendingReservationStatus(r.status)
+  return isCancelledReservationStatus(r.status) && cancellationAudit(r)?.phase === category
+}

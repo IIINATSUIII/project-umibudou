@@ -10,6 +10,9 @@ import { useReservationLists } from '@/lib/useReservationLists'
 import { patchReservation, ApiRequestError } from '@/lib/api'
 import { getStatusName } from '@/lib/masters'
 import {
+  cancellationAudit,
+  reservationMatchesCategory,
+  type ReservationCategory,
   cancelledReservationStatus,
   confirmedReservationStatus,
   isCancellableReservationStatus,
@@ -45,6 +48,7 @@ export default function ReservationsPage() {
   const [successMessage, setSuccessMessage] = useState('')
   // 空文字 = 全件表示。日付を選ぶとその日のみ表示
   const [dateFilter, setDateFilter] = useState('')
+  const [category, setCategory] = useState<ReservationCategory>('all')
 
   useEffect(() => {
     if (new URLSearchParams(window.location.search).get('saved') === '1') {
@@ -65,7 +69,7 @@ export default function ReservationsPage() {
   }
 
   const filtered = reservations
-    .filter((r) => !dateFilter || r.diveDate === dateFilter)
+    .filter((r) => (!dateFilter || r.diveDate === dateFilter) && reservationMatchesCategory(r, category))
     .sort((a, b) => a.diveDate.localeCompare(b.diveDate) ||
       TIME_SLOT_ORDER[a.timeSlot] - TIME_SLOT_ORDER[b.timeSlot] ||
       (a.time ?? '').localeCompare(b.time ?? ''))
@@ -76,8 +80,8 @@ export default function ReservationsPage() {
     if (!reservation || !isCancellableReservationStatus(reservation.status)) return
     try {
       const status = cancelledReservationStatus(reservation)
-      const updatedAt = await patchReservation(id, { status }, reservation.updatedAt ?? '')
-      setReservations((prev) => prev.map((r) => r.id === id ? { ...r, status, updatedAt } : r))
+      await patchReservation(id, { status }, reservation.updatedAt ?? '')
+      await reloadReservationsFresh()
       setActionError('')
     } catch (err) {
       setActionError(err instanceof Error ? err.message : '保存できませんでした')
@@ -135,6 +139,17 @@ export default function ReservationsPage() {
           <OtaCsvImport onImported={reloadAfterImport} />
         </div>
 
+        <div role="group" aria-label="予約ステータスで絞り込み" className="flex flex-wrap gap-2">
+          {([['all', 'すべて'], ['confirmed', '承認済み（確定）'],
+            ['progress', '進行中（受付・確認中）'], ['before', 'キャンセル／却下（確定前）'],
+            ['after', '承認後キャンセル']] as const).map(([value, label]) => (
+            <button key={value} type="button" aria-pressed={category === value}
+              onClick={() => setCategory(value)}
+              className={`rounded-lg border px-3 py-1.5 text-sm ${category === value ? 'bg-ocean-600 text-white border-ocean-600' : 'bg-white text-gray-700 border-gray-300'}`}>
+              {label}
+            </button>
+          ))}
+        </div>
         {successMessage && (
           <div role="status" className="rounded-lg bg-green-50 border border-green-200 px-3 py-2 text-sm text-green-700">
             {successMessage}
@@ -144,7 +159,7 @@ export default function ReservationsPage() {
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
           {filtered.length === 0 ? (
             <p className="text-center text-gray-400 py-12 text-sm">
-              {dateFilter ? 'この日の予約はありません' : '予約はありません'}
+              絞り込み条件に一致する予約はありません
             </p>
           ) : (
             <div className="divide-y divide-gray-100">
@@ -170,7 +185,13 @@ export default function ReservationsPage() {
                         </div>
                         <div className="text-sm text-gray-600">{r.courseName}</div>
                         <div className="text-xs text-gray-400 mt-0.5">📞 {r.guestPhone}</div>
-                        {r.staffNote && <div className="text-xs text-gray-500 mt-1 bg-gray-50 rounded px-2 py-1">💬 {r.staffNote}</div>}
+                        {cancellationAudit(r) && (
+                          <div className="text-xs text-red-700 mt-1">
+                            {cancellationAudit(r)?.phase === 'after' ? '承認後キャンセル' : '確定前キャンセル／却下'}
+                            {' · '}{cancellationAudit(r)?.at.replace('T', ' ').slice(0, 16)}（UTC）
+                          </div>
+                        )}
+                        {r.staffNote?.replace(/\[予約取消履歴:(?:before|after):[^\]]+\]/g, '').trim() && <div className="text-xs text-gray-500 mt-1 bg-gray-50 rounded px-2 py-1">💬 {r.staffNote.replace(/\[予約取消履歴:(?:before|after):[^\]]+\]/g, '').trim()}</div>}
                       </div>
                       <div className="flex flex-col gap-1.5 shrink-0">
                         {questionnaireId && (
