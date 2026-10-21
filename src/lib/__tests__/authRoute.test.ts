@@ -32,6 +32,7 @@ function cookieRequest(path: string, token?: string) {
 beforeEach(() => {
   vi.stubEnv('SESSION_SECRET', SECRET)
   vi.stubEnv('STAFF_CREDENTIALS', EMAIL + ':' + PASSWORD)
+  vi.stubEnv('STAFF_ADMIN_EMAIL', '')
   vi.spyOn(session, 'createSessionToken')
   vi.spyOn(console, 'error').mockImplementation(() => {})
 })
@@ -91,10 +92,10 @@ describe('POST /api/auth', () => {
     expect(response.status).toBe(200)
     expect(await response.json()).toEqual({ ok: true, email: EMAIL })
     expect(session.createSessionToken).toHaveBeenCalledTimes(1)
-    expect(session.createSessionToken).toHaveBeenCalledWith(EMAIL)
+    expect(session.createSessionToken).toHaveBeenCalledWith(EMAIL, { role: 'staff' })
     const cookie = response.cookies.get(session.SESSION_COOKIE)
     expect(cookie).toMatchObject({ httpOnly: true, sameSite: 'lax', path: '/', maxAge: 604800 })
-    expect(await session.verifySessionToken(cookie!.value)).toEqual({ email: EMAIL })
+    expect(await session.verifySessionToken(cookie!.value)).toEqual({ email: EMAIL, role: 'staff' })
   })
   it('本番のセッションCookieにSecureを設定する', async () => {
     vi.stubEnv('NODE_ENV', 'production')
@@ -126,7 +127,7 @@ describe('GET /api/auth と保護画面・ログアウト', () => {
     const login = await POST(postRequest(VALID_BODY))
     const token = login.cookies.get(session.SESSION_COOKIE)!.value
     const current = await GET(cookieRequest('/api/auth', token))
-    expect(await current.json()).toEqual({ user: { email: EMAIL } })
+    expect(await current.json()).toEqual({ user: { email: EMAIL, role: 'staff' } })
     const access = await middleware(cookieRequest('/dashboard', token))
     expect(access.headers.get('x-middleware-next')).toBe('1')
     const logout = await DELETE()
