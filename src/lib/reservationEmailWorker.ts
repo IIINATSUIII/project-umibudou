@@ -1,5 +1,6 @@
 import { store } from './dataStore'
 import { withStoreWriteLock } from './storeLock'
+import { reconcileReservationReceiptOutbox } from './reservations'
 import {
   EmailConfigurationError,
   isReservationEmailConfigured,
@@ -80,6 +81,26 @@ async function markFailed(email: ClaimedEmail, error: unknown, now: number): Pro
   return deadLetter
 }
 
+async function deadLetterExpiredFinalAttempt(now: number): Promise<number> {
+  return withStoreWriteLock(async () => {
+    const emails = await store.getReservationEmails()
+    const abandoned = emails.filter((email) => {
+      if (email.status !== 'sending' || email.attemptCount < MAX_ATTEMPTS) return false
+      const lease = email.lockedUntil ? Date.parse(email.lockedUntil) : Number.NaN
+      return !Number.isFinite(lease) || lease <= now
+    })
+    for (const email of abandoned) {
+      await store.updateReservationEmail(email.id, {
+        status: 'dead_letter',
+        availableAt: new Date(now).toISOString(),
+        lockedUntil: '',
+        lastError: 'WorkerLeaseExpired',
+      })
+    }
+    return abandoned.length
+  })
+}
+
 /** 予約受付メールを最大BATCH_LIMIT件処理する。送信失敗はOutboxへ戻して再送する。 */
 export async function runReservationEmailOutbox(
   now = Date.now(),
@@ -93,6 +114,8 @@ export async function runReservationEmailOutbox(
     failed: 0,
     deadLettered: 0,
   }
+  await reconcileReservationReceiptOutbox()
+  result.deadLettered = await deadLetterExpiredFinalAttempt(now)
   for (let count = 0; count < BATCH_LIMIT; count += 1) {
     const email = await claimNext(now)
     if (!email) break

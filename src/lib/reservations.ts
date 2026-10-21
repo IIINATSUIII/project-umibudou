@@ -71,6 +71,26 @@ function receiptFromReservation(
   }
 }
 
+/** Recover a receipt row if reservation persistence succeeded before the Outbox write failed. */
+export async function reconcileReservationReceiptOutbox(): Promise<number> {
+  return withStoreWriteLock(async () => {
+    const [reservations, emails] = await Promise.all([
+      store.getReservations(),
+      store.getReservationEmails(),
+    ])
+    const queuedReservationIds = new Set(emails.map((email) => email.reservationId))
+    let added = 0
+    const now = new Date().toISOString()
+    for (const reservation of reservations) {
+      if (!reservation.publicRequestKey || !reservation.guestEmail?.trim() || queuedReservationIds.has(reservation.id)) continue
+      await store.addReservationEmail(receiptFromReservation(reservation, reservation.publicRequestKey, now))
+      queuedReservationIds.add(reservation.id)
+      added += 1
+    }
+    return added
+  })
+}
+
 /** 予約IDは全実行環境で一意なUUID。旧連番IDは変更しない。 */
 export async function generateReservationId(diveDate: string): Promise<string> {
   return `R-${diveDate.replace(/-/g, '')}-${randomUUID()}`
