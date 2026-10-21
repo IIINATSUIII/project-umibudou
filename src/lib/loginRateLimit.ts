@@ -21,7 +21,8 @@ export function isLoginRateLimited(email: string): boolean {
   const now = Date.now()
   pruneExpired(now)
   const state = failures.get(key)
-  if (!state) return false
+  // Fail closed when the per-process cache is saturated instead of allowing new keys through untracked.
+  if (!state) return failures.size >= MAX_TRACKED_EMAILS
   if (state.blockedUntil > now) return true
   return false
 }
