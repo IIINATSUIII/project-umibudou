@@ -19,6 +19,7 @@ import {
 import { normalizeReservationInput, normalizeReservationPatch } from '@/lib/reservationNormalization'
 import {
   cancelledReservationStatus,
+  cancellationPhaseForStatus,
   isCancelledReservationStatus,
   isCancellableReservationStatus,
 } from '@/lib/reservationStatus'
@@ -161,7 +162,7 @@ export async function PATCH(req: NextRequest) {
     const expectedUpdatedAt = typeof values.expectedUpdatedAt === 'string' ? values.expectedUpdatedAt : undefined
     if (!id) return staffJson({ error: '予約IDを指定してください' }, { status: 400 })
     if (!expectedUpdatedAt) return staffJson({ error: '読込時の更新日時が必要です' }, { status: 400 })
-    const allowed = ['status', 'staffId', 'staffNote', 'divePoint', 'diveDate', 'date', 'time', 'timeSlot', 'courseId', 'courseName', 'course', 'guestName', 'guestPhone', 'phone', 'guestEmail', 'guestCount', 'notes']
+    const allowed = ['status', 'staffId', 'staffNote', 'divePoint', 'diveDate', 'date', 'time', 'timeSlot', 'courseId', 'courseName', 'course', 'guestName', 'guestPhone', 'phone', 'guestEmail', 'guestCount', 'notes', 'cancellationReason']
     const rawDelta = Object.fromEntries(Object.entries(values).filter(([key]) => allowed.includes(key)))
     if (Object.keys(rawDelta).length === 0) {
       return staffJson({ error: '更新項目がありません' }, { status: 400 })
@@ -171,7 +172,7 @@ export async function PATCH(req: NextRequest) {
       : typeof value !== 'string')) {
       return staffJson({ error: '更新値が不正です' }, { status: 400 })
     }
-    const delta = normalizeReservationPatch(rawDelta as ReservationInput)
+    let delta = normalizeReservationPatch(rawDelta as ReservationInput)
     if (typeof delta.status === 'string') {
       const knownStatus = STATUSES.some((status) => status.id === delta.status)
         || ['pending', 'confirmed', 'cancelled', 'canceled'].includes(delta.status)
@@ -183,7 +184,19 @@ export async function PATCH(req: NextRequest) {
       if (!isCancellableReservationStatus(current.status)) {
         return staffJson({ error: 'この予約はキャンセルできません' }, { status: 409 })
       }
-      delta.status = cancelledReservationStatus(current)
+      const cancellationPhase = cancellationPhaseForStatus(current.status)
+      if (!cancellationPhase) {
+        return staffJson({ error: 'キャンセル時点を判定できません' }, { status: 409 })
+      }
+      delta = {
+        ...delta,
+        status: cancelledReservationStatus(current),
+        cancellationPhase,
+        cancelledAt: new Date().toISOString(),
+        ...(typeof delta.cancellationReason === 'string' && delta.cancellationReason.trim()
+          ? { cancellationReason: delta.cancellationReason.trim() }
+          : {}),
+      }
     }
     const updatedAt = await patchReservation(id, delta, expectedUpdatedAt)
     return staffJson({ ok: true, updatedAt })
