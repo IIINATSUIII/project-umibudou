@@ -186,7 +186,10 @@ export async function PATCH(req: NextRequest) {
         return staffJson({ error: 'この予約はキャンセルできません' }, { status: 409 })
       }
       delta.status = cancelledReservationStatus(current)
-      delta.staffNote = appendCancellationAudit(current, new Date().toISOString())
+      delta.staffNote = appendCancellationAudit({
+        ...current,
+        staffNote: typeof delta.staffNote === 'string' ? delta.staffNote : current.staffNote,
+      }, new Date().toISOString())
     }
     // Retain cancellation evidence when a later edit replaces the note.
     if (!isCancelledReservationStatus(delta.status ?? '') && typeof delta.staffNote === 'string') {
