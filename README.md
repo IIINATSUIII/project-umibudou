@@ -94,6 +94,27 @@ GOOGLE_DATASTORE_LOCK_PROJECT_ID=your-lock-project
 
 Sheetsへの書き込みはFirestoreの分散ロックを使用します。同じスプレッドシートを利用する全インスタンスで同じロックプロジェクトを指定してください。設定方法と障害復旧は [レビュー修正・移行手順](docs/reviews/2026-10-06-review-fixes.md) を参照してください。
 
+### 予約受付メール（任意）
+
+公開予約の保存後、申込者へ「受付完了（仮予約）」メールを送信できます。送信には[ResendのメールAPI](https://resend.com/docs/dashboard/emails/idempotency-keys)を使用し、同じ予約IDの再送には固定の冪等キーを付けます。
+
+```env
+RESEND_API_KEY=re_xxxxxxxxxxxxxxxxxxxxxxxxx
+RESEND_FROM_EMAIL="海ぶどうギャング <noreply@example.com>"
+CRON_SECRET=replace_with_random_long_secret
+```
+
+Google Sheetsを使用する場合は、スタッフ認証済みの状態で `POST /api/setup` を一度実行し、「予約受付メール」シートを作成してください。メール送信は予約保存と同時にOutboxへ記録され、メールプロバイダーの一時障害時は15秒から最大1時間の指数バックオフで再送します。12回失敗したメールは `dead_letter` として記録され、スタッフ用の `POST /api/reservations/email-retry` に `{"reservationId":"..."}` を送ると手動再送できます。
+
+外部スケジューラーから次のエンドポイントを1分間隔程度で呼び出してください。
+
+```text
+POST /api/cron/reservation-emails
+Authorization: Bearer ${CRON_SECRET}
+```
+
+予約受付メールは予約確定メールではありません。予約確定の連絡は従来どおりスタッフが行います。
+
 ### スプレッドシートの初期化・移行
 
 ```

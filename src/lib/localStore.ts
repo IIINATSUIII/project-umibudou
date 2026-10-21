@@ -3,6 +3,7 @@ import { randomUUID } from 'crypto'
 import path from 'path'
 import type {
   Reservation,
+  ReservationEmail,
   QuestionnaireData,
   Customer,
   RosterEntry,
@@ -28,12 +29,14 @@ const names: Record<StoreKind, string> = {
   QUESTIONNAIRES: 'questionnaires',
   CUSTOMERS: 'customers',
   ROSTER: 'roster',
+  RESERVATION_EMAILS: 'reservation-emails',
 }
 const seeds = {
   RESERVATIONS: MOCK_RESERVATIONS,
   QUESTIONNAIRES: MOCK_QUESTIONNAIRES,
   CUSTOMERS: MOCK_CUSTOMERS,
   ROSTER: [],
+  RESERVATION_EMAILS: [],
 }
 async function read<T>(kind: StoreKind): Promise<T[]> {
   let rows: unknown
@@ -130,3 +133,7 @@ export const searchCustomers = async (q: string) =>
   (await getCustomers()).filter((v) => matchesCustomer(v, q))
 export const getRoster = () => read<RosterEntry>('ROSTER')
 export const addRoster = (v: RosterEntry) => add('ROSTER', v)
+export const getReservationEmails = () => read<ReservationEmail>('RESERVATION_EMAILS')
+export const addReservationEmail = (v: ReservationEmail) => add('RESERVATION_EMAILS', v)
+export const updateReservationEmail = (id: string, v: Partial<ReservationEmail>) =>
+  update<ReservationEmail>('RESERVATION_EMAILS', id, v)

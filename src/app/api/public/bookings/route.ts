@@ -5,6 +5,8 @@ import {
   validateNewReservationInput,
   ReservationValidationError,
 } from '@/lib/reservationValidation'
+import { ReservationIdempotencyConflictError } from '@/lib/reservations'
+import { StoreBusyError } from '@/lib/storeLock'
 
 /**
  * POST /api/public/bookings — 客側予約申し込み（ログイン不要）
@@ -13,6 +15,13 @@ import {
  */
 export async function POST(req: NextRequest) {
   try {
+    const requestKey = req.headers.get('idempotency-key')?.trim() ?? ''
+    if (!/^[A-Za-z0-9._:-]{1,128}$/.test(requestKey)) {
+      return NextResponse.json(
+        { error: 'Idempotency-Key ヘッダーが必要です' },
+        { status: 400 },
+      )
+    }
     const body = await req.json().catch(() => null) as unknown
     const validationInput = typeof body === 'object' && body !== null && !Array.isArray(body)
       ? { ...(body as Record<string, unknown>), channel: 'hp', status: DEFAULT_STATUS_ID }
@@ -33,10 +42,16 @@ export async function POST(req: NextRequest) {
       ...validation.data,
       channel: 'hp',
       status: DEFAULT_STATUS_ID, // スタッフ承認制：確定は店側画面で行う
-    })
+    }, { sendReceipt: true, requestKey })
     // 完了画面でQR生成・予約番号表示に使うため id を返す
     return NextResponse.json({ ok: true, id: reservation.id, questionnaireToken:reservation.questionnaireToken, questionnaireTokenExpiresAt:reservation.questionnaireTokenExpiresAt })
   } catch (err) {
+    if (err instanceof ReservationIdempotencyConflictError) {
+      return NextResponse.json({ error: err.message }, { status: 409 })
+    }
+    if (err instanceof StoreBusyError) {
+      return NextResponse.json({ error: err.message }, { status: 503 })
+    }
     if (err instanceof ReservationValidationError) {
       return NextResponse.json({
         error: 'VALIDATION_ERROR',
