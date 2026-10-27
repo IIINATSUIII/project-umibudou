@@ -57,7 +57,15 @@ async function authenticateStaff(email: string, password: string): Promise<Staff
 
     // 既存の環境変数アカウントを、最初のログイン時にハッシュ化してDBへ移行する。
     // STAFF_ADMIN_EMAILを設定したアカウントだけが移行後の管理者になる。
-    if (!validateCredentials(email, password)) return null
+    let matchesLegacyCredentials: boolean
+    try {
+      matchesLegacyCredentials = validateCredentials(email, password)
+    } catch (error) {
+      // DB-managed accounts do not require legacy environment credentials.
+      if (error instanceof AuthConfigurationError) return null
+      throw error
+    }
+    if (!matchesLegacyCredentials) return null
     return ensureLegacyStaffUser(email, password)
   } catch (error) {
     // 開発環境では、DBが未起動でもローカル登録済みアカウント／環境変数アカウントを使える。
