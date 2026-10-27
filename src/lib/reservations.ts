@@ -56,6 +56,7 @@ function receiptFromReservation(
   requestKey: string,
   now: string,
 ): ReservationEmail {
+  if (!reservation.guestEmail) throw new Error('Receipt recipient is missing')
   return {
     id: `RE-${reservation.id}`,
     reservationId: reservation.id,
@@ -89,6 +90,7 @@ async function queueReceiptIfMissing(reservation: Reservation, requestKey: strin
 
 /** Recover a receipt row if reservation persistence succeeded before the Outbox write failed. */
 export async function reconcileReservationReceiptOutbox(): Promise<number> {
+  if (store.createPublicReservationWithReceipt) return 0
   return withStoreWriteLock(async () => {
     const [reservations, emails] = await Promise.all([
       store.getReservations(),
@@ -121,7 +123,7 @@ export async function createReservation(
     throw new Error('公開予約の再送キーがありません')
   }
   return withStoreWriteLock(async () => {
-    if (options.sendReceipt && options.requestKey) {
+    if (options.sendReceipt && options.requestKey && !store.createPublicReservationWithReceipt) {
       const existing = (await store.getReservations()).find(
         (reservation) => reservation.publicRequestKey === options.requestKey,
       )
@@ -159,6 +161,14 @@ export async function createReservation(
       ...(options.sendReceipt && options.requestKey
         ? { publicRequestKey: options.requestKey }
         : {}),
+    }
+    if (options.sendReceipt && options.requestKey && store.createPublicReservationWithReceipt) {
+      const result = await store.createPublicReservationWithReceipt(
+        reservation,
+        receiptFromReservation(reservation, options.requestKey, now),
+      )
+      if (result.status === 'conflict') throw new ReservationIdempotencyConflictError()
+      return result.reservation
     }
     await store.addReservation(reservation)
     if (options.sendReceipt && options.requestKey)

@@ -40,7 +40,7 @@ describe('reservation receipt email', () => {
 
   it('Resendへ予約ID固定の冪等キーを付けて送信する', async () => {
     vi.stubEnv('RESEND_API_KEY', 're_test')
-    vi.stubEnv('RESEND_FROM_EMAIL', '店 <noreply@example.com>')
+    vi.stubEnv('EMAIL_FROM', '店 <noreply@example.com>')
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ id: 'provider-1' }), { status: 200 }),
     )

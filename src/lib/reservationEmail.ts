@@ -27,7 +27,7 @@ export class EmailDeliveryError extends Error {
 }
 
 export function isReservationEmailConfigured(): boolean {
-  return Boolean(process.env.RESEND_API_KEY && process.env.RESEND_FROM_EMAIL)
+  return Boolean(process.env.RESEND_API_KEY && process.env.EMAIL_FROM?.trim())
 }
 
 function escapeHtml(value: string): string {
@@ -94,7 +94,7 @@ export async function sendReservationReceiptEmail(email: ReservationEmail): Prom
       'Idempotency-Key': `reservation-received/${email.reservationId}`,
     },
     body: JSON.stringify({
-      from: process.env.RESEND_FROM_EMAIL,
+      from: process.env.EMAIL_FROM,
       to: [email.recipientEmail],
       subject: content.subject,
       text: content.text,

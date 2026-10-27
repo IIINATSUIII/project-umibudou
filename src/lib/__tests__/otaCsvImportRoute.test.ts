@@ -22,9 +22,14 @@ const post = (body: unknown, cookie = 'odp_session=staff-session') =>
   }))
 
 it('スタッフ以外は401で、取込処理を呼ばない', async () => {
-  const res = await post({ csv: 'a' }, '')
-  expect(res.status).toBe(401)
-  expect(mock.importOtaCsv).not.toHaveBeenCalled()
+  vi.stubEnv('SESSION_SECRET', 'test-session-secret')
+  try {
+    const res = await post({ csv: 'a' }, '')
+    expect(res.status).toBe(401)
+    expect(mock.importOtaCsv).not.toHaveBeenCalled()
+  } finally {
+    vi.unstubAllEnvs()
+  }
 })
 
 it('形式不正は400とMSG-14、理由を返す', async () => {

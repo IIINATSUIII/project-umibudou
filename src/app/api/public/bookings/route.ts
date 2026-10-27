@@ -68,13 +68,13 @@ export async function POST(req: NextRequest) {
     // alias path below remains for clients that still submit date/course/phone.
     if (validated?.ok && !exactTime) {
       const requestKey = req.headers.get('idempotency-key')?.trim() ?? ''
-      if (requestKey && !/^[A-Za-z0-9._:-]{1,128}$/.test(requestKey))
+      if (!requestKey || !/^[A-Za-z0-9._:-]{1,128}$/.test(requestKey))
         return NextResponse.json({ error: 'Idempotency-Key が不正です' }, { status: 400 })
       const saved = await createReservation({
         ...validated.data,
         channel: 'hp',
         status: DEFAULT_STATUS_ID,
-      }, requestKey ? { sendReceipt: true, requestKey } : {})
+      }, { sendReceipt: true, requestKey })
       return NextResponse.json({
         ok: true,
         id: saved.id,

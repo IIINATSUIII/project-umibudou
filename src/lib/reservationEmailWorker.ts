@@ -41,6 +41,10 @@ function isDue(email: ReservationEmail, now: number): boolean {
 }
 
 async function claimNext(now: number): Promise<ClaimedEmail | undefined> {
+  if (store.claimReservationEmail) {
+    const claimed = await store.claimReservationEmail(now, MAX_ATTEMPTS, LEASE_MS)
+    return claimed ? { ...claimed, attempt: claimed.attemptCount } : undefined
+  }
   return withStoreWriteLock(async () => {
     const emails = await store.getReservationEmails()
     const next = emails
@@ -60,33 +64,35 @@ async function claimNext(now: number): Promise<ClaimedEmail | undefined> {
 }
 
 async function markSent(email: ClaimedEmail, providerMessageId: string, now: number): Promise<boolean> {
+  const patch: Partial<ReservationEmail> = {
+    status: 'sent', sentAt: new Date(now).toISOString(), providerMessageId,
+    lockedUntil: '', lastError: '',
+  }
+  if (store.updateReservationEmailIfClaimed)
+    return store.updateReservationEmailIfClaimed(email.id, email.attemptCount, email.lockedUntil!, patch)
   return withStoreWriteLock(async () => {
     const current = (await store.getReservationEmails()).find((item) => item.id === email.id)
     if (current?.status !== 'sending' || current.attemptCount !== email.attemptCount || current.lockedUntil !== email.lockedUntil) return false
-    await store.updateReservationEmail(email.id, {
-      status: 'sent',
-      sentAt: new Date(now).toISOString(),
-      providerMessageId,
-      lockedUntil: '',
-      lastError: '',
-    })
+    await store.updateReservationEmail(email.id, patch)
     return true
   })
 }
 
 async function markFailed(email: ClaimedEmail, error: unknown, now: number): Promise<'ignored' | 'failed' | 'dead_letter'> {
   const deadLetter = email.attempt >= MAX_ATTEMPTS
+  const patch: Partial<ReservationEmail> = {
+    status: deadLetter ? 'dead_letter' : 'failed',
+    availableAt: new Date(deadLetter ? now : now + retryDelayMs(email.attempt)).toISOString(),
+    lockedUntil: '', lastError: safeErrorKind(error),
+  }
+  if (store.updateReservationEmailIfClaimed) {
+    const updated = await store.updateReservationEmailIfClaimed(email.id, email.attemptCount, email.lockedUntil!, patch)
+    return updated ? (deadLetter ? 'dead_letter' : 'failed') : 'ignored'
+  }
   return withStoreWriteLock(async () => {
     const current = (await store.getReservationEmails()).find((item) => item.id === email.id)
     if (current?.status !== 'sending' || current.attemptCount !== email.attemptCount || current.lockedUntil !== email.lockedUntil) return 'ignored'
-    await store.updateReservationEmail(email.id, {
-      status: deadLetter ? 'dead_letter' : 'failed',
-      availableAt: deadLetter
-        ? new Date(now).toISOString()
-        : new Date(now + retryDelayMs(email.attempt)).toISOString(),
-      lockedUntil: '',
-      lastError: safeErrorKind(error),
-    })
+    await store.updateReservationEmail(email.id, patch)
     return deadLetter ? 'dead_letter' : 'failed'
   })
 }
@@ -99,15 +105,23 @@ async function deadLetterExpiredFinalAttempt(now: number): Promise<number> {
       const lease = email.lockedUntil ? Date.parse(email.lockedUntil) : Number.NaN
       return !Number.isFinite(lease) || lease <= now
     })
+    let deadLettered = 0
     for (const email of abandoned) {
-      await store.updateReservationEmail(email.id, {
+      const patch: Partial<ReservationEmail> = {
         status: 'dead_letter',
         availableAt: new Date(now).toISOString(),
         lockedUntil: '',
         lastError: 'WorkerLeaseExpired',
-      })
+      }
+      if (store.updateReservationEmailIfClaimed) {
+        if (await store.updateReservationEmailIfClaimed(email.id, email.attemptCount, email.lockedUntil ?? '', patch))
+          deadLettered += 1
+      } else {
+        await store.updateReservationEmail(email.id, patch)
+        deadLettered += 1
+      }
     }
-    return abandoned.length
+    return deadLettered
   })
 }
 
@@ -142,12 +156,14 @@ export async function runReservationEmailOutbox(
   return result
 }
 
-export type ReservationEmailRetryResult = 'requeued' | 'already_sent' | 'not_found'
+export type ReservationEmailRetryResult = 'requeued' | 'already_sent' | 'not_found' | 'in_progress'
 
 /** デッドレター化したメールをスタッフ操作で再送対象へ戻す。 */
 export async function retryReservationEmail(
   reservationId: string,
 ): Promise<ReservationEmailRetryResult> {
+  if (store.retryReservationEmailByReservationId)
+    return store.retryReservationEmailByReservationId(reservationId)
   return withStoreWriteLock(async () => {
     const email = (await store.getReservationEmails()).find(
       (item) => item.reservationId === reservationId,

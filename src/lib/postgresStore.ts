@@ -653,6 +653,13 @@ export async function createPublicReservationWithReceipt(
         ...email,
         id: `RE-${existing.id}`,
         reservationId: existing.id,
+        recipientEmail: existing.guestEmail ?? email.recipientEmail,
+        guestName: existing.guestName,
+        diveDate: existing.diveDate,
+        timeSlot: existing.timeSlot,
+        courseId: existing.courseId ?? '',
+        courseName: existing.courseName,
+        guestCount: existing.guestCount,
       })
       return { status: 'replayed', reservation: existing }
     }

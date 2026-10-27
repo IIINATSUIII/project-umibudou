@@ -57,11 +57,16 @@ describe('reservation receipt recovery', () => {
 describe('staff receipt retry endpoint', () => {
   it('rejects requests without a staff session before touching the Outbox', async () => {
     mock.retryReservationEmail.mockReset()
-    const response = await retryEmail(new NextRequest('http://localhost/api/reservations/email-retry', {
-      method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ reservationId: 'R-123' }),
-    }))
-    expect(response.status).toBe(401)
-    expect(mock.retryReservationEmail).not.toHaveBeenCalled()
+    vi.stubEnv('SESSION_SECRET', 'test-session-secret')
+    try {
+      const response = await retryEmail(new NextRequest('http://localhost/api/reservations/email-retry', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ reservationId: 'R-123' }),
+      }))
+      expect(response.status).toBe(401)
+      expect(mock.retryReservationEmail).not.toHaveBeenCalled()
+    } finally {
+      vi.unstubAllEnvs()
+    }
   })
 })

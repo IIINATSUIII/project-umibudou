@@ -144,6 +144,14 @@ POST http://127.0.0.1:3030/api/setup
 
 **本番では `ENABLE_SHEETS_SETUP=true` でも実行できません。** 未認証は401、認証済みでも本番または無効設定なら404です。本番用Sheetsの保守は、バックアップを確認したうえで、設定を限定したローカルの開発環境から明示的に行ってください。
 
+### 公開予約の受付メール
+
+公開予約フォームは `Idempotency-Key` を付けて予約を保存し、受付メールをOutboxに登録します。メール送信失敗時も予約は保持し、次のcronで再試行します。送信内容に問診URLや管理画面URLは含めません。
+
+運用前に使用中のデータ保存先を確認してください。`DATA_STORE=postgres` の場合は `npm run db:migrate` で `008_reservation_email.sql` を適用します。Sheetsが主ストアの場合は予約シートと受付メールシートの移行が必要です。開発環境のスタッフ用 `POST /api/setup` はバックアップ後に実行できます。本番Sheetsでは、前述の手順で本番データを安全に保守できる環境を用意してから移行してください。移行前に新しいコードを展開すると、予約保存が失敗する可能性があります。
+
+`RESEND_API_KEY`、`EMAIL_FROM`、`CRON_SECRET` を設定し、スケジューラーから `GET /api/cron/reservation-emails` を定期的に呼び出します。リクエストには `Authorization: Bearer <CRON_SECRET>` を付けます。再送が必要な場合は、スタッフとして `POST /api/reservations/email-retry` に `{ "reservationId": "R-..." }` を送信します。cronを設定しない間、受付メールはOutboxに留まり送信されません。
+
 ### スタッフAPIの認証
 
 顧客・予約・問診・名簿・問診URL発行/失効・setupの全操作は、各ハンドラーの先頭で共通の `requireStaffSession()` を実行します。proxyが実行されなくても、未認証はデータ取得・更新・ロックの前に401のJSONで拒否します。署名鍵の設定不備は503です。個人情報を含むスタッフAPIの応答には `Cache-Control: no-store` を設定します。
@@ -176,6 +184,7 @@ Vercel ダッシュボード → Settings → Environment Variables で以下を
 | `SESSION_SECRET` | ランダム 32 バイト hex |
 | `RESEND_API_KEY` | Resend APIキー |
 | `EMAIL_FROM` | Resendで認証済みの送信元 |
+| `CRON_SECRET` | Sheets同期と受付メール送信cronの認証キー |
 | `APP_BASE_URL` | メール内ログインリンクのベースURL |
 | `GOOGLE_SERVICE_ACCOUNT_EMAIL` | サービスアカウントのメール |
 | `GOOGLE_PRIVATE_KEY` | `"-----BEGIN PRIVATE KEY-----\n..."` |

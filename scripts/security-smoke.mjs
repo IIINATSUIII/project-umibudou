@@ -11,7 +11,7 @@ import { SignJWT } from 'jose'
 const root = process.cwd()
 await readFile(path.join(root, '.next/BUILD_ID'), 'utf8')
 const data = await mkdtemp(path.join(tmpdir(), 'umibudou-auth-smoke-'))
-const files = ['customers', 'reservations', 'questionnaires', 'roster']
+const files = ['customers', 'reservations', 'reservation-emails', 'questionnaires', 'roster']
 for (const name of files) await writeFile(path.join(data, `${name}.json`), '[]\n')
 const snapshot = async () => Promise.all(files.map(name => readFile(path.join(data, `${name}.json`), 'utf8')))
 const listener = net.createServer()
@@ -72,7 +72,8 @@ try {
     ['GET', '/api/reservations'], ['POST', '/api/reservations'], ['PATCH', '/api/reservations'],
     ['GET', '/api/questionnaires'], ['POST', '/api/questionnaires'], ['PATCH', '/api/questionnaires'],
     ['POST', '/api/questionnaires/checkin'], ['GET', '/api/roster'], ['POST', '/api/roster'],
-    ['POST', '/api/reservations/questionnaire-url'], ['DELETE', '/api/reservations/questionnaire-url'], ['POST', '/api/setup'],
+    ['POST', '/api/reservations/questionnaire-url'], ['DELETE', '/api/reservations/questionnaire-url'],
+    ['POST', '/api/reservations/email-retry'], ['POST', '/api/setup'],
   ]
   const key = new TextEncoder().encode(secret)
   const emptyIdentity = await new SignJWT({ email: '' }).setProtectedHeader({ alg: 'HS256' }).setExpirationTime('1h').sign(key)
@@ -112,6 +113,7 @@ try {
   assert.deepEqual(await snapshot(), before, 'Disabled setup or unsupported operations changed stored data')
 
   const booking = (await call('POST', '/api/public/bookings', {
+    headers: { 'Idempotency-Key': 'http-smoke-booking-1' },
     body: { guestName: '検証 太郎', guestPhone: '090-0000-0000', guestEmail: 'guest@example.com',
       diveDate: new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' }), timeSlot: 'morning', courseId: 'CRS-001', guestCount: 1 }, status: 200,
   })).body
@@ -154,7 +156,7 @@ try {
   await call('GET', '/api/cron/sheets-outbox', { headers: { authorization: 'Bearer http-smoke-only-cron-secret' }, status: 503 })
   await call('DELETE', '/api/auth', { cookie, status: 200 })
   await call('GET', '/api/customers', { status: 401 })
-  console.log(`HTTP security smoke passed: ${requests} requests; 15 staff operations; guest booking/questionnaire/QR/checkin/roster/logout.`)
+  console.log(`HTTP security smoke passed: ${requests} requests; ${staff.length} staff operations; guest booking/questionnaire/QR/checkin/roster/logout.`)
   if (process.argv.includes('--keep-server')) {
     console.log(`Browser fixture: ${base}/login ; email ${email} ; password ${password}`)
     console.log('Press Enter to stop the fixture server and remove its dummy data.')
