@@ -34,6 +34,7 @@ const RESERVATION_FIELDS: (keyof Reservation)[] = [
   'staffId', 'staffName', 'channel', 'questionnaireId', 'questionnaireIds',
   'questionnaireToken', 'questionnaireTokenExpiresAt', 'questionnaireCompleted', 'divePoint', 'staffNote',
   'publicRequestKey',
+  'cancellationPhase', 'cancelledAt', 'cancellationReason',
 ]
 
 const RESERVATION_EMAIL_FIELDS: (keyof ReservationEmail)[] = [
@@ -69,7 +70,7 @@ const CUSTOMER_FIELDS: (keyof Customer)[] = [
 
 const DATE_TIME_FIELDS = new Set([
   'createdAt', 'updatedAt', 'questionnaireTokenExpiresAt', 'submittedAt', 'consentAt', 'qrExpiresAt', 'registeredAt',
-  'availableAt', 'lastAttemptAt', 'lockedUntil', 'sentAt',
+  'availableAt', 'lastAttemptAt', 'lockedUntil', 'sentAt', 'cancelledAt',
 ])
 
 function columnName(field: string): string {
@@ -222,6 +223,11 @@ function mapReservation(row: Row): Reservation {
     divePoint: optionalString(row, 'dive_point'),
     staffNote: optionalString(row, 'staff_note'),
     publicRequestKey: optionalString(row, 'public_request_key'),
+    cancellationPhase: ['before', 'after'].includes(stringValue(row, 'cancellation_phase'))
+      ? stringValue(row, 'cancellation_phase') as Reservation['cancellationPhase']
+      : undefined,
+    cancelledAt: dateTimeString(row, 'cancelled_at'),
+    cancellationReason: optionalString(row, 'cancellation_reason'),
   }
 }
 

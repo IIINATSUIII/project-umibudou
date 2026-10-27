@@ -82,6 +82,9 @@ export const HEADERS = {
     'questionnaireCompleted',
     'divePoint',
     'staffNote',
+    'cancellationPhase',
+    'cancelledAt',
+    'cancellationReason',
     'questionnaireId',
     'legacyTime',
     'legacyChannel',
@@ -285,6 +288,11 @@ export function normalizeReservation(v: RecordValue): Reservation {
     questionnaireId: optional(v.questionnaireId),
     staffNote: optional(v.staffNote ?? v.notes),
     divePoint: optional(v.divePoint),
+    cancellationPhase: ['before', 'after'].includes(text(v.cancellationPhase))
+      ? (text(v.cancellationPhase) as Reservation['cancellationPhase'])
+      : undefined,
+    cancelledAt: optional(v.cancelledAt),
+    cancellationReason: optional(v.cancellationReason),
     legacyTime: optional(legacyTime),
     legacyChannel: optional(v.legacyChannel ?? v.channel),
     publicRequestKey: optional(v.publicRequestKey),
