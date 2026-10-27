@@ -8,6 +8,7 @@ const memory = vi.hoisted(() => ({
 
 vi.mock('@/lib/dataStore', () => ({
   store: {
+    getReservations: async () => [],
     getReservationEmails: async () => memory.emails,
     updateReservationEmail: async (id: string, delta: Partial<ReservationEmail>) => {
       const item = memory.emails.find((email) => email.id === id)!
