@@ -102,7 +102,7 @@ try {
   const setCookie = loggedIn.response.headers.get('set-cookie')
   assert(setCookie?.includes('HttpOnly') && setCookie.includes('Secure') && setCookie.includes('SameSite=lax'))
   cookie = setCookie.split(';')[0]
-  assert.deepEqual((await call('GET', '/api/auth', { cookie, status: 200 })).body, { user: { email } })
+  assert.deepEqual((await call('GET', '/api/auth', { cookie, status: 200 })).body, { user: { email, role: 'staff' } })
   assert.equal((await call('GET', '/api/customers', { cookie, status: 200 })).response.headers.get('cache-control'), 'no-store')
   await call('GET', '/api/customers', { status: 401 })
   await call('GET', '/api/customers', { cookie, status: 200 })
