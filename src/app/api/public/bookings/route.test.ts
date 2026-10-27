@@ -11,7 +11,7 @@ vi.mock('@/lib/reservations', () => memory)
 import { POST } from './route'
 
 const validBody = {
-  diveDate: '2026-10-21',
+  diveDate: new Date(Date.now() + 24 * 60 * 60 * 1000).toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' }),
   timeSlot: 'morning',
   courseId: 'CRS-001',
   guestName: '山田太郎',
