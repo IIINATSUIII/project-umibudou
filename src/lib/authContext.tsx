@@ -8,8 +8,14 @@ import {
   useState,
 } from 'react'
 
-/** undefined = 初期化中, null = 未ログイン, string = ログイン済みメール */
-type AuthState = string | null | undefined
+export type AuthUser = {
+  email: string
+  displayName?: string
+  role?: 'admin' | 'staff'
+}
+
+/** undefined = 初期化中, null = 未ログイン */
+type AuthState = AuthUser | null | undefined
 
 type AuthContextValue = {
   user: AuthState
@@ -32,7 +38,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         cache: 'no-store',
       })
       const data = await r.json()
-      setUser(data.user?.email ?? null)
+      setUser(data.user?.email ? data.user : null)
     } catch {
       setUser(null)
     }
@@ -54,7 +60,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
  * ログイン状態を返す。
  * undefined = 初期化中, null = 未ログイン, string = ログイン済みメール
  */
-export function useAuth(): AuthState {
+export function useAuth(): string | null | undefined {
+  const user = useContext(AuthContext).user
+  return user === undefined ? undefined : user?.email ?? null
+}
+
+/** 権限を含む現在ユーザー情報を返す。 */
+export function useAuthUser(): AuthUser | null | undefined {
   return useContext(AuthContext).user
 }
 
@@ -62,3 +74,4 @@ export function useAuth(): AuthState {
 export function useAuthRefresh(): () => Promise<void> {
   return useContext(AuthContext).refresh
 }
+

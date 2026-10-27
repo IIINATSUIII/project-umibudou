@@ -11,11 +11,14 @@ const PUBLIC_PATHS = [
 ]
 
 function isPublic(pathname: string): boolean {
+  // トップページは認証状態を見てクライアント側で /login または /dashboard へ遷移する。
+  // SESSION_SECRET未設定でも、認証エラーJSONを画面へ直接表示しない。
+  if (pathname === '/') return true
   // Staff-only scan must stay protected even though /questionnaire/[id] is public.
   if (pathname === '/questionnaire/scan' || pathname.startsWith('/questionnaire/scan/')) return false
   // The handler still requires its own CRON_SECRET bearer token.
   if (pathname === '/api/cron/sheets-outbox') return true
-  if (pathname === '/api/auth' || pathname.startsWith('/api/public/')) return true
+  if (pathname === '/api/auth' || pathname === '/api/auth/register' || pathname.startsWith('/api/auth/invitations/preview') || pathname.startsWith('/api/public/')) return true
   if (pathname === '/favicon.ico' || pathname === '/line-rich-menu.png') return true
   if (PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`))) return true
   // ダイバー向け問診票入力画面はログイン不要（/questionnaire/[id] のみ）
@@ -44,3 +47,4 @@ export const config = {
     '/((?!_next/static|_next/image|favicon.ico).*)',
   ],
 }
+
