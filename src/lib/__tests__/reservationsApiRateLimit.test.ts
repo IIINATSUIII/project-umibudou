@@ -18,6 +18,7 @@ vi.mock('@/lib/reservations', () => ({
   createReservation: mock.createReservation,
   patchReservation: mock.patchReservation,
   ReservationConflictError: class ReservationConflictError extends Error {},
+  ReservationIdempotencyConflictError: class ReservationIdempotencyConflictError extends Error {},
 }))
 
 import { GET, POST, PATCH } from '../../app/api/reservations/route'
@@ -101,7 +102,7 @@ it('公開予約(POST /api/public/bookings): API制限が続く場合は503とMS
   const res = await publicBooking(
     new NextRequest('http://localhost/api/public/bookings', {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', 'Idempotency-Key': 'rate-limit-test-1' },
       body: JSON.stringify(validBooking),
     })
   )

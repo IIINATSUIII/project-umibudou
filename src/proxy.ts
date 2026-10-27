@@ -17,7 +17,7 @@ function isPublic(pathname: string): boolean {
   // Staff-only scan must stay protected even though /questionnaire/[id] is public.
   if (pathname === '/questionnaire/scan' || pathname.startsWith('/questionnaire/scan/')) return false
   // The handler still requires its own CRON_SECRET bearer token.
-  if (pathname === '/api/cron/sheets-outbox') return true
+  if (pathname === '/api/cron/sheets-outbox' || pathname === '/api/cron/reservation-emails') return true
   if (pathname === '/api/auth' || pathname === '/api/auth/register' || pathname.startsWith('/api/auth/invitations/preview') || pathname.startsWith('/api/public/')) return true
   if (pathname === '/favicon.ico' || pathname === '/line-rich-menu.png') return true
   if (PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`))) return true

@@ -1,5 +1,6 @@
 import type {
   Reservation,
+  ReservationEmail,
   QuestionnaireData,
   Customer,
   RosterEntry,
@@ -87,6 +88,7 @@ export const HEADERS = {
     'questionnaireId',
     'legacyTime',
     'legacyChannel',
+    'publicRequestKey',
   ],
   QUESTIONNAIRES: [
     ...LEGACY_QUESTIONNAIRE_HEADERS,
@@ -157,6 +159,27 @@ export const HEADERS = {
     'staffName',
     'checkedInAt',
     'checkInMethod',
+  ],
+  RESERVATION_EMAILS: [
+    'id',
+    'reservationId',
+    'requestKey',
+    'recipientEmail',
+    'guestName',
+    'diveDate',
+    'timeSlot',
+    'courseId',
+    'courseName',
+    'guestCount',
+    'status',
+    'attemptCount',
+    'availableAt',
+    'createdAt',
+    'lastAttemptAt',
+    'lockedUntil',
+    'sentAt',
+    'providerMessageId',
+    'lastError',
   ],
 }
 export type StoreKind = keyof typeof HEADERS
@@ -272,6 +295,41 @@ export function normalizeReservation(v: RecordValue): Reservation {
     cancellationReason: optional(v.cancellationReason),
     legacyTime: optional(legacyTime),
     legacyChannel: optional(v.legacyChannel ?? v.channel),
+    publicRequestKey: optional(v.publicRequestKey),
+  }
+}
+
+export function normalizeReservationEmail(v: RecordValue): ReservationEmail {
+  if (!text(v.id) || !text(v.reservationId) || !text(v.requestKey))
+    throw new Error('予約受付メールのID・予約ID・再送キーがありません')
+  const status = text(v.status)
+  const validStatuses: ReservationEmail['status'][] = [
+    'pending', 'sending', 'sent', 'failed', 'dead_letter',
+  ]
+  return {
+    id: text(v.id),
+    reservationId: text(v.reservationId),
+    requestKey: text(v.requestKey),
+    recipientEmail: text(v.recipientEmail),
+    guestName: text(v.guestName),
+    diveDate: text(v.diveDate),
+    timeSlot: ['morning', 'afternoon', 'full', 'unspecified'].includes(text(v.timeSlot))
+      ? v.timeSlot as ReservationEmail['timeSlot']
+      : 'unspecified',
+    courseId: text(v.courseId),
+    courseName: text(v.courseName),
+    guestCount: Number(v.guestCount),
+    status: validStatuses.includes(status as ReservationEmail['status'])
+      ? status as ReservationEmail['status']
+      : 'pending',
+    attemptCount: Number(v.attemptCount || 0),
+    availableAt: text(v.availableAt),
+    createdAt: text(v.createdAt),
+    lastAttemptAt: optional(v.lastAttemptAt),
+    lockedUntil: optional(v.lockedUntil),
+    sentAt: optional(v.sentAt),
+    providerMessageId: optional(v.providerMessageId),
+    lastError: optional(v.lastError),
   }
 }
 const Q_BOOLEAN_FIELDS = [
@@ -362,8 +420,9 @@ export function normalizeCustomer(v: RecordValue): Customer {
 export function normalizeRecord(
   kind: StoreKind,
   v: RecordValue
-): Reservation | QuestionnaireData | Customer | RosterEntry {
+): Reservation | ReservationEmail | QuestionnaireData | Customer | RosterEntry {
   if (kind === 'RESERVATIONS') return normalizeReservation(v)
+  if (kind === 'RESERVATION_EMAILS') return normalizeReservationEmail(v)
   if (kind === 'QUESTIONNAIRES') return normalizeQuestionnaire(v)
   if (kind === 'CUSTOMERS') return normalizeCustomer(v)
   return { ...v, age: Number(v.age) } as unknown as RosterEntry
@@ -386,7 +445,9 @@ export function assertKnownHeaders(kind: StoreKind, headers: string[]): void {
           ]
         : kind === 'CUSTOMERS'
           ? ['id', 'lastName', 'firstName', 'phone', 'email']
-          : HEADERS.ROSTER
+        : kind === 'ROSTER'
+          ? HEADERS.ROSTER
+          : ['id', 'reservationId', 'requestKey', 'recipientEmail', 'status']
   if (!required.every((h) => headers.includes(h)))
     throw new Error(
       `${kind}のスキーマを認識できません。データを変更せず中止しました`

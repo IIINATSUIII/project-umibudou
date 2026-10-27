@@ -10,6 +10,7 @@ import path from 'path'
 import type {
   Reservation,
   ReservationInput,
+  ReservationEmail,
   QuestionnaireData,
   Customer,
   RosterEntry,
@@ -47,6 +48,7 @@ const names: Record<StoreKind, string> = {
   QUESTIONNAIRES: 'questionnaires',
   CUSTOMERS: 'customers',
   ROSTER: 'roster',
+  RESERVATION_EMAILS: 'reservation-emails',
 }
 
 const seeds: Record<StoreKind, unknown[]> = {
@@ -54,6 +56,7 @@ const seeds: Record<StoreKind, unknown[]> = {
   QUESTIONNAIRES: MOCK_QUESTIONNAIRES,
   CUSTOMERS: MOCK_CUSTOMERS,
   ROSTER: [],
+  RESERVATION_EMAILS: [],
 }
 
 async function read<T>(kind: StoreKind): Promise<T[]> {
@@ -247,3 +250,7 @@ export const searchCustomers = async (query: string) =>
 
 export const getRoster = () => read<RosterEntry>('ROSTER')
 export const addRoster = (data: RosterEntry) => add('ROSTER', data)
+export const getReservationEmails = () => read<ReservationEmail>('RESERVATION_EMAILS')
+export const addReservationEmail = (v: ReservationEmail) => add('RESERVATION_EMAILS', v)
+export const updateReservationEmail = (id: string, v: Partial<ReservationEmail>) =>
+  update<ReservationEmail>('RESERVATION_EMAILS', id, v)

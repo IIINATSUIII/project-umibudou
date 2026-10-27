@@ -4,7 +4,7 @@
  * Sheets-if-configured, otherwise local JSON.
  */
 
-import type { Customer, QuestionnaireData, QuestionnaireFormData, Reservation, ReservationInput, RosterEntry } from '@/types'
+import type { Customer, QuestionnaireData, QuestionnaireFormData, Reservation, ReservationEmail, ReservationInput, RosterEntry } from '@/types'
 import * as sheets from './sheets'
 import * as local from './localStore'
 import * as postgres from './postgresStore'
@@ -39,6 +39,16 @@ export type QuestionnaireResolutionResult =
 export interface DataStore {
   getReservations(): Promise<Reservation[]>
   addReservation(data: ReservationInput): Promise<Reservation>
+  getReservationEmails(): Promise<ReservationEmail[]>
+  addReservationEmail(email: ReservationEmail): Promise<void | ReservationEmail>
+  updateReservationEmail(id: string, patch: Partial<ReservationEmail>): Promise<void | ReservationEmail>
+  createPublicReservationWithReceipt?(reservation: Reservation, email: ReservationEmail): Promise<{
+    status: 'created' | 'replayed' | 'conflict'
+    reservation: Reservation
+  }>
+  claimReservationEmail?(nowMs: number, maxAttempts: number, leaseMs: number): Promise<ReservationEmail | undefined>
+  updateReservationEmailIfClaimed?(id: string, attemptCount: number, lockedUntil: string, patch: Partial<ReservationEmail>): Promise<boolean>
+  retryReservationEmailByReservationId?(reservationId: string): Promise<'requeued' | 'already_sent' | 'not_found' | 'in_progress'>
   /** 一括登録（任意）。未実装のストアでは addReservation を順に呼ぶ。 */
   addReservations?(data: ReservationInput[]): Promise<Reservation[]>
   updateReservation(id: string, data: ReservationInput): Promise<void>
