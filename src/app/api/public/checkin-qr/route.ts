@@ -23,12 +23,18 @@ export async function POST(req: NextRequest) {
     const values = body as Record<string, unknown>
     const reservationId = typeof values.reservationId === 'string' ? values.reservationId.trim() : ''
     const reservationToken = typeof values.reservationToken === 'string' ? values.reservationToken.trim() : ''
-    if (!reservationId || reservationId.length > 64 || reservationToken.length < 20 || reservationToken.length > 128) {
+    // 予約番号は省略できる（確認コードだけで予約を特定する）。本人確認の鍵は確認コード。
+    if (reservationId.length > 64 || reservationToken.length < 20 || reservationToken.length > 128) {
       return NextResponse.json({ error: '予約情報をご確認ください。' }, { status: 400 })
     }
 
     const reservations = await store.getReservations()
-    const reservation = reservations.find((item) => item.id === reservationId && isConfirmedReservationStatus(item.status))
+    const reservation = reservations.find((item) =>
+      isConfirmedReservationStatus(item.status) &&
+      (reservationId
+        ? item.id === reservationId
+        : Boolean(item.questionnaireToken) && matchesToken(reservationToken, item.questionnaireToken as string))
+    )
     const expectedToken = reservation?.questionnaireToken
     if (!reservation || !expectedToken || !matchesToken(reservationToken, expectedToken)) {
       return NextResponse.json({ error: '予約を確認できませんでした。予約時の案内をご確認ください。' }, { status: 404 })

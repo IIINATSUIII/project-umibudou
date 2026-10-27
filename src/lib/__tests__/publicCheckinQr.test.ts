@@ -20,11 +20,11 @@ import { POST } from '@/app/api/public/checkin-qr/route'
 
 const questionnaireToken = 'questionnaire-input-token-1234567890'
 
-function request(reservationId = 'R-1', reservationToken = questionnaireToken) {
+function request(reservationId: string | undefined = 'R-1', reservationToken = questionnaireToken) {
   return new NextRequest('http://localhost/api/public/checkin-qr', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ reservationId, reservationToken }),
+    body: JSON.stringify({ ...(reservationId === undefined ? {} : { reservationId }), reservationToken }),
   })
 }
 
@@ -90,4 +90,35 @@ it('keeps cancelled reservations and expired confirmation tokens unavailable', a
   memory.reservations[0].status = 'STS-03'
   memory.reservations[0].questionnaireTokenExpiresAt = '2026-10-05T15:00:00.000Z'
   expect((await POST(request())).status).toBe(410)
+})
+
+it('finds the reservation by the confirmation token alone when no reservation ID is sent', async () => {
+  const response = await POST(request(undefined))
+  const body = await response.json()
+
+  expect(response.status).toBe(200)
+  expect(body.reservation.courseName).toBe('体験ダイビング')
+  expect(body.participants).toHaveLength(1)
+})
+
+it('does not reveal a reservation for an unknown or truncated token when no reservation ID is sent', async () => {
+  expect((await POST(request(undefined, 'x'.repeat(36)))).status).toBe(404)
+  expect((await POST(request(undefined, questionnaireToken.slice(0, 30)))).status).toBe(404)
+  expect((await POST(request(undefined, 'short'))).status).toBe(400)
+})
+
+it('keeps unconfirmed, cancelled and expired reservations unavailable when looked up by token alone', async () => {
+  memory.reservations[0].status = 'STS-01'
+  expect((await POST(request(undefined))).status).toBe(404)
+
+  memory.reservations[0].status = 'STS-04'
+  expect((await POST(request(undefined))).status).toBe(404)
+
+  memory.reservations[0].status = 'STS-03'
+  memory.reservations[0].questionnaireTokenExpiresAt = '2026-10-05T15:00:00.000Z'
+  expect((await POST(request(undefined))).status).toBe(410)
+})
+
+it('still requires the reservation ID to match when one is sent (a wrong ID does not fall back to the token)', async () => {
+  expect((await POST(request('R-OTHER'))).status).toBe(404)
 })
