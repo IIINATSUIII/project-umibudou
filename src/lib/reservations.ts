@@ -46,7 +46,9 @@ function samePublicRequest(
     reservation.diveDate === input.diveDate &&
     reservation.timeSlot === input.timeSlot &&
     reservation.courseId === input.courseId &&
-    reservation.guestCount === input.guestCount
+    reservation.guestCount === input.guestCount &&
+    (reservation.divePoint ?? '') === (input.divePoint ?? '') &&
+    (reservation.staffNote ?? '') === (input.staffNote ?? '')
 }
 
 function receiptFromReservation(
@@ -69,6 +71,19 @@ function receiptFromReservation(
     attemptCount: 0,
     availableAt: now,
     createdAt: now,
+  }
+}
+
+async function queueReceiptIfMissing(reservation: Reservation, requestKey: string): Promise<void> {
+  try {
+    const existing = (await store.getReservationEmails()).some(
+      (email) => email.reservationId === reservation.id,
+    )
+    if (!existing)
+      await store.addReservationEmail(receiptFromReservation(reservation, requestKey, new Date().toISOString()))
+  } catch {
+    // The reservation is durable. The worker reconciles missing Outbox rows after storage recovers.
+    console.error('[reservation-receipt] OUTBOX_WRITE_FAILED')
   }
 }
 
@@ -113,11 +128,7 @@ export async function createReservation(
       if (existing) {
         if (!samePublicRequest(existing, validated))
           throw new ReservationIdempotencyConflictError()
-        const existingEmail = (await store.getReservationEmails()).find(
-          (email) => email.reservationId === existing.id,
-        )
-        if (!existingEmail)
-          await store.addReservationEmail(receiptFromReservation(existing, options.requestKey, new Date().toISOString()))
+        await queueReceiptIfMissing(existing, options.requestKey)
         return existing
       }
     }
@@ -151,7 +162,7 @@ export async function createReservation(
     }
     await store.addReservation(reservation)
     if (options.sendReceipt && options.requestKey)
-      await store.addReservationEmail(receiptFromReservation(reservation, options.requestKey, now))
+      await queueReceiptIfMissing(reservation, options.requestKey)
     return reservation
   })
 }
