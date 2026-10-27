@@ -12,6 +12,24 @@ describe('旧データと各PRの共通契約', () => {
     const r = normalizeReservation({id:'R-001',date:'2026-10-06',time:'13:30',course:'体験ダイビング',guestName:'田中',guestCount:'2',phone:'09012345678',channel:'sns',status:'confirmed',questionnaireId:'M-001',notes:'送迎あり'})
     expect(r).toMatchObject({id:'R-001',diveDate:'2026-10-06',timeSlot:'afternoon',legacyTime:'13:30',guestCount:2,guestPhone:'09012345678',status:'STS-03',questionnaireId:'M-001',questionnaireCompleted:true,staffNote:'送迎あり'})
   })
+  it('キャンセル時点・日時・理由を保持し、履歴のない旧キャンセルは推測しない', () => {
+    const cancelled = normalizeReservation({
+      id: 'R-002', diveDate: '2026-10-06', guestName: '田中', guestPhone: '090',
+      guestCount: '1', channel: 'phone', status: 'STS-04',
+      cancellationPhase: 'after', cancelledAt: '2026-10-06T03:00:00.000Z', cancellationReason: '体調不良',
+    })
+    const legacy = normalizeReservation({
+      id: 'R-003', diveDate: '2026-10-06', guestName: '佐藤', guestPhone: '090',
+      guestCount: '1', channel: 'phone', status: 'STS-04',
+    })
+    expect(cancelled).toMatchObject({
+      cancellationPhase: 'after',
+      cancelledAt: '2026-10-06T03:00:00.000Z',
+      cancellationReason: '体調不良',
+    })
+    expect(legacy.cancellationPhase).toBeUndefined()
+    expect(HEADERS.RESERVATIONS).toEqual(expect.arrayContaining(['cancellationPhase', 'cancelledAt', 'cancellationReason']))
+  })
   it('問診の元37列を保持し、各PRの追加列を重複させない', () => {
     expect(HEADERS.QUESTIONNAIRES.slice(0,37)).toEqual(LEGACY_QUESTIONNAIRE_HEADERS)
     expect(new Set(HEADERS.QUESTIONNAIRES).size).toBe(HEADERS.QUESTIONNAIRES.length)

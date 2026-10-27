@@ -1,4 +1,4 @@
-import type { Reservation } from '@/types'
+import type { Reservation, ReservationCancellationPhase } from '@/types'
 
 export const ISSUE_5_RESERVATION_STATUS = {
   requested: 'STS-01',
@@ -76,4 +76,29 @@ export function cancelledReservationStatus(current: Reservation): string {
   return /^STS-\d{2}$/.test(current.status)
     ? ISSUE_5_RESERVATION_STATUS.cancelled
     : 'cancelled'
+}
+
+export type ReservationCategory = 'all' | 'confirmed' | 'progress' | 'before' | 'after'
+
+/** Determine the cancellation phase from the status immediately before cancellation. */
+export function cancellationPhaseForStatus(status: string): ReservationCancellationPhase | null {
+  if (isConfirmedReservationStatus(status)) return 'after'
+  if (isPendingReservationStatus(status)) return 'before'
+  return null
+}
+
+/** Return the persisted phase, without guessing for legacy cancelled records. */
+export function cancellationPhaseFor(reservation: Reservation): ReservationCancellationPhase | null {
+  return reservation.cancellationPhase ?? null
+}
+
+export function reservationMatchesCategory(
+  reservation: Reservation,
+  category: ReservationCategory,
+): boolean {
+  if (category === 'all') return true
+  if (category === 'confirmed') return isConfirmedReservationStatus(reservation.status)
+  if (category === 'progress') return isPendingReservationStatus(reservation.status)
+  return isCancelledReservationStatus(reservation.status) &&
+    cancellationPhaseFor(reservation) === category
 }
