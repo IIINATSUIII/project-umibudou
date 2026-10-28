@@ -27,6 +27,8 @@ npm run dev   # → http://127.0.0.1:3030
 
 PostgreSQLを主保存先にする手順は [PostgreSQL主保存先への移行計画](docs/postgres-primary-plan.md) を参照してください。
 
+WindowsでローカルPostgreSQLを使う場合は、Docker Desktopを起動し、通常のセットアップで`.env.local`の認証設定を済ませてから `powershell -ExecutionPolicy Bypass -File scripts\dev-postgres.ps1` を実行します。起動時に入力したDBパスワードはリポジトリへ保存しません。アプリは`DATA_STORE=postgres`、`SHEETS_SYNC_ENABLED=false`で起動します。DBだけ起動・移行する場合は`-MigrateOnly`を付けます。既存JSONの取込は自動実行せず、`-ImportSource json -LocalDataDir <JSON保存先>`でドライラン、確認後に`-Apply`で投入できます。Dockerのデータは`compose.dev.yml`の名前付きボリュームに保持されるため、次回も同じDBパスワードを入力してください。
+
 詳しいセットアップ手順は [docs/07_MVP版セットアップ手順書.md](docs/07_MVP版セットアップ手順書.md) を参照してください。設計資料（要件定義書・基本設計書・DB設計・詳細設計・画面遷移図）は [docs/](docs/) に同梱しています。開発規約は [CLAUDE.md](CLAUDE.md) を参照してください。
 
 Git / GitHub が初めてのメンバーは [docs/00_GitHub初心者ガイド.md](docs/00_GitHub初心者ガイド.md) から読んでください。
