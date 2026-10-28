@@ -19,6 +19,20 @@ jobs:
     name: Lint, typecheck, and build
     runs-on: ubuntu-latest
 
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: ci-only-password
+          POSTGRES_DB: oki_dive_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d oki_dive_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     env:
       # CI only needs non-secret values so the Next.js build can run.
       SESSION_SECRET: ci-only-session-secret-please-do-not-use
@@ -36,6 +50,11 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Verify database migrations
+        env:
+          DATABASE_URL: postgresql://postgres:ci-only-password@localhost:5432/oki_dive_test
+        run: npm run db:migrate
 
       - name: Run lint
         run: npm run lint

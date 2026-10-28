@@ -1,10 +1,11 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const state = vi.hoisted(() => ({
   reservation: {} as Record<string, unknown>,
   customer: {} as Record<string, unknown>,
   rowLockQueue: Promise.resolve() as Promise<void>,
   updatedTables: [] as string[],
+  outboxQueries: 0,
 }))
 
 vi.mock('../db', () => ({
@@ -39,7 +40,10 @@ vi.mock('../db', () => ({
             state.updatedTables.push(table)
             return { rows: [{ id: values[values.length - 1] }], rowCount: 1 }
           }
-          if (sql.startsWith('INSERT INTO sheets_outbox')) return { rows: [], rowCount: 1 }
+          if (sql.startsWith('INSERT INTO sheets_outbox')) {
+            state.outboxQueries += 1
+            return { rows: [], rowCount: 1 }
+          }
           throw new Error(`Unexpected query: ${sql}`)
         },
       }
@@ -60,9 +64,22 @@ beforeEach(() => {
   state.customer = { id: 'C-1', updated_at: previousVersion, last_name: '田中', visit_count: 1 }
   state.rowLockQueue = Promise.resolve()
   state.updatedTables = []
+  state.outboxQueries = 0
+  vi.stubEnv('SHEETS_SYNC_ENABLED', 'false')
 })
 
+afterEach(() => vi.unstubAllEnvs())
+
 describe('PostgreSQL version checks under a row lock', () => {
+  it('queues Sheets updates only when sync is enabled', async () => {
+    await updateReservation('R-1', { status: 'STS-02' })
+    expect(state.outboxQueries).toBe(0)
+
+    vi.stubEnv('SHEETS_SYNC_ENABLED', 'true')
+    await updateReservation('R-1', { status: 'STS-03' })
+    expect(state.outboxQueries).toBe(1)
+  })
+
   it('allows only one concurrent reservation update using the same expected version', async () => {
     const results = await Promise.allSettled([
       updateReservation('R-1', { status: 'STS-02', updatedAt: '2026-10-01T00:00:01.000Z' }, previousVersion),

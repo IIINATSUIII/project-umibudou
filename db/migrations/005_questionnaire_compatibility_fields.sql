@@ -13,13 +13,13 @@ ALTER TABLE customers
   ALTER COLUMN total_dives DROP NOT NULL;
 
 UPDATE questionnaires
-SET sleep_category = COALESCE(NULLIF(raw_legacy ->> 'sleepCategory', ''), sleep_category),
+SET sleep_category = COALESCE(NULLIF(questionnaires.raw_legacy ->> 'sleepCategory', ''), questionnaires.sleep_category),
     last_dive_period = COALESCE(
-      NULLIF(raw_legacy ->> 'lastDivePeriod', ''),
-      NULLIF(last_dive_date, ''),
+      NULLIF(questionnaires.raw_legacy ->> 'lastDivePeriod', ''),
+      NULLIF(questionnaires.last_dive_date, ''),
       ''
     ),
-    medical_certificate = CASE lower(raw_legacy ->> 'medicalCertificate')
+    medical_certificate = CASE lower(questionnaires.raw_legacy ->> 'medicalCertificate')
       WHEN 'true' THEN true
       WHEN '1' THEN true
       WHEN 'yes' THEN true
@@ -27,12 +27,12 @@ SET sleep_category = COALESCE(NULLIF(raw_legacy ->> 'sleepCategory', ''), sleep_
       ELSE false
     END,
     doctor_clearance = COALESCE(
-      NULLIF(raw_legacy ->> 'doctorClearance', ''),
-      NULLIF(raw_legacy ->> 'doctorDivingPermit', ''),
-      doctor_diving_permit
+      NULLIF(questionnaires.raw_legacy ->> 'doctorClearance', ''),
+      NULLIF(questionnaires.raw_legacy ->> 'doctorDivingPermit', ''),
+      questionnaires.doctor_diving_permit
     ),
-    staff_check_status = COALESCE(NULLIF(raw_legacy ->> 'staffCheckStatus', ''), '未確認'),
-    staff_check_note = COALESCE(raw_legacy ->> 'staffCheckNote', ''),
+    staff_check_status = COALESCE(NULLIF(questionnaires.raw_legacy ->> 'staffCheckStatus', ''), '未確認'),
+    staff_check_note = COALESCE(questionnaires.raw_legacy ->> 'staffCheckNote', ''),
     submission_state = CASE
       WHEN reservations.questionnaire_completed
         OR reservations.questionnaire_id = questionnaires.id

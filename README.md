@@ -25,6 +25,8 @@ npm run dev   # → http://127.0.0.1:3030
 
 **Google Sheets の設定は不要で開発を始められます** — 未設定の場合は `data/*.json` へのローカル保存＋モックデータで全画面が動作します。
 
+PostgreSQLを主保存先にする手順は [PostgreSQL主保存先への移行計画](docs/postgres-primary-plan.md) を参照してください。
+
 詳しいセットアップ手順は [docs/07_MVP版セットアップ手順書.md](docs/07_MVP版セットアップ手順書.md) を参照してください。設計資料（要件定義書・基本設計書・DB設計・詳細設計・画面遷移図）は [docs/](docs/) に同梱しています。開発規約は [CLAUDE.md](CLAUDE.md) を参照してください。
 
 Git / GitHub が初めてのメンバーは [docs/00_GitHub初心者ガイド.md](docs/00_GitHub初心者ガイド.md) から読んでください。
@@ -181,6 +183,7 @@ Vercel ダッシュボード → Settings → Environment Variables で以下を
 | `STAFF_CREDENTIALS` | `staff@okidive.com:pass\|staff2@okidive.com:pass2` |
 | `STAFF_ADMIN_EMAIL` | 初回移行する管理者メール |
 | `DATABASE_URL` | PostgreSQL接続URL |
+| `DATA_STORE` | 主保存先をPostgreSQLにする場合は`postgres` |
 | `SESSION_SECRET` | ランダム 32 バイト hex |
 | `RESEND_API_KEY` | Resend APIキー |
 | `EMAIL_FROM` | Resendで認証済みの送信元 |
@@ -189,6 +192,7 @@ Vercel ダッシュボード → Settings → Environment Variables で以下を
 | `GOOGLE_SERVICE_ACCOUNT_EMAIL` | サービスアカウントのメール |
 | `GOOGLE_PRIVATE_KEY` | `"-----BEGIN PRIVATE KEY-----\n..."` |
 | `GOOGLE_SPREADSHEET_ID` | スプレッドシート ID |
+| `SHEETS_SYNC_ENABLED` | PostgreSQLからSheetsへ同期する場合だけ`true` |
 
 ### GitHub Actions による自動チェック
 

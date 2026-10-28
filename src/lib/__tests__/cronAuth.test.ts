@@ -8,6 +8,7 @@ import { GET, POST } from '@/app/api/cron/sheets-outbox/route'
 
 beforeEach(() => {
   vi.stubEnv('CRON_SECRET', 'cron-only-test-secret')
+  vi.stubEnv('SHEETS_SYNC_ENABLED', 'true')
   worker.mockReset().mockResolvedValue({ delivered: 0 })
 })
 afterEach(() => vi.unstubAllEnvs())
@@ -37,5 +38,14 @@ it('refuses to run when CRON_SECRET is absent', async () => {
     headers: { authorization: 'Bearer cron-only-test-secret' },
   }))
   expect(response.status).toBe(401)
+  expect(worker).not.toHaveBeenCalled()
+})
+
+it('refuses to run when Sheets sync is disabled', async () => {
+  vi.stubEnv('SHEETS_SYNC_ENABLED', 'false')
+  const response = await GET(new NextRequest('http://localhost/api/cron/sheets-outbox', {
+    headers: { authorization: 'Bearer cron-only-test-secret' },
+  }))
+  expect(response.status).toBe(503)
   expect(worker).not.toHaveBeenCalled()
 })

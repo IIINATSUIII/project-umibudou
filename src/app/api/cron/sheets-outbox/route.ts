@@ -22,6 +22,9 @@ async function handle(request: NextRequest): Promise<NextResponse> {
   if (!USE_POSTGRES) {
     return NextResponse.json({ error: 'PostgreSQL datastore is not enabled' }, { status: 503 })
   }
+  if (process.env.SHEETS_SYNC_ENABLED !== 'true') {
+    return NextResponse.json({ error: 'Sheets sync is not enabled' }, { status: 503 })
+  }
 
   try {
     return NextResponse.json(await runSheetsOutboxWorker())

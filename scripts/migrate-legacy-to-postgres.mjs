@@ -11,13 +11,18 @@ const SHEETS = {
   reservations: '予約',
   questionnaires: '問診票',
   customers: '顧客台帳',
+  roster: '名簿',
+  reservationEmails: '予約受付メール',
 }
+const OPTIONAL_SOURCES = new Set(['roster', 'reservationEmails'])
+const JSON_FILES = { reservationEmails: 'reservation-emails' }
 const RESERVATION_ALIASES = { date: 'diveDate', course: 'courseName', phone: 'guestPhone', notes: 'staffNote' }
 const RESERVATION_COLUMNS = [
   'id', 'created_at', 'updated_at', 'customer_id', 'guest_name', 'guest_phone', 'guest_email',
   'dive_date', 'time', 'time_slot', 'course_id', 'course_name', 'guest_count', 'status', 'staff_id',
   'staff_name', 'channel', 'questionnaire_id', 'questionnaire_ids', 'questionnaire_token',
   'questionnaire_token_expires_at', 'questionnaire_completed', 'dive_point', 'staff_note', 'raw_legacy',
+  'public_request_key', 'cancellation_phase', 'cancelled_at', 'cancellation_reason',
 ]
 const QUESTIONNAIRE_COLUMNS = [
   'id', 'reservation_id', 'customer_id', 'submission_id', 'submitted_at', 'last_name', 'first_name',
@@ -36,6 +41,17 @@ const CUSTOMER_COLUMNS = [
   'visit_count', 'has_c_card', 'c_card_type', 'total_dives', 'health_notes', 'guide_notes', 'registered_at',
   'updated_at', 'birth_date', 'gender', 'postal_code', 'address', 'emergency_name', 'emergency_relation',
   'emergency_phone', 'c_card_org', 'last_dive_date', 'last_dive_period', 'dm_consent', 'raw_legacy',
+]
+const ROSTER_COLUMNS = [
+  'id', 'dive_date', 'reservation_id', 'questionnaire_id', 'customer_id', 'name', 'name_kana',
+  'birth_date', 'age', 'gender', 'address', 'phone', 'emergency_contact', 'emergency_phone',
+  'course', 'staff_name', 'checked_in_at', 'check_in_method',
+]
+const RESERVATION_EMAIL_COLUMNS = [
+  'id', 'reservation_id', 'request_key', 'recipient_email', 'guest_name', 'dive_date',
+  'time_slot', 'course_id', 'course_name', 'guest_count', 'status', 'attempt_count',
+  'available_at', 'created_at', 'last_attempt_at', 'locked_until', 'sent_at',
+  'provider_message_id', 'last_error',
 ]
 
 function parseArgs(args) {
@@ -162,7 +178,7 @@ function rawPayload(source, sourceKind) {
 }
 
 export function buildRows(sourceRows, sourceKind, issues) {
-  const rows = { customers: [], reservations: [], questionnaires: [] }
+  const rows = { customers: [], reservations: [], questionnaires: [], roster: [], reservationEmails: [] }
   const sourceByType = sourceKind === 'sheets'
     ? Object.fromEntries(Object.entries(sourceRows).map(([type, list]) => [type, list.map((entry) => entry.record)]))
     : sourceRows
@@ -243,6 +259,13 @@ export function buildRows(sourceRows, sourceKind, issues) {
           dive_point: optionalText(source.divePoint),
           staff_note: optionalText(source.staffNote),
           raw_legacy: legacy,
+          public_request_key: optionalText(source.publicRequestKey),
+          cancellation_phase: optionalText(source.cancellationPhase),
+          cancelled_at: parseTimestamp(source.cancelledAt, { entity, id, field: 'cancelledAt' }, issues),
+          cancellation_reason: optionalText(source.cancellationReason),
+        }
+        if (row.cancellation_phase && !['before', 'after'].includes(row.cancellation_phase)) {
+          issues.push({ entity, id, reason: 'invalid_cancellationPhase' })
         }
         rows.reservations.push(row)
       } else if (entity === 'questionnaires') {
@@ -320,6 +343,56 @@ export function buildRows(sourceRows, sourceKind, issues) {
           raw_legacy: legacy,
         }
         rows.questionnaires.push(row)
+      } else if (entity === 'roster') {
+        rows.roster.push({
+          id,
+          dive_date: parseDate(source.diveDate, { entity, id, field: 'diveDate', required: true }, issues),
+          reservation_id: requiredText(source.reservationId, entity, id, 'reservationId', issues),
+          questionnaire_id: requiredText(source.questionnaireId, entity, id, 'questionnaireId', issues),
+          customer_id: optionalText(source.customerId),
+          name: rawText(source.name),
+          name_kana: rawText(source.nameKana),
+          birth_date: rawText(source.birthDate),
+          age: parseNumber(source.age, 0, { entity, id, field: 'age', integer: true }, issues),
+          gender: rawText(source.gender),
+          address: rawText(source.address),
+          phone: rawText(source.phone),
+          emergency_contact: rawText(source.emergencyContact),
+          emergency_phone: rawText(source.emergencyPhone),
+          course: rawText(source.course),
+          staff_name: rawText(source.staffName),
+          checked_in_at: parseTimestamp(source.checkedInAt, { entity, id, field: 'checkedInAt', required: true }, issues),
+          check_in_method: rawText(source.checkInMethod),
+        })
+        if (!['QR読取', '手動照合'].includes(rawText(source.checkInMethod))) {
+          issues.push({ entity, id, reason: 'invalid_checkInMethod' })
+        }
+      } else if (entity === 'reservationEmails') {
+        const status = rawText(source.status)
+        if (!['pending', 'sending', 'sent', 'failed', 'dead_letter'].includes(status)) {
+          issues.push({ entity, id, reason: 'invalid_status' })
+        }
+        rows.reservationEmails.push({
+          id,
+          reservation_id: requiredText(source.reservationId, entity, id, 'reservationId', issues),
+          request_key: requiredText(source.requestKey, entity, id, 'requestKey', issues),
+          recipient_email: requiredText(source.recipientEmail, entity, id, 'recipientEmail', issues),
+          guest_name: rawText(source.guestName),
+          dive_date: parseDate(source.diveDate, { entity, id, field: 'diveDate', required: true }, issues),
+          time_slot: rawText(source.timeSlot),
+          course_id: rawText(source.courseId),
+          course_name: rawText(source.courseName),
+          guest_count: parseNumber(source.guestCount, 1, { entity, id, field: 'guestCount', integer: true, minimum: 1 }, issues),
+          status,
+          attempt_count: parseNumber(source.attemptCount, 0, { entity, id, field: 'attemptCount', integer: true }, issues),
+          available_at: parseTimestamp(source.availableAt, { entity, id, field: 'availableAt', required: true }, issues),
+          created_at: parseTimestamp(source.createdAt, { entity, id, field: 'createdAt', required: true }, issues),
+          last_attempt_at: parseTimestamp(source.lastAttemptAt, { entity, id, field: 'lastAttemptAt' }, issues),
+          locked_until: parseTimestamp(source.lockedUntil, { entity, id, field: 'lockedUntil' }, issues),
+          sent_at: parseTimestamp(source.sentAt, { entity, id, field: 'sentAt' }, issues),
+          provider_message_id: optionalText(source.providerMessageId),
+          last_error: optionalText(source.lastError),
+        })
       }
     }
   }
@@ -343,6 +416,9 @@ export function validateRelations(rows, issues, warnings) {
   const questionnaireById = new Map(rows.questionnaires.filter((row) => row.id).map((row) => [row.id, row]))
 
   findDuplicates(rows.questionnaires, 'submission_id', 'questionnaires', issues, 'duplicate_submission_id')
+  findDuplicates(rows.roster, 'questionnaire_id', 'roster', issues, 'duplicate_questionnaire_id')
+  findDuplicates(rows.reservationEmails, 'reservation_id', 'reservationEmails', issues, 'duplicate_reservation_id')
+  findDuplicates(rows.reservations, 'public_request_key', 'reservations', issues, 'duplicate_public_request_key')
   findDuplicates(rows.reservations, 'questionnaire_token', 'reservations', issues, 'duplicate_questionnaire_token')
   findDuplicates(rows.questionnaires, 'qr_token', 'questionnaires', issues, 'duplicate_qr_token')
 
@@ -369,6 +445,30 @@ export function validateRelations(rows, issues, warnings) {
     }
     if (questionnaire.customer_id && !customerIds.has(questionnaire.customer_id)) {
       issues.push({ entity: 'questionnaires', id: questionnaire.id, reason: 'missing_customer_reference' })
+    }
+  }
+
+  for (const entry of rows.roster) {
+    if (!reservationById.has(entry.reservation_id)) {
+      issues.push({ entity: 'roster', id: entry.id, reason: 'missing_reservation_reference' })
+    }
+    const questionnaire = questionnaireById.get(entry.questionnaire_id)
+    if (!questionnaire) {
+      issues.push({ entity: 'roster', id: entry.id, reason: 'missing_questionnaire_reference' })
+    } else if (questionnaire.reservation_id !== entry.reservation_id) {
+      issues.push({ entity: 'roster', id: entry.id, reason: 'questionnaire_reservation_mismatch' })
+    }
+    if (entry.customer_id && !customerIds.has(entry.customer_id)) {
+      issues.push({ entity: 'roster', id: entry.id, reason: 'missing_customer_reference' })
+    }
+  }
+
+  for (const email of rows.reservationEmails) {
+    const reservation = reservationById.get(email.reservation_id)
+    if (!reservation) {
+      issues.push({ entity: 'reservationEmails', id: email.id, reason: 'missing_reservation_reference' })
+    } else if (reservation.public_request_key !== email.request_key) {
+      issues.push({ entity: 'reservationEmails', id: email.id, reason: 'request_key_mismatch' })
     }
   }
 
@@ -449,8 +549,15 @@ async function readSheetsSource() {
     scopes: ['https://www.googleapis.com/auth/spreadsheets.readonly'],
   })
   const sheets = google.sheets({ version: 'v4', auth })
+  const metadata = await sheets.spreadsheets.get({ spreadsheetId, fields: 'sheets.properties.title' })
+  const availableSheets = new Set((metadata.data.sheets ?? []).map((sheet) => sheet.properties?.title))
   const result = {}
   for (const [entity, sheetName] of Object.entries(SHEETS)) {
+    if (!availableSheets.has(sheetName)) {
+      if (!OPTIONAL_SOURCES.has(entity)) throw new Error(`Missing required sheet: ${sheetName}`)
+      result[entity] = []
+      continue
+    }
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId,
       range: `${sheetQuote(sheetName)}!A1:AZ`,
@@ -474,9 +581,18 @@ async function readSheetsSource() {
 async function readJsonSource() {
   const result = {}
   for (const entity of Object.keys(SHEETS)) {
-    const file = path.join(process.cwd(), 'data', `${entity}.json`)
-    const parsed = JSON.parse(await readFile(file, 'utf8'))
-    if (!Array.isArray(parsed)) throw new Error(`data/${entity}.json must contain a JSON array`)
+    const fileName = JSON_FILES[entity] ?? entity
+    const file = path.join(process.env.LOCAL_DATA_DIR || path.join(process.cwd(), 'data'), `${fileName}.json`)
+    let contents
+    try {
+      contents = await readFile(file, 'utf8')
+    } catch (error) {
+      if (error.code !== 'ENOENT' || !OPTIONAL_SOURCES.has(entity)) throw error
+      result[entity] = []
+      continue
+    }
+    const parsed = JSON.parse(contents)
+    if (!Array.isArray(parsed)) throw new Error(`${fileName}.json must contain a JSON array`)
     result[entity] = parsed
   }
   return result
@@ -503,7 +619,8 @@ function stableJson(value) {
 
 const TIMESTAMP_COLUMNS = new Set([
   'created_at', 'updated_at', 'registered_at', 'questionnaire_token_expires_at',
-  'submitted_at', 'consent_at', 'qr_expires_at',
+  'submitted_at', 'consent_at', 'qr_expires_at', 'cancelled_at', 'checked_in_at',
+  'available_at', 'last_attempt_at', 'locked_until', 'sent_at',
 ])
 
 function sameImportedValue(column, expected, actual) {
@@ -532,6 +649,8 @@ async function inspectTargetDatabase(client, rows) {
     ['customers', CUSTOMER_COLUMNS, rows.customers],
     ['reservations', RESERVATION_COLUMNS, rows.reservations],
     ['questionnaires', QUESTIONNAIRE_COLUMNS, rows.questionnaires],
+    ['roster_entries', ROSTER_COLUMNS, rows.roster],
+    ['reservation_emails', RESERVATION_EMAIL_COLUMNS, rows.reservationEmails],
   ]
   let empty = true
   let exact = true
@@ -587,8 +706,6 @@ async function inspectTargetDatabase(client, rows) {
   databaseCounts.sheets_outbox = outboxCount
   if (outboxCount) {
     empty = false
-    exact = false
-    conflicts.push({ entity: 'sheets_outbox', id: '-', reason: 'target_has_outbox_history' })
   }
 
   return { empty, exact, conflicts, counts: databaseCounts }
@@ -600,10 +717,12 @@ async function ensureSchema(client) {
            to_regclass('public.reservations') AS reservations,
            to_regclass('public.questionnaires') AS questionnaires,
            to_regclass('public.customer_reservation_counts') AS counts,
-           to_regclass('public.sheets_outbox') AS outbox
+           to_regclass('public.sheets_outbox') AS outbox,
+           to_regclass('public.roster_entries') AS roster,
+           to_regclass('public.reservation_emails') AS reservation_emails
   `)
   const schema = result.rows[0]
-  if (!schema?.customers || !schema.reservations || !schema.questionnaires || !schema.counts || !schema.outbox) {
+  if (!schema?.customers || !schema.reservations || !schema.questionnaires || !schema.counts || !schema.outbox || !schema.roster || !schema.reservation_emails) {
     throw new Error('Run npm run db:migrate before importing legacy data')
   }
   const columns = await client.query(
@@ -618,6 +737,12 @@ async function ensureSchema(client) {
        AND column_name = 'sleep_category'`,
   )
   if (!sleepCategory.rowCount) throw new Error('The questionnaire sleep category migration is missing')
+  const reservationColumns = await client.query(
+    `SELECT column_name FROM information_schema.columns
+     WHERE table_schema = 'public' AND table_name = 'reservations'
+       AND column_name IN ('public_request_key', 'cancellation_phase', 'cancelled_at', 'cancellation_reason')`,
+  )
+  if (reservationColumns.rowCount !== 4) throw new Error('The reservation email and cancellation migrations are missing')
 }
 
 function insertBatchSql(table, columns, rows) {
@@ -641,6 +766,19 @@ async function insertRows(client, table, columns, rows) {
   }
 }
 
+export async function enqueueImportedSheetsProjections(client, rows) {
+  const projections = [
+    ['customers', 'customer'],
+    ['reservations', 'reservation'],
+    ['questionnaires', 'questionnaire'],
+    ['roster', 'roster'],
+  ]
+  const events = projections.flatMap(([source, entity_type]) =>
+    rows[source].map(({ id }) => ({ entity_type, entity_id: id, operation: 'upsert' })),
+  )
+  await insertRows(client, 'sheets_outbox', ['entity_type', 'entity_id', 'operation'], events)
+}
+
 async function main() {
   const { source, apply } = parseArgs(process.argv.slice(2))
   loadEnvConfig(process.cwd())
@@ -654,7 +792,7 @@ async function main() {
   reportIssues('Source validation issues', issues)
   reportIssues('Import warnings', warnings)
   console.log(
-    `Source counts: customers=${rows.customers.length}, reservations=${rows.reservations.length}, questionnaires=${rows.questionnaires.length}, visitMarkers=${rows.customers.reduce((count, customer) => count + customer.count_markers.length, 0)}`,
+    `Source counts: customers=${rows.customers.length}, reservations=${rows.reservations.length}, questionnaires=${rows.questionnaires.length}, roster=${rows.roster.length}, reservationEmails=${rows.reservationEmails.length}, visitMarkers=${rows.customers.reduce((count, customer) => count + customer.count_markers.length, 0)}`,
   )
   console.log(`Inferred visit markers: ${inferredMarkerCount}`)
 
@@ -667,7 +805,7 @@ async function main() {
       await client.query('BEGIN')
       transactionOpen = true
       await client.query(
-        'LOCK TABLE customer_reservation_counts, customers, questionnaires, reservations, sheets_outbox IN SHARE ROW EXCLUSIVE MODE',
+        'LOCK TABLE customer_reservation_counts, customers, questionnaires, reservations, roster_entries, reservation_emails, sheets_outbox IN SHARE ROW EXCLUSIVE MODE',
       )
     } else {
       await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY')
@@ -677,7 +815,7 @@ async function main() {
     const target = await inspectTargetDatabase(client, rows)
     reportIssues('Database target differences', target.conflicts)
     console.log(
-      `Database counts: customers=${target.counts.customers}, reservations=${target.counts.reservations}, questionnaires=${target.counts.questionnaires}, visitMarkers=${target.counts.customer_reservation_counts}, outbox=${target.counts.sheets_outbox}`,
+      `Database counts: customers=${target.counts.customers}, reservations=${target.counts.reservations}, questionnaires=${target.counts.questionnaires}, roster=${target.counts.roster_entries}, reservationEmails=${target.counts.reservation_emails}, visitMarkers=${target.counts.customer_reservation_counts}, outbox=${target.counts.sheets_outbox}`,
     )
     if (issues.length || (!target.empty && !target.exact)) {
       await client.query('ROLLBACK')
@@ -704,11 +842,16 @@ async function main() {
     await insertRows(client, 'customers', CUSTOMER_COLUMNS, rows.customers)
     await insertRows(client, 'reservations', RESERVATION_COLUMNS, rows.reservations)
     await insertRows(client, 'questionnaires', QUESTIONNAIRE_COLUMNS, rows.questionnaires)
+    await insertRows(client, 'roster_entries', ROSTER_COLUMNS, rows.roster)
+    await insertRows(client, 'reservation_emails', RESERVATION_EMAIL_COLUMNS, rows.reservationEmails)
     const markerRows = rows.customers.flatMap((customer) => customer.count_markers.map((reservationId) => ({
       customer_id: customer.id,
       reservation_id: reservationId,
     })))
     await insertRows(client, 'customer_reservation_counts', ['customer_id', 'reservation_id'], markerRows)
+    if (source === 'json' && process.env.SHEETS_SYNC_ENABLED === 'true') {
+      await enqueueImportedSheetsProjections(client, rows)
+    }
     await client.query('COMMIT')
     transactionOpen = false
     console.log('Legacy import committed.')
