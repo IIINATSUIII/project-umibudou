@@ -157,6 +157,7 @@ async function enqueueSheets(
   entityId: string,
   operation: 'upsert' | 'delete',
 ): Promise<void> {
+  if (process.env.SHEETS_SYNC_ENABLED !== 'true') return
   await client.query(
     `INSERT INTO sheets_outbox (entity_type, entity_id, operation)
      VALUES ($1, $2, $3)`,

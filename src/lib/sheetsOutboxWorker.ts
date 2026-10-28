@@ -112,6 +112,7 @@ async function deliver(event: OutboxRow): Promise<void> {
 
 /** Claim one reference, fetch current Postgres state, sync it, and retry failures with backoff. */
 export async function runSheetsOutboxWorker(): Promise<SheetsOutboxRunResult> {
+  if (process.env.SHEETS_SYNC_ENABLED !== 'true') throw new Error('Sheets sync is not enabled')
   if (!isSheetsConfigured()) throw new Error('Google Sheets credentials are not configured')
   const events = await claimBatch()
   const result: SheetsOutboxRunResult = {
