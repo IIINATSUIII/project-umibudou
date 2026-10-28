@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildRows, validateRelations } from './migrate-legacy-to-postgres.mjs'
+import { buildRows, enqueueImportedSheetsProjections, validateRelations } from './migrate-legacy-to-postgres.mjs'
 
 const source = () => ({
   customers: [{ id: 'C-1', visitCount: 0 }],
@@ -52,5 +52,21 @@ describe('legacy PostgreSQL import', () => {
 
     expect(issues.map((issue) => issue.reason)).toContain('missing_questionnaire_reference')
     expect(issues.map((issue) => issue.reason)).toContain('request_key_mismatch')
+  })
+
+  it('queues the imported JSON projections for Sheets in the same transaction', async () => {
+    const calls = []
+    const client = { query: async (sql, values) => calls.push({ sql, values }) }
+    const rows = buildRows(source(), 'json', [])
+    await enqueueImportedSheetsProjections(client, rows)
+
+    expect(calls).toHaveLength(1)
+    expect(calls[0].sql).toContain('INSERT INTO sheets_outbox')
+    expect(calls[0].values).toEqual([
+      'customer', 'C-1', 'upsert',
+      'reservation', 'R-1', 'upsert',
+      'questionnaire', 'Q-1', 'upsert',
+      'roster', 'N-1', 'upsert',
+    ])
   })
 })

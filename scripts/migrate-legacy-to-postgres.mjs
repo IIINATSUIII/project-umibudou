@@ -706,8 +706,6 @@ async function inspectTargetDatabase(client, rows) {
   databaseCounts.sheets_outbox = outboxCount
   if (outboxCount) {
     empty = false
-    exact = false
-    conflicts.push({ entity: 'sheets_outbox', id: '-', reason: 'target_has_outbox_history' })
   }
 
   return { empty, exact, conflicts, counts: databaseCounts }
@@ -766,6 +764,19 @@ async function insertRows(client, table, columns, rows) {
     const statement = insertBatchSql(table, columns, batch)
     await client.query(statement.sql, statement.values)
   }
+}
+
+export async function enqueueImportedSheetsProjections(client, rows) {
+  const projections = [
+    ['customers', 'customer'],
+    ['reservations', 'reservation'],
+    ['questionnaires', 'questionnaire'],
+    ['roster', 'roster'],
+  ]
+  const events = projections.flatMap(([source, entity_type]) =>
+    rows[source].map(({ id }) => ({ entity_type, entity_id: id, operation: 'upsert' })),
+  )
+  await insertRows(client, 'sheets_outbox', ['entity_type', 'entity_id', 'operation'], events)
 }
 
 async function main() {
@@ -838,6 +849,9 @@ async function main() {
       reservation_id: reservationId,
     })))
     await insertRows(client, 'customer_reservation_counts', ['customer_id', 'reservation_id'], markerRows)
+    if (source === 'json' && process.env.SHEETS_SYNC_ENABLED === 'true') {
+      await enqueueImportedSheetsProjections(client, rows)
+    }
     await client.query('COMMIT')
     transactionOpen = false
     console.log('Legacy import committed.')
