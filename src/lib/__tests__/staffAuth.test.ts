@@ -91,7 +91,7 @@ describe('page and API authentication boundaries', () => {
     },
   )
 
-  it.each(['/dashboard', '/customers', '/questionnaire/scan', '/questionnaire/scan/', '/questionnaire/scan/extra', '/booking-extra', '/line-menu-extra'])(
+  it.each(['/dashboard', '/customers', '/questionnaire/scan', '/questionnaire/scan/', '/questionnaire/scan/extra', '/booking-extra', '/line-menu-extra', '/models', '/models/other/secret.bin', '/ort-extra'])(
     'redirects anonymous page requests to login: %s', async (url) => {
       const response = await middleware(request(url))
       expect(response.status).toBe(307)
@@ -99,7 +99,7 @@ describe('page and API authentication boundaries', () => {
     },
   )
 
-  it.each(['/login', '/booking', '/line-menu/checkin', '/api/auth', '/api/public/bookings', '/api/public/questionnaires', '/api/public/checkin-qr', '/api/cron/sheets-outbox', '/questionnaire/opaque-token', '/_next/static/app.js', '/favicon.ico', '/line-rich-menu.png'])(
+  it.each(['/login', '/booking', '/line-menu/checkin', '/api/auth', '/api/public/bookings', '/api/public/questionnaires', '/api/public/checkin-qr', '/api/cron/sheets-outbox', '/questionnaire/opaque-token', '/_next/static/app.js', '/favicon.ico', '/line-rich-menu.png', '/models/fish/fish-s75-v1.onnx', '/ort/ort.wasm.min.js'])(
     'keeps public and independently authenticated paths available: %s', async (url) => {
       vi.stubEnv('SESSION_SECRET', '')
       expect((await middleware(request(url))).headers.get('x-middleware-next')).toBe('1')
