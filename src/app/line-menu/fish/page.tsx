@@ -8,6 +8,7 @@ import { classifyPhoto, loadModel } from '@/lib/fish/browserClassifier'
 import { CollectionStore, isCollectionSupported, requestPersistentStorage } from '@/lib/fish/collectionStore'
 import { countFound } from '@/lib/fish/collection'
 import { downscalePhoto } from '@/lib/fish/downscalePhoto'
+import SpriteChooser from './SpriteChooser'
 
 const MAX_IMAGE_BYTES = 12 * 1024 * 1024
 const ACCEPTED_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif']
@@ -32,6 +33,8 @@ export default function FishGuidePage() {
   const [foundCount, setFoundCount] = useState<number | null>(null)
   // IndexedDB が使えるか（ブラウザで表示したあとに調べる。サーバーが作る最初の画面と食い違わないように）
   const [canCollect, setCanCollect] = useState(false)
+  // 水槽で泳ぐ姿を選ぶ確認画面（縮小した写真を入れると開く）
+  const [choosing, setChoosing] = useState<Blob | null>(null)
 
   function collection(): CollectionStore {
     store.current ??= new CollectionStore()
@@ -94,6 +97,7 @@ export default function FishGuidePage() {
     setPickedSpecies('')
     setSaveState('idle')
     setSaveMessage('')
+    setChoosing(null)
     if (!selected) return
     if (!ACCEPTED_TYPES.includes(selected.type)) {
       setImage(null)
@@ -107,26 +111,39 @@ export default function FishGuidePage() {
     }
   }
 
-  async function addToCollection() {
+  const speciesIdToAdd = result ? (pickedSpecies === '' ? result.candidates[0].species.id : pickedSpecies === 'none' ? null : Number(pickedSpecies)) : null
+
+  // 「コレクションに追加」: 写真を縮小して、水槽で泳ぐ姿を選ぶ確認画面を開く（保存は、選んだあと）
+  async function startAdding() {
     if (!image || !result) return
     setSaveState('saving')
     setSaveMessage('')
     try {
-      const top = result.candidates[0]
-      const speciesId = pickedSpecies === '' ? top.species.id : pickedSpecies === 'none' ? null : Number(pickedSpecies)
-      const photo = await downscalePhoto(image)
+      setChoosing(await downscalePhoto(image))
+    } catch (cause) {
+      setSaveMessage(cause instanceof Error ? cause.message : '追加できませんでした。')
+    } finally {
+      setSaveState('idle')
+    }
+  }
+
+  // 確認画面で姿を選んだら保存する（sprite が null なら、泡に包んで泳ぐ）
+  async function addToCollection(sprite: Blob | null) {
+    if (!choosing || !result) return
+    try {
       await collection().add({
-        speciesId,
+        speciesId: speciesIdToAdd,
         source: pickedSpecies === '' ? 'ai' : 'manual',
-        topProbability: top.probability,
-        photo,
+        topProbability: result.candidates[0].probability,
+        photo: choosing,
+        sprite,
       })
       void requestPersistentStorage()
       setFoundCount(countFound(await collection().list()))
       setSaveState('saved')
-      setSaveMessage('コレクションに追加しました。')
+      setSaveMessage(sprite ? 'コレクションに追加しました。水槽で、この姿で泳ぎます。' : 'コレクションに追加しました。水槽では、泡に包まれて泳ぎます。')
+      setChoosing(null)
     } catch (cause) {
-      setSaveState('idle')
       setSaveMessage(cause instanceof Error ? cause.message : '追加できませんでした。')
     }
   }
@@ -207,7 +224,7 @@ export default function FishGuidePage() {
                 <div className="space-y-2 rounded-xl border border-sky-200 bg-sky-50 p-3" data-testid="collection-add">
                   <label className="block text-sm font-medium text-slate-700">
                     コレクションに追加する魚
-                    <select value={pickedSpecies} onChange={(e) => { setPickedSpecies(e.target.value); setSaveState('idle'); setSaveMessage('') }}
+                    <select value={pickedSpecies} onChange={(e) => { setPickedSpecies(e.target.value); setSaveState('idle'); setSaveMessage(''); setChoosing(null) }}
                       className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm">
                       <option value="">{result.candidates[0].species.ja}（判定の1位）</option>
                       {result.candidates.slice(1).map((candidate) => (
@@ -221,10 +238,21 @@ export default function FishGuidePage() {
                       </optgroup>
                     </select>
                   </label>
-                  <button type="button" onClick={() => void addToCollection()} disabled={saveState !== 'idle'}
-                    className="w-full rounded-xl bg-sky-700 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-sky-800 disabled:cursor-not-allowed disabled:opacity-60">
-                    {saveState === 'saving' ? '追加しています…' : saveState === 'saved' ? '✓ 追加しました' : '📚 コレクションに追加'}
-                  </button>
+                  {choosing ? (
+                    <SpriteChooser
+                      photo={choosing}
+                      expectedSpeciesId={speciesIdToAdd}
+                      originalProbability={result.candidates[0].probability}
+                      confirmLabel="コレクションに追加"
+                      onConfirm={addToCollection}
+                      onCancel={() => setChoosing(null)}
+                    />
+                  ) : (
+                    <button type="button" onClick={() => void startAdding()} disabled={saveState !== 'idle'}
+                      className="w-full rounded-xl bg-sky-700 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-sky-800 disabled:cursor-not-allowed disabled:opacity-60">
+                      {saveState === 'saving' ? '準備しています…' : saveState === 'saved' ? '✓ 追加しました' : '📚 コレクションに追加'}
+                    </button>
+                  )}
                   {saveMessage && <p role="status" className={`text-xs ${saveState === 'saved' ? 'text-emerald-700' : 'text-red-700'}`}>{saveMessage}</p>}
                   <p className="text-xs leading-relaxed text-slate-500">写真は縮小して、<b>この端末の中だけ</b>に保存します（撮影場所の情報は残りません）。</p>
                 </div>

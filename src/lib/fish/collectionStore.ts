@@ -12,7 +12,7 @@ const DB_NAME = 'okidive-fish-collection'
 const DB_VERSION = 1
 const STORE = 'entries'
 
-export type NewEntryInput = Pick<CollectionEntry, 'speciesId' | 'source' | 'topProbability' | 'photo'>
+export type NewEntryInput = Pick<CollectionEntry, 'speciesId' | 'source' | 'topProbability' | 'photo'> & { sprite?: Blob | null }
 
 function request<T>(req: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -71,6 +71,7 @@ export class CollectionStore {
       source: input.source,
       topProbability: input.topProbability,
       photo: input.photo,
+      ...(input.sprite !== undefined ? { sprite: input.sprite } : {}),
     }
     try {
       const tx = db.transaction(STORE, 'readwrite')
@@ -84,6 +85,16 @@ export class CollectionStore {
       throw error
     }
     return entry
+  }
+
+  /** 切り抜き(sprite)だけを、あとから付ける（古い記録に、水槽用の画像を作り足すとき）。記録がなければ何もしない。 */
+  async setSprite(id: string, sprite: Blob | null): Promise<void> {
+    const db = await this.open()
+    const tx = db.transaction(STORE, 'readwrite')
+    const store = tx.objectStore(STORE)
+    const current = await request<CollectionEntry | undefined>(store.get(id))
+    if (current) store.put({ ...current, sprite })
+    await done(tx)
   }
 
   async remove(id: string): Promise<void> {

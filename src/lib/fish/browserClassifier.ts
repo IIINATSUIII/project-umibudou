@@ -18,13 +18,13 @@ import {
 const ORT_SCRIPT = '/ort/ort.wasm.min.js'
 const ORT_BASE = '/ort/'
 
-interface OrtTensor {
+export interface OrtTensor {
   data: Float32Array
 }
-interface OrtSession {
+export interface OrtSession {
   run(feeds: Record<string, unknown>): Promise<Record<string, OrtTensor>>
 }
-interface OrtGlobal {
+export interface OrtGlobal {
   env: { wasm: { wasmPaths: string; numThreads: number } }
   InferenceSession: { create(url: string, options: { executionProviders: string[] }): Promise<OrtSession> }
   Tensor: new (type: 'float32', data: Float32Array, dims: number[]) => unknown
@@ -33,7 +33,7 @@ interface OrtGlobal {
 let ortLoading: Promise<OrtGlobal> | null = null
 let sessionLoading: Promise<OrtSession> | null = null
 
-function loadOrt(): Promise<OrtGlobal> {
+export function loadOrt(): Promise<OrtGlobal> {
   const existing = (window as unknown as { ort?: OrtGlobal }).ort
   if (existing) return Promise.resolve(existing)
   ortLoading ??= new Promise<OrtGlobal>((resolve, reject) => {

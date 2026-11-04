@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { SPECIES, cautionFor } from '@/lib/fish/classify'
 import { buildProgress, sortNewestFirst, type CollectionEntry } from '@/lib/fish/collection'
 import { CollectionStore, isCollectionSupported } from '@/lib/fish/collectionStore'
+import SpriteChooser from '../SpriteChooser'
 
 type Tab = 'zukan' | 'album'
 
@@ -28,6 +29,9 @@ export default function FishCollectionPage() {
   const [tab, setTab] = useState<Tab>('zukan')
   const [selected, setSelected] = useState<CollectionEntry | null>(null)
   const [confirmingClear, setConfirmingClear] = useState(false)
+  // 水槽で泳ぐ姿を選び直している最中か
+  const [choosingLook, setChoosingLook] = useState(false)
+  const [notice, setNotice] = useState('')
   // IndexedDB が使えるかは、ブラウザで表示したあとに調べる（サーバーが作る最初の画面と食い違わないように）
   const [supported, setSupported] = useState<boolean | null>(null)
 
@@ -52,6 +56,12 @@ export default function FishCollectionPage() {
     }
   }, [reload])
 
+  // 別の写真を選んだら、姿の選び直しはやめる
+  useEffect(() => {
+    setChoosingLook(false)
+    setNotice('')
+  }, [selected?.id])
+
   const urls = usePhotoUrls(entries ?? [])
   const progress = useMemo(() => buildProgress(entries ?? []), [entries])
   const speciesEntries = (id: number) => (entries ?? []).filter((entry) => entry.speciesId === id)
@@ -63,6 +73,17 @@ export default function FishCollectionPage() {
       await reload()
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '削除できませんでした。')
+    }
+  }
+
+  async function changeLook(entry: CollectionEntry, sprite: Blob | null) {
+    try {
+      await store.current?.setSprite(entry.id, sprite)
+      setChoosingLook(false)
+      setNotice(sprite ? '水槽で泳ぐ姿を変えました。' : '水槽では、泡に包んで泳ぎます。')
+      await reload()
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '変更できませんでした。')
     }
   }
 
@@ -111,9 +132,17 @@ export default function FishCollectionPage() {
               </p>
             </section>
 
+            {entries.length > 0 && (
+              <Link href="/line-menu/fish/aquarium" data-testid="aquarium-link"
+                className="mt-3 flex items-center justify-between rounded-2xl bg-gradient-to-r from-sky-500 to-teal-500 p-4 text-white shadow-sm transition hover:brightness-105">
+                <span className="font-bold">🐠 マイ水槽で泳がせる</span>
+                <span className="text-xs opacity-90">タップで名前・エサやり →</span>
+              </Link>
+            )}
+
             <div role="tablist" aria-label="表示の切り替え" className="mt-4 grid grid-cols-2 gap-2 rounded-xl bg-slate-100 p-1">
               {(['zukan', 'album'] as const).map((key) => (
-                <button key={key} role="tab" aria-selected={tab === key} onClick={() => { setTab(key); setSelected(null) }} data-testid={`tab-${key}`}
+                <button key={key} role="tab" aria-selected={tab === key} onClick={() => { setTab(key); setSelected(null); setChoosingLook(false); setNotice('') }} data-testid={`tab-${key}`}
                   className={`rounded-lg px-3 py-2 text-sm font-semibold transition ${tab === key ? 'bg-white text-sky-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
                   {key === 'zukan' ? '🐟 図鑑' : '🖼 アルバム'}
                 </button>
@@ -192,6 +221,24 @@ export default function FishCollectionPage() {
                   {new Date(selected.createdAt).toLocaleString('ja-JP')} に追加・{selected.source === 'ai' ? '判定の結果から' : '自分で選んだ魚'}
                   {selected.speciesId !== null && ` ・この魚の写真 ${speciesEntries(selected.speciesId).length}枚`}
                 </p>
+                {choosingLook ? (
+                  <div className="mt-3">
+                    <SpriteChooser
+                      photo={selected.photo}
+                      expectedSpeciesId={selected.speciesId}
+                      originalProbability={selected.topProbability}
+                      confirmLabel="この姿にする"
+                      onConfirm={(sprite) => changeLook(selected, sprite)}
+                      onCancel={() => setChoosingLook(false)}
+                    />
+                  </div>
+                ) : (
+                  <button type="button" onClick={() => { setChoosingLook(true); setNotice('') }} data-testid="choose-look"
+                    className="mt-3 w-full rounded-xl border border-sky-300 bg-sky-50 px-3 py-2 text-sm font-semibold text-sky-800 hover:bg-sky-100">
+                    🐠 水槽での姿を選ぶ
+                  </button>
+                )}
+                {notice && <p role="status" className="mt-2 text-xs text-emerald-700">{notice}</p>}
                 <div className="mt-3 grid grid-cols-2 gap-2">
                   <button type="button" onClick={() => setSelected(null)} className="rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50">閉じる</button>
                   <button type="button" onClick={() => void remove(selected.id)} data-testid="delete-one"

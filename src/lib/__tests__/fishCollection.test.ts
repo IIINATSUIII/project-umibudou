@@ -200,6 +200,42 @@ describe('CollectionStore(端末の中への保存)', () => {
     expect(await store.count()).toBe(MAX_ENTRIES)
   }, 60000)
 
+  it('切り抜き(sprite)も、写真といっしょに保存して読み出せる。切り抜けなかった(null)も区別して残す', async () => {
+    await store.add(input({ speciesId: 1, sprite: photo(300) }))
+    await store.add(input({ speciesId: 2, sprite: null }))
+    await store.add(input({ speciesId: 3 }))
+
+    const saved = await store.list()
+    const bySpecies = (id: number) => saved.find((e) => e.speciesId === id)!
+
+    expect(bySpecies(1).sprite?.size).toBe(300)
+    expect(bySpecies(2).sprite).toBeNull()
+    expect(bySpecies(3).sprite).toBeUndefined() // まだ試していない古い記録
+  })
+
+  it('あとから切り抜きを付けられる。ほかの項目と写真は変わらない', async () => {
+    const added = await store.add(input({ speciesId: 4 }))
+
+    await store.setSprite(added.id, photo(123))
+
+    const [saved] = await store.list()
+    expect(saved.sprite?.size).toBe(123)
+    expect(saved.speciesId).toBe(4)
+    expect(saved.photo.size).toBe(500)
+    expect(saved.createdAt).toBe(added.createdAt)
+  })
+
+  it('切り抜けなかった(null)を、あとから記録できる。存在しない記録に対しては、何も作らない', async () => {
+    const added = await store.add(input())
+
+    await store.setSprite(added.id, null)
+    await store.setSprite('no-such-id', photo(10))
+
+    const saved = await store.list()
+    expect(saved).toHaveLength(1)
+    expect(saved[0].sprite).toBeNull()
+  })
+
   it('追加した記録の id は、重ならない', async () => {
     const ids = new Set((await Promise.all([store.add(input()), store.add(input()), store.add(input())])).map((e) => e.id))
 
