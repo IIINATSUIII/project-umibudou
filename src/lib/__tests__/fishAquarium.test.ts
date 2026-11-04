@@ -14,6 +14,8 @@ import {
   toAlpha,
 } from '../fish/cutout'
 import {
+  DIGEST_MAX,
+  FOODS_PER_POOP,
   FULL_GROWN_FED,
   GROWTH_STAGES,
   MAX_FOOD,
@@ -365,17 +367,27 @@ describe('うんち', () => {
     expect(feed(0, 60).dropped).toHaveLength(0)
   })
 
-  it('エサを食べた数だけ、しばらくしてから、うんちが出る（食べてすぐは出ない）', () => {
-    expect(feed(1, 3).dropped).toHaveLength(0) // 消化には時間がかかる
-    const result = feed(3, 80)
-    expect(result.dropped).toHaveLength(3)
+  it('エサを食べても、数が少ないうちは、うんちは出ない', () => {
+    expect(feed(1, 120).dropped).toHaveLength(0)
+    expect(feed(FOODS_PER_POOP - 1, 120).dropped).toHaveLength(0)
+  })
+
+  it(`エサを${FOODS_PER_POOP}個食べるごとに、しばらくしてから、うんちが1つ出る（食べてすぐは出ない）`, () => {
+    expect(feed(FOODS_PER_POOP, 5).dropped).toHaveLength(0) // 消化には時間がかかる
+    const result = feed(FOODS_PER_POOP, DIGEST_MAX + 5)
+    expect(result.dropped).toHaveLength(1)
     expect(result.fishes[0].digesting).toBe(0) // 出し終わったら、それ以上は出ない
-    expect(feed(3, 200).dropped).toHaveLength(3)
+    expect(feed(FOODS_PER_POOP, 300).dropped).toHaveLength(1)
+    expect(feed(FOODS_PER_POOP * 2, DIGEST_MAX * 2 + 10).dropped).toHaveLength(2)
+  })
+
+  it('うんちの数は、食べたエサの数よりずっと少ない（水槽がうんちだらけにならない）', () => {
+    expect(feed(20, 600).dropped.length).toBeLessThanOrEqual(20 / FOODS_PER_POOP)
   })
 
   it('うんちは、魚の後ろ（しっぽ側）から出る', () => {
     const random = seeded(2)
-    const fish: SwimmingFish = { ...createFish('a', tank, random), x: 200, y: 200, vx: 40, digesting: 1, poopIn: 0 }
+    const fish: SwimmingFish = { ...createFish('a', tank, random), x: 200, y: 200, vx: 40, digesting: FOODS_PER_POOP, poopIn: 0 }
     const right = step([fish], [], tank, 0.016, random).dropped[0]
     expect(right.x).toBeLessThan(fish.x) // 右向きなら、左（後ろ）
     const left = step([{ ...fish, vx: -40 }], [], tank, 0.016, random).dropped[0]

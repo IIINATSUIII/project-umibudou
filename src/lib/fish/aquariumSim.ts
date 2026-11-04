@@ -27,7 +27,7 @@ export interface SwimmingFish {
   baseSize: number
   /** これまでに食べたエサの数（成長のもと。記録に保存される） */
   fed: number
-  /** まだ消化していないエサの数。うんちとして出てくる */
+  /** まだ消化していないエサの数。FOODS_PER_POOP に達するごとに、うんちが1つ出る */
   digesting: number
   /** 次のうんちまでの秒数 */
   poopIn: number
@@ -94,9 +94,11 @@ export function foodUntilNextStage(fed: number): number | null {
 }
 
 // ---- うんち ----
-/** 食べてから、うんちを出すまでの秒数の範囲 */
-const DIGEST_MIN = 6
-const DIGEST_MAX = 14
+/** エサをこの数だけ食べるごとに、うんちが1つ出る（出しすぎて、水槽がうんちだらけにならないように） */
+export const FOODS_PER_POOP = 5
+/** その数に達してから、うんちを出すまでの秒数の範囲 */
+export const DIGEST_MIN = 20
+export const DIGEST_MAX = 45
 const POOP_SINK_SPEED = 24
 /** 水槽に残るうんちの上限（古いものから消す）。描画を軽く保つ */
 export const MAX_POOP = 16
@@ -212,8 +214,8 @@ export function step(
         eatenBy.push(fish.id)
         spin = 0.6
         fed += 1
-        if (digesting === 0) poopIn = DIGEST_MIN + random() * (DIGEST_MAX - DIGEST_MIN)
         digesting += 1
+        if (digesting === FOODS_PER_POOP) poopIn = DIGEST_MIN + random() * (DIGEST_MAX - DIGEST_MIN)
       }
     } else {
       // ふだんの泳ぎ: 横にまっすぐ、高さはときどき選びなおして、ゆるやかに近づく
@@ -244,11 +246,11 @@ export function step(
     y = clamp(y, half * 0.6 + 4, tank.height - tank.floor - half * 0.6)
 
     // 食べたものは、しばらくしてから、うんちとして出る（しっぽのほうから）
-    if (digesting > 0) {
+    if (digesting >= FOODS_PER_POOP) {
       poopIn -= stepDt
       if (poopIn <= 0) {
         dropped.push({ x: x - (vx < 0 ? -1 : 1) * size * 0.4, y: y + size * 0.15 })
-        digesting -= 1
+        digesting -= FOODS_PER_POOP
         poopIn = DIGEST_MIN + random() * (DIGEST_MAX - DIGEST_MIN)
       }
     }
