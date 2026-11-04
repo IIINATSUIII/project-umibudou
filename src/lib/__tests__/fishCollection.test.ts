@@ -1,6 +1,6 @@
 import 'fake-indexeddb/auto'
 import { IDBFactory } from 'fake-indexeddb'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   COLLECTION_MESSAGES,
   CollectionError,
@@ -14,7 +14,7 @@ import {
   validateNewEntry,
   type CollectionEntry,
 } from '../fish/collection'
-import { CollectionStore } from '../fish/collectionStore'
+import { CollectionStore, newId } from '../fish/collectionStore'
 import { SPECIES } from '../fish/classify'
 
 const photo = (bytes = 100) => new Blob([new Uint8Array(bytes).fill(1)], { type: 'image/jpeg' })
@@ -248,6 +248,20 @@ describe('CollectionStore(端末の中への保存)', () => {
     expect(saved[0].fed).toBe(4)
     expect(saved[0].speciesId).toBe(4)
     expect(saved[0].photo.size).toBe(500)
+  })
+
+  it('crypto.randomUUID が無い環境（古い Node など）でも、記録を追加できる。id は重ならない', async () => {
+    vi.stubGlobal('crypto', undefined)
+    try {
+      expect(newId()).not.toBe(newId())
+      const a = await store.add(input())
+      const b = await store.add(input())
+      expect(a.id).toBeTruthy()
+      expect(a.id).not.toBe(b.id)
+      expect(await store.count()).toBe(2)
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 
   it('追加した記録の id は、重ならない', async () => {

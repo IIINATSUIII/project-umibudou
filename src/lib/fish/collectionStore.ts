@@ -29,6 +29,12 @@ function done(tx: IDBTransaction): Promise<void> {
   })
 }
 
+/** 記録の id。crypto.randomUUID が無い環境（古い Node など）では、時刻と乱数で作る */
+export function newId(): string {
+  const random = globalThis.crypto?.randomUUID?.()
+  return random ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`
+}
+
 export class CollectionStore {
   private db: Promise<IDBDatabase> | null = null
 
@@ -65,7 +71,7 @@ export class CollectionStore {
     const db = await this.open()
     validateNewEntry(input, await this.count())
     const entry: CollectionEntry = {
-      id: crypto.randomUUID(),
+      id: newId(),
       createdAt: Date.now(),
       speciesId: input.speciesId,
       source: input.source,
