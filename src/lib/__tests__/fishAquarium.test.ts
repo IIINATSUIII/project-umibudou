@@ -14,16 +14,29 @@ import {
   toAlpha,
 } from '../fish/cutout'
 import {
+  FULL_GROWN_FED,
+  GROWTH_STAGES,
   MAX_FOOD,
+  MAX_GROWTH_SCALE,
+  MAX_POOP,
+  MIN_GROWTH_SCALE,
+  addPoops,
   createFish,
   dropFood,
   facing,
+  foodUntilNextStage,
+  growthScale,
+  growthStage,
+  hitPoop,
   hitTest,
   nearestFood,
+  removePoop,
   spinScale,
   step,
+  stepPoops,
   wobbleOffset,
   type Food,
+  type Poop,
   type SwimmingFish,
   type TankSize,
 } from '../fish/aquariumSim'
@@ -280,5 +293,133 @@ describe('タップの当たり判定', () => {
 
   it('魚がいない水槽では、いつも null', () => {
     expect(hitTest([], 10, 10)).toBeNull()
+  })
+})
+
+describe('成長: エサを食べた数で大きくなる', () => {
+  it('倍率は、食べていなければ小さく、食べるほど大きく、育ちきったら止まる', () => {
+    expect(growthScale(0)).toBeCloseTo(MIN_GROWTH_SCALE)
+    expect(growthScale(FULL_GROWN_FED)).toBeCloseTo(MAX_GROWTH_SCALE)
+    expect(growthScale(FULL_GROWN_FED * 5)).toBeCloseTo(MAX_GROWTH_SCALE)
+    expect(growthScale(10)).toBeGreaterThan(growthScale(5))
+    expect(growthScale(-3)).toBeCloseTo(MIN_GROWTH_SCALE) // 壊れた値でも、範囲に収める
+    expect(growthScale(Number.NaN)).toBeCloseTo(MIN_GROWTH_SCALE)
+  })
+
+  it('段階: 食べた数が境目に達すると上がる。次の段階までの数も出せる', () => {
+    expect(growthStage(0)).toBe(0)
+    expect(growthStage(GROWTH_STAGES[1].from - 1)).toBe(0)
+    expect(growthStage(GROWTH_STAGES[1].from)).toBe(1)
+    expect(growthStage(999)).toBe(GROWTH_STAGES.length - 1)
+    expect(foodUntilNextStage(2)).toBe(GROWTH_STAGES[1].from - 2)
+    expect(foodUntilNextStage(999)).toBeNull()
+  })
+
+  it('食べた数が多い魚は、最初から大きく泳ぎ始める（保存された数から再開する）', () => {
+    const baby = createFish('a', tank, seeded(3), 0)
+    const grown = createFish('a', tank, seeded(3), FULL_GROWN_FED)
+    expect(grown.baseSize).toBe(baby.baseSize)
+    expect(grown.size).toBeGreaterThan(baby.size)
+    expect(grown.fed).toBe(FULL_GROWN_FED)
+  })
+
+  it('エサを食べると、食べた数が1つ増え、大きさが少しずつ成長に追いつく', () => {
+    const random = seeded(9)
+    let fishes: SwimmingFish[] = [{ ...createFish('a', tank, random, 0), x: 200, y: 200 }]
+    const before = fishes[0].size
+    const result = step(fishes, [{ id: 1, x: 200, y: 200 }], tank, 0.016, random)
+    expect(result.eaten).toEqual(['a'])
+    fishes = result.fishes
+    expect(fishes[0].fed).toBe(1)
+
+    // 食べた数を一気に増やしておくと、時間がたつにつれて、目標の大きさに近づく
+    fishes = [{ ...fishes[0], fed: FULL_GROWN_FED }]
+    const target = fishes[0].baseSize * MAX_GROWTH_SCALE
+    let last = before
+    for (let t = 0; t < 120; t++) {
+      fishes = step(fishes, [], tank, 1 / 60, random).fishes
+      expect(fishes[0].size).toBeGreaterThanOrEqual(last - 1e-9) // 縮まない
+      last = fishes[0].size
+    }
+    expect(last).toBeGreaterThan(before)
+    expect(last).toBeCloseTo(target, 0)
+  })
+})
+
+describe('うんち', () => {
+  /** 1匹がエサを n 個食べたあと、しばらく様子を見る */
+  function feed(count: number, seconds: number) {
+    const random = seeded(11)
+    let fishes: SwimmingFish[] = [{ ...createFish('a', tank, random), x: 200, y: 200, vx: 40 }]
+    for (let i = 0; i < count; i++) fishes = step(fishes, [{ id: i + 1, x: fishes[0].x, y: fishes[0].y }], tank, 0.016, random).fishes
+    const dropped: { x: number; y: number }[] = []
+    for (let t = 0; t < seconds * 60; t++) {
+      const result = step(fishes, [], tank, 1 / 60, random)
+      fishes = result.fishes
+      dropped.push(...result.dropped)
+    }
+    return { fishes, dropped }
+  }
+
+  it('何も食べていない魚は、うんちをしない', () => {
+    expect(feed(0, 60).dropped).toHaveLength(0)
+  })
+
+  it('エサを食べた数だけ、しばらくしてから、うんちが出る（食べてすぐは出ない）', () => {
+    expect(feed(1, 3).dropped).toHaveLength(0) // 消化には時間がかかる
+    const result = feed(3, 80)
+    expect(result.dropped).toHaveLength(3)
+    expect(result.fishes[0].digesting).toBe(0) // 出し終わったら、それ以上は出ない
+    expect(feed(3, 200).dropped).toHaveLength(3)
+  })
+
+  it('うんちは、魚の後ろ（しっぽ側）から出る', () => {
+    const random = seeded(2)
+    const fish: SwimmingFish = { ...createFish('a', tank, random), x: 200, y: 200, vx: 40, digesting: 1, poopIn: 0 }
+    const right = step([fish], [], tank, 0.016, random).dropped[0]
+    expect(right.x).toBeLessThan(fish.x) // 右向きなら、左（後ろ）
+    const left = step([{ ...fish, vx: -40 }], [], tank, 0.016, random).dropped[0]
+    expect(left.x).toBeGreaterThan(fish.x)
+  })
+
+  it('うんちは、ゆっくり沈み、底に着くと止まる。着く高さは水槽の底（砂）の中', () => {
+    let poops: Poop[] = addPoops([], [{ x: 100, y: 100 }], tank, 1)
+    const y0 = poops[0].y
+    poops = stepPoops(poops, tank, 0.1)
+    expect(poops[0].y).toBeGreaterThan(y0)
+    expect(poops[0].settled).toBe(false)
+
+    for (let t = 0; t < 60 * 30; t++) poops = stepPoops(poops, tank, 1 / 60)
+    expect(poops[0].settled).toBe(true)
+    expect(poops[0].y).toBeGreaterThanOrEqual(tank.height - tank.floor)
+    expect(poops[0].y).toBeLessThanOrEqual(tank.height)
+    const rest = poops[0].y
+    expect(stepPoops(poops, tank, 0.1)[0].y).toBe(rest) // 着いたら、動かない
+  })
+
+  it('元の配列は変えない', () => {
+    const poops: Poop[] = [{ id: 1, x: 10, y: 10, settled: false }]
+    stepPoops(poops, tank, 0.1)
+    expect(poops[0].y).toBe(10)
+  })
+
+  it('たまるうんちには上限があり、あふれたら古いものから消える。水の外には出さない', () => {
+    let poops: Poop[] = []
+    for (let i = 0; i < MAX_POOP + 5; i++) poops = addPoops(poops, [{ x: -50, y: 99999 }], tank, i + 1)
+    expect(poops).toHaveLength(MAX_POOP)
+    expect(poops[0].id).toBe(6) // 古い5つが消えた
+    expect(poops[0].x).toBe(8)
+    expect(poops[0].y).toBeLessThanOrEqual(tank.height - tank.floor)
+  })
+
+  it('タップで、いちばん近いうんちを見つけ、そうじできる。外れたら null', () => {
+    const poops: Poop[] = [
+      { id: 1, x: 100, y: 440, settled: true },
+      { id: 2, x: 110, y: 440, settled: true },
+    ]
+    expect(hitPoop(poops, 300, 100)).toBeNull()
+    expect(hitPoop(poops, 108, 440)?.id).toBe(2)
+    expect(removePoop(poops, 2).map((p) => p.id)).toEqual([1])
+    expect(removePoop(poops, 99)).toHaveLength(2)
   })
 })

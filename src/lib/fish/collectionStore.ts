@@ -97,6 +97,16 @@ export class CollectionStore {
     await done(tx)
   }
 
+  /** 水槽で食べたエサの数を、増やす。記録が無ければ（削除された後など）何もしない。 */
+  async addFed(id: string, amount = 1): Promise<void> {
+    const db = await this.open()
+    const tx = db.transaction(STORE, 'readwrite')
+    const store = tx.objectStore(STORE)
+    const current = await request<CollectionEntry | undefined>(store.get(id))
+    if (current) store.put({ ...current, fed: (current.fed ?? 0) + amount })
+    await done(tx)
+  }
+
   async remove(id: string): Promise<void> {
     const db = await this.open()
     const tx = db.transaction(STORE, 'readwrite')

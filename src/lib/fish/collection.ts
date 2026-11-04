@@ -26,6 +26,8 @@ export interface CollectionEntry {
    * null = 切り抜けなかった（水槽では、写真を泡に包んで泳がせる）、undefined = まだ試していない（古い記録）
    */
   sprite?: Blob | null
+  /** 水槽で食べたエサの数（魚が成長するもと）。無ければ 0 */
+  fed?: number
 }
 
 /** 保存できる写真の上限（端末の容量を使い切らないため） */

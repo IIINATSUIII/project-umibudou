@@ -6,14 +6,22 @@ import { SPECIES } from '@/lib/fish/classify'
 import { sortNewestFirst, type CollectionEntry } from '@/lib/fish/collection'
 import { CollectionStore, isCollectionSupported } from '@/lib/fish/collectionStore'
 import {
+  GROWTH_STAGES,
+  addPoops,
   createFish,
   dropFood,
   facing,
+  foodUntilNextStage,
+  growthStage,
+  hitPoop,
   hitTest,
+  removePoop,
   spinScale,
   step,
+  stepPoops,
   wobbleOffset,
   type Food,
+  type Poop,
   type SwimmingFish,
   type TankSize,
 } from '@/lib/fish/aquariumSim'
@@ -60,9 +68,14 @@ export default function AquariumPage() {
   const [entries, setEntries] = useState<CollectionEntry[] | null>(null)
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
+  const [poopCount, setPoopCount] = useState(0)
+  // 食べたエサの数を保存する先（読み込み時に開いて、ページを閉じるときに閉じる）
+  const storeRef = useRef<CollectionStore | null>(null)
   const stateRef = useRef({
     fishes: [] as SwimmingFish[],
     foods: [] as Food[],
+    poops: [] as Poop[],
+    nextPoopId: 1,
     looks: new Map<string, Look>(),
     names: new Map<string, string>(),
     bubbles: [] as Bubble[],
@@ -76,6 +89,7 @@ export default function AquariumPage() {
   useEffect(() => {
     let cancelled = false
     const store = new CollectionStore()
+    storeRef.current = store
     ;(async () => {
       if (!isCollectionSupported()) {
         setEntries([])
@@ -93,6 +107,7 @@ export default function AquariumPage() {
     })()
     return () => {
       cancelled = true
+      storeRef.current = null
       void store.close()
     }
   }, [])
@@ -118,8 +133,10 @@ export default function AquariumPage() {
       if (cancelled) return
       state.looks = looks
       state.names = names
-      state.fishes = entries.filter((e) => looks.has(e.id)).map((e) => createFish(e.id, state.tank, random))
+      state.fishes = entries.filter((e) => looks.has(e.id)).map((e) => createFish(e.id, state.tank, random, e.fed ?? 0))
       state.foods = []
+      state.poops = []
+      setPoopCount(0)
     })()
     return () => {
       cancelled = true
@@ -168,6 +185,7 @@ export default function AquariumPage() {
     let frame = 0
     let last = performance.now()
     let running = true
+    const poopCountRef = { current: 0 }
 
     const draw = (now: number) => {
       const { cssWidth, cssHeight, ratio } = state.size
@@ -217,6 +235,26 @@ export default function AquariumPage() {
         context.stroke()
       }
       context.restore()
+      // うんち（砂の上にたまる）
+      for (const poop of state.poops) {
+        context.save()
+        context.translate(poop.x, poop.y)
+        context.fillStyle = '#7a4a22'
+        context.beginPath()
+        context.ellipse(0, 4, 9, 4.5, 0, 0, Math.PI * 2)
+        context.fill()
+        context.beginPath()
+        context.ellipse(0, -0.5, 6.5, 4, 0, 0, Math.PI * 2)
+        context.fill()
+        context.beginPath()
+        context.ellipse(0, -5, 3.8, 3.2, 0, 0, Math.PI * 2)
+        context.fill()
+        context.fillStyle = 'rgba(255,255,255,0.28)'
+        context.beginPath()
+        context.ellipse(-2.5, -1.5, 1.8, 1, -0.5, 0, Math.PI * 2)
+        context.fill()
+        context.restore()
+      }
       // エサ
       context.fillStyle = '#d9a441'
       for (const food of state.foods) {
@@ -263,7 +301,8 @@ export default function AquariumPage() {
       // タップした魚の名前
       if (state.label && now < state.label.until) {
         const fish = state.fishes.find((f) => f.id === state.label?.id)
-        const text = state.names.get(state.label.id)
+        const name = state.names.get(state.label.id)
+        const text = name && fish ? `${name}（${GROWTH_STAGES[growthStage(fish.fed)].name}）` : undefined
         if (fish && text) {
           context.font = '600 13px system-ui, "Yu Gothic", sans-serif'
           const width = context.measureText(text).width + 18
@@ -287,6 +326,24 @@ export default function AquariumPage() {
       const result = step(state.fishes, state.foods, state.tank, dt, Math.random)
       state.fishes = result.fishes
       state.foods = result.foods
+      // 食べたエサの数を保存する。段階が上がったら、知らせる
+      for (const id of result.eaten) {
+        void storeRef.current?.addFed(id).catch(() => undefined)
+        const fish = state.fishes.find((f) => f.id === id)
+        if (fish && growthStage(fish.fed) > growthStage(fish.fed - 1)) {
+          setMessage(`${state.names.get(id) ?? '魚'}が「${GROWTH_STAGES[growthStage(fish.fed)].name}」に成長しました！`)
+        }
+      }
+      // うんちが出たら加え、沈める
+      if (result.dropped.length > 0) {
+        state.poops = addPoops(state.poops, result.dropped, state.tank, state.nextPoopId)
+        state.nextPoopId += result.dropped.length
+      }
+      state.poops = stepPoops(state.poops, state.tank, dt)
+      if (state.poops.length !== poopCountRef.current) {
+        poopCountRef.current = state.poops.length
+        setPoopCount(state.poops.length)
+      }
       for (const bubble of state.bubbles) {
         bubble.y -= bubble.speed * Math.min(dt, 0.1)
         bubble.x += Math.sin(now / 700 + bubble.r) * 0.2
@@ -325,11 +382,22 @@ export default function AquariumPage() {
     const x = event.clientX - rect.left
     const y = event.clientY - rect.top
     const state = stateRef.current
+    // うんちは小さいので、魚より先に調べる（タップしたらそうじする）
+    const poop = hitPoop(state.poops, x, y)
+    if (poop) {
+      state.poops = removePoop(state.poops, poop.id)
+      setPoopCount(state.poops.length)
+      setMessage('うんちをそうじしました ✨')
+      return
+    }
     const hit = hitTest(state.fishes, x, y)
     if (hit) {
       state.label = { id: hit.id, until: performance.now() + 2200 }
       state.fishes = state.fishes.map((f) => (f.id === hit.id ? { ...f, spin: 0.6 } : f))
-      setMessage(`${state.names.get(hit.id) ?? ''} をタップしました`)
+      const left = foodUntilNextStage(hit.fed)
+      const stage = GROWTH_STAGES[growthStage(hit.fed)].name
+      const next = GROWTH_STAGES[growthStage(hit.fed) + 1]?.name
+      setMessage(`${state.names.get(hit.id) ?? ''} をタップしました（${stage}・エサ ${hit.fed}個${left !== null && next ? `・あと${left}個で「${next}」` : '・いちばん大きく育ちました'}）`)
       return
     }
     const before = state.foods.length
@@ -345,7 +413,7 @@ export default function AquariumPage() {
         <Link href="/line-menu/fish/collection" className="text-sm font-medium text-teal-800 hover:underline">← コレクションへ</Link>
         <header className="mb-4 mt-5 text-center">
           <h1 className="text-2xl font-bold text-slate-900">🐠 マイ水槽</h1>
-          <p className="mt-2 text-sm text-slate-600">撮った魚が、水槽を泳ぎます。魚をタップすると名前が、水をタップするとエサがまけます。</p>
+          <p className="mt-2 text-sm text-slate-600">撮った魚が、水槽を泳ぎます。魚をタップすると名前が、水をタップするとエサがまけます。エサを食べると大きく育ちますが、うんちも出ます。うんちをタップして、そうじしましょう。</p>
         </header>
 
         {error && <p role="alert" className="mb-3 rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</p>}
@@ -365,6 +433,7 @@ export default function AquariumPage() {
         {fishCount > 0 && (
           <p className="mt-2 text-center text-xs text-slate-500" data-testid="tank-count">
             水槽の魚: {fishCount}匹{fishCount >= MAX_IN_TANK ? `（新しい${MAX_IN_TANK}匹まで）` : ''}
+            <span data-testid="poop-count"> ・うんち: {poopCount}個</span>
           </p>
         )}
         <p className="mt-6 text-center text-xs leading-relaxed text-slate-400">

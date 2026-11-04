@@ -236,6 +236,20 @@ describe('CollectionStore(端末の中への保存)', () => {
     expect(saved[0].sprite).toBeNull()
   })
 
+  it('食べたエサの数を増やせる（最初は無し=0）。同時に何度呼んでも、数え落とさない。存在しない記録には、何も作らない', async () => {
+    const added = await store.add(input({ speciesId: 4 }))
+    expect((await store.list())[0].fed).toBeUndefined()
+
+    await Promise.all([store.addFed(added.id), store.addFed(added.id), store.addFed(added.id, 2)])
+    await store.addFed('no-such-id')
+
+    const saved = await store.list()
+    expect(saved).toHaveLength(1)
+    expect(saved[0].fed).toBe(4)
+    expect(saved[0].speciesId).toBe(4)
+    expect(saved[0].photo.size).toBe(500)
+  })
+
   it('追加した記録の id は、重ならない', async () => {
     const ids = new Set((await Promise.all([store.add(input()), store.add(input()), store.add(input())])).map((e) => e.id))
 
