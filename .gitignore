@@ -18,6 +18,8 @@ firebase-debug.log
 
 # ローカル永続化データ（Sheets未設定時のフォールバック保存先）
 data/
+# おさかな図鑑: ビルド前に scripts/copy-ort.mjs が node_modules からコピーする
+public/ort/
 
 # misc
 .DS_Store
