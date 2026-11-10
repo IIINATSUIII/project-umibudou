@@ -5,6 +5,9 @@ import Link from 'next/link'
 import Image from 'next/image'
 import { SPECIES, cautionFor, type FishResult } from '@/lib/fish/classify'
 import { classifyPhoto, loadModel } from '@/lib/fish/browserClassifier'
+import { CollectionStore, isCollectionSupported, requestPersistentStorage } from '@/lib/fish/collectionStore'
+import { countFound } from '@/lib/fish/collection'
+import { downscalePhoto } from '@/lib/fish/downscalePhoto'
 
 const MAX_IMAGE_BYTES = 12 * 1024 * 1024
 const ACCEPTED_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif']
@@ -21,6 +24,30 @@ export default function FishGuidePage() {
   const [modelState, setModelState] = useState<ModelState>('loading')
   const [judging, setJudging] = useState(false)
   const [result, setResult] = useState<Result | null>(null)
+  // コレクション（その端末のブラウザの中だけに保存）
+  const store = useRef<CollectionStore | null>(null)
+  const [pickedSpecies, setPickedSpecies] = useState<string>('') // '' = 判定の1位 / 'none' = わからない / 数字 = 選び直した魚
+  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved'>('idle')
+  const [saveMessage, setSaveMessage] = useState('')
+  const [foundCount, setFoundCount] = useState<number | null>(null)
+  // IndexedDB が使えるか（ブラウザで表示したあとに調べる。サーバーが作る最初の画面と食い違わないように）
+  const [canCollect, setCanCollect] = useState(false)
+
+  function collection(): CollectionStore {
+    store.current ??= new CollectionStore()
+    return store.current
+  }
+
+  // 見つけた魚の数（コレクションのリンクに表示）
+  useEffect(() => {
+    if (!isCollectionSupported()) return
+    setCanCollect(true)
+    collection().list().then((entries) => setFoundCount(countFound(entries))).catch(() => setFoundCount(null))
+    return () => {
+      void store.current?.close()
+      store.current = null
+    }
+  }, [])
 
   // 画面を開いたら、判定モデルを先に読み込む（初回だけ時間がかかる。次回からは、ブラウザが覚えている）
   useEffect(() => {
@@ -64,6 +91,9 @@ export default function FishGuidePage() {
     event.target.value = ''
     setError('')
     setResult(null)
+    setPickedSpecies('')
+    setSaveState('idle')
+    setSaveMessage('')
     if (!selected) return
     if (!ACCEPTED_TYPES.includes(selected.type)) {
       setImage(null)
@@ -74,6 +104,30 @@ export default function FishGuidePage() {
     } else {
       setImage(selected)
       if (modelState === 'ready') void judge(selected)
+    }
+  }
+
+  async function addToCollection() {
+    if (!image || !result) return
+    setSaveState('saving')
+    setSaveMessage('')
+    try {
+      const top = result.candidates[0]
+      const speciesId = pickedSpecies === '' ? top.species.id : pickedSpecies === 'none' ? null : Number(pickedSpecies)
+      const photo = await downscalePhoto(image)
+      await collection().add({
+        speciesId,
+        source: pickedSpecies === '' ? 'ai' : 'manual',
+        topProbability: top.probability,
+        photo,
+      })
+      void requestPersistentStorage()
+      setFoundCount(countFound(await collection().list()))
+      setSaveState('saved')
+      setSaveMessage('コレクションに追加しました。')
+    } catch (cause) {
+      setSaveState('idle')
+      setSaveMessage(cause instanceof Error ? cause.message : '追加できませんでした。')
     }
   }
 
@@ -148,9 +202,44 @@ export default function FishGuidePage() {
                 </div>
               ))}
               <p className="text-xs text-slate-500">結果は目安です（判定にかかった時間: {(result.milliseconds / 1000).toFixed(2)}秒）。</p>
+
+              {canCollect ? (
+                <div className="space-y-2 rounded-xl border border-sky-200 bg-sky-50 p-3" data-testid="collection-add">
+                  <label className="block text-sm font-medium text-slate-700">
+                    コレクションに追加する魚
+                    <select value={pickedSpecies} onChange={(e) => { setPickedSpecies(e.target.value); setSaveState('idle'); setSaveMessage('') }}
+                      className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm">
+                      <option value="">{result.candidates[0].species.ja}（判定の1位）</option>
+                      {result.candidates.slice(1).map((candidate) => (
+                        <option key={candidate.species.id} value={candidate.species.id}>{candidate.species.ja}</option>
+                      ))}
+                      <option value="none">わからない・この中にいない</option>
+                      <optgroup label="ほかの魚から選ぶ">
+                        {SPECIES.filter((species) => !result.candidates.some((c) => c.species.id === species.id)).map((species) => (
+                          <option key={species.id} value={species.id}>{species.ja}</option>
+                        ))}
+                      </optgroup>
+                    </select>
+                  </label>
+                  <button type="button" onClick={() => void addToCollection()} disabled={saveState !== 'idle'}
+                    className="w-full rounded-xl bg-sky-700 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-sky-800 disabled:cursor-not-allowed disabled:opacity-60">
+                    {saveState === 'saving' ? '追加しています…' : saveState === 'saved' ? '✓ 追加しました' : '📚 コレクションに追加'}
+                  </button>
+                  {saveMessage && <p role="status" className={`text-xs ${saveState === 'saved' ? 'text-emerald-700' : 'text-red-700'}`}>{saveMessage}</p>}
+                  <p className="text-xs leading-relaxed text-slate-500">写真は縮小して、<b>この端末の中だけ</b>に保存します（撮影場所の情報は残りません）。</p>
+                </div>
+              ) : (
+                <p className="text-xs text-slate-500">この端末（ブラウザ）では、コレクションに保存できません。</p>
+              )}
             </div>
           )}
         </section>
+
+        <Link href="/line-menu/fish/collection" data-testid="collection-link"
+          className="mt-4 flex items-center justify-between rounded-2xl border border-sky-200 bg-white p-4 text-sm font-semibold text-sky-800 shadow-sm transition hover:bg-sky-50">
+          <span>📚 コレクションを見る</span>
+          <span className="text-xs font-normal text-slate-500">{foundCount === null ? '' : `${foundCount} / ${SPECIES.length}種 見つけた`}</span>
+        </Link>
 
         <section className="mt-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <details>
