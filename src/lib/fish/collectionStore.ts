@@ -12,7 +12,7 @@ const DB_NAME = 'okidive-fish-collection'
 const DB_VERSION = 1
 const STORE = 'entries'
 
-export type NewEntryInput = Pick<CollectionEntry, 'speciesId' | 'source' | 'topProbability' | 'photo'>
+export type NewEntryInput = Pick<CollectionEntry, 'speciesId' | 'source' | 'topProbability' | 'photo'> & { sprite?: Blob | null }
 
 function request<T>(req: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -27,6 +27,12 @@ function done(tx: IDBTransaction): Promise<void> {
     tx.onerror = () => reject(tx.error ?? new Error('保存に失敗しました'))
     tx.onabort = () => reject(tx.error ?? new Error('保存が中断されました'))
   })
+}
+
+/** 記録の id。crypto.randomUUID が無い環境（古い Node など）では、時刻と乱数で作る */
+export function newId(): string {
+  const random = globalThis.crypto?.randomUUID?.()
+  return random ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`
 }
 
 export class CollectionStore {
@@ -65,12 +71,13 @@ export class CollectionStore {
     const db = await this.open()
     validateNewEntry(input, await this.count())
     const entry: CollectionEntry = {
-      id: crypto.randomUUID(),
+      id: newId(),
       createdAt: Date.now(),
       speciesId: input.speciesId,
       source: input.source,
       topProbability: input.topProbability,
       photo: input.photo,
+      ...(input.sprite !== undefined ? { sprite: input.sprite } : {}),
     }
     try {
       const tx = db.transaction(STORE, 'readwrite')
@@ -84,6 +91,26 @@ export class CollectionStore {
       throw error
     }
     return entry
+  }
+
+  /** 切り抜き(sprite)だけを、あとから付ける（古い記録に、水槽用の画像を作り足すとき）。記録がなければ何もしない。 */
+  async setSprite(id: string, sprite: Blob | null): Promise<void> {
+    const db = await this.open()
+    const tx = db.transaction(STORE, 'readwrite')
+    const store = tx.objectStore(STORE)
+    const current = await request<CollectionEntry | undefined>(store.get(id))
+    if (current) store.put({ ...current, sprite })
+    await done(tx)
+  }
+
+  /** 水槽で食べたエサの数を、増やす。記録が無ければ（削除された後など）何もしない。 */
+  async addFed(id: string, amount = 1): Promise<void> {
+    const db = await this.open()
+    const tx = db.transaction(STORE, 'readwrite')
+    const store = tx.objectStore(STORE)
+    const current = await request<CollectionEntry | undefined>(store.get(id))
+    if (current) store.put({ ...current, fed: (current.fed ?? 0) + amount })
+    await done(tx)
   }
 
   async remove(id: string): Promise<void> {
