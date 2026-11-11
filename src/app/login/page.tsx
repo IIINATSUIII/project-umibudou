@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { login } from '@/lib/auth'
 import { useAuthRefresh } from '@/lib/authContext'
+import { staffLoginDestination } from '@/lib/staffLoginDestination'
 
 export default function LoginPage() {
   const router = useRouter()
@@ -17,15 +18,20 @@ export default function LoginPage() {
     e.preventDefault()
     setError('')
     setLoading(true)
-    const ok = await login(email, password)
-    setLoading(false)
-    if (ok) {
+    try {
+      const ok = await login(email, password)
+      if (ok) {
       // AuthProvider はルートレイアウトで一度しかマウントされないため、
       // 遷移前にコンテキストを更新しないと user が null のまま /login に戻される
       await refreshAuth()
-      router.push('/dashboard')
-    } else {
-      setError('メールアドレスまたはパスワードが正しくありません')
+        router.replace(staffLoginDestination(new URLSearchParams(window.location.search).get('next')))
+      } else {
+        setError('メールアドレスまたはパスワードが正しくありません')
+      }
+    } catch {
+      setError('ログインできませんでした。通信状態を確認して再度お試しください。')
+    } finally {
+      setLoading(false)
     }
   }
 
@@ -40,10 +46,12 @@ export default function LoginPage() {
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+            <label htmlFor="staff-email" className="block text-sm font-medium text-gray-700 mb-1">
               メールアドレス
             </label>
             <input
+              id="staff-email"
+              autoComplete="username"
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
@@ -54,10 +62,12 @@ export default function LoginPage() {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+            <label htmlFor="staff-password" className="block text-sm font-medium text-gray-700 mb-1">
               パスワード
             </label>
             <input
+              id="staff-password"
+              autoComplete="current-password"
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
@@ -81,7 +91,7 @@ export default function LoginPage() {
         </form>
 
         <p className="mt-5 text-xs text-center text-gray-400">
-          JWT セッション認証（HTTP-only Cookie）
+          店舗のスタッフ用アカウントでログインしてください。
         </p>
       </div>
     </div>

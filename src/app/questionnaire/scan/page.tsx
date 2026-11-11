@@ -4,6 +4,9 @@ import { useCallback, useEffect, useRef, useState, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import StaffQuestionnaireCheck from '@/components/StaffQuestionnaireCheck'
 import Navigation from '@/components/Navigation'
+import CheckinInbox from '@/components/CheckinInbox'
+import MobileCheckinSetup from '@/components/MobileCheckinSetup'
+import { staffLoginUrl } from '@/lib/staffLoginDestination'
 import { useAuth } from '@/lib/authContext'
 import { addRoster, fetchCustomers, fetchQuestionnaireById, fetchQuestionnaires, fetchReservations } from '@/lib/api'
 import type { Customer, QuestionnaireData, Reservation } from '@/types'
@@ -38,6 +41,8 @@ function ScanContent() {
   const searchParams = useSearchParams()
   const videoRef = useRef<HTMLVideoElement>(null)
   const streamRef = useRef<MediaStream | null>(null)
+  const initialLookupRef = useRef<string | null>(null)
+  const selectionRef = useRef(0)
   const [query, setQuery] = useState(
     searchParams.get('token') ?? searchParams.get('id') ?? ''
   )
@@ -56,6 +61,7 @@ function ScanContent() {
   const [cameraOn, setCameraOn] = useState(false)
   const [added, setAdded] = useState(false)
   const [adding, setAdding] = useState(false)
+  const [inboxRevision, setInboxRevision] = useState(0)
   const [checkInMethod, setCheckInMethod] = useState<'QR読取' | '手動照合'>(
     '手動照合'
   )
@@ -85,7 +91,7 @@ function ScanContent() {
   useEffect(() => {
     if (user === undefined) return
     if (!user) {
-      router.push('/login')
+      router.push(staffLoginUrl('/questionnaire/scan'))
       return
     }
     load()
@@ -95,6 +101,7 @@ function ScanContent() {
 
   const lookup = useCallback(
     (value: string, method: 'QR読取' | '手動照合' = '手動照合') => {
+      selectionRef.current++
       const q = value.trim()
       setQuery(q)
       setCandidates([])
@@ -137,11 +144,14 @@ function ScanContent() {
   )
   useEffect(() => {
     const initial = searchParams.get('token') ?? searchParams.get('id')
-    if (initial && questionnaires.length)
+    if (initial && questionnaires.length && initialLookupRef.current !== initial) {
+      initialLookupRef.current = initial
       lookup(initial, searchParams.get('token') ? 'QR読取' : '手動照合')
+    }
   }, [questionnaires, searchParams, lookup])
 
   async function startCamera() {
+    selectionRef.current++
     setCameraError('')
     const DetectorClass = (window as DetectorWindow).BarcodeDetector
     if (!DetectorClass) {
@@ -205,6 +215,7 @@ function ScanContent() {
 
   function manualSearch(e: React.FormEvent) {
     e.preventDefault()
+    selectionRef.current++
     const term = query.trim()
     if (!term) {
       setError('氏名または電話番号を入力してください。')
@@ -244,10 +255,42 @@ function ScanContent() {
       })
       setAdded(true)
       setResult({ ...result, qrUsed: true })
-    } catch {
-      setError('名簿への追加に失敗しました。時間をおいて再度お試しください。')
+      setInboxRevision(value => value + 1)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '名簿への追加に失敗しました。時間をおいて再度お試しください。')
     } finally {
       setAdding(false)
+    }
+  }
+
+  async function selectIncoming(id: string) {
+    const selection = ++selectionRef.current
+    stopCamera()
+    setError('')
+    setResult(null)
+    setCandidates([])
+    setAdded(false)
+    setResolveError('')
+    setCustomerLoadError(false)
+    try {
+      // 直前に提出された問診も、5分間隔の事前ロードを待たず表示する。
+      const current = await fetchQuestionnaireById(id)
+      if (current.qrUsed) throw new Error('このQRコードは受付済みです。')
+      if (!current.qrToken || Date.parse(current.qrExpiresAt ?? '') <= Date.now() || !Number.isFinite(Date.parse(current.qrExpiresAt ?? ''))) {
+        throw new Error('QRコードの有効期限が切れています。')
+      }
+      const latestReservations = await fetchReservations()
+      if (selectionRef.current !== selection) return
+      setReservations(latestReservations)
+      setCheckInMethod('QR読取')
+      setSelectedCustomerId(current.customerId ?? '')
+      setResult(current)
+      if (current.staffReviewStatus === '要対応') {
+        void fetchCustomers().then(setCustomers).catch(() => setCustomerLoadError(true))
+      }
+    } catch (cause) {
+      if (selectionRef.current !== selection) return
+      setError(cause instanceof Error ? cause.message : '問診情報を取得できませんでした。')
     }
   }
 
@@ -309,6 +352,8 @@ function ScanContent() {
             更新
           </button>
         </div>
+        <CheckinInbox onSelect={selectIncoming} disabled={adding || resolving} refreshKey={inboxRevision} />
+        <MobileCheckinSetup />
         <section className="bg-white rounded-xl border p-4 space-y-3">
           <button
             onClick={cameraOn ? stopCamera : startCamera}

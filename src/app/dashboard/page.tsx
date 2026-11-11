@@ -113,6 +113,15 @@ export default function DashboardPage() {
       {actionError && <p role="alert" className="p-4 text-red-700">{actionError}</p>}
       <main className="max-w-5xl mx-auto px-4 py-6 pb-20 md:pb-6 space-y-6">
 
+        <section className="rounded-xl border border-ocean-200 bg-white p-4 space-y-3" aria-label="チェックイン受付">
+          <h2 className="font-bold text-gray-800">チェックイン受付</h2>
+          <p className="text-sm text-gray-600">店舗スマホでお客さんのQRを読み取り、PCで問診を確認して受付します。</p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Link href="/questionnaire/scan" className="rounded-lg bg-ocean-600 px-4 py-3 text-center font-medium text-white">PCで受付を開く</Link>
+            <Link href="/checkin/mobile" className="rounded-lg border border-ocean-600 px-4 py-3 text-center font-medium text-ocean-700">このスマホでQRを読み取る</Link>
+          </div>
+        </section>
+
         {pendingRes.length > 0 && (
           <div className="bg-yellow-50 border border-yellow-300 rounded-xl overflow-hidden">
             <div className="flex items-center justify-between px-4 py-3 border-b border-yellow-200">
