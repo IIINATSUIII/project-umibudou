@@ -14,6 +14,7 @@ const dependencies = vi.hoisted(() => ({
     addQuestionnaire: vi.fn(), updateQuestionnaire: vi.fn(), getRoster: vi.fn(), addRoster: vi.fn(),
   },
   lock: vi.fn(), initializeSheets: vi.fn(), importBookings: vi.fn(),
+  listHandoffs: vi.fn(), enqueueHandoff: vi.fn(), dismissHandoff: vi.fn(),
 }))
 vi.mock('@/lib/dataStore', () => ({
   store: dependencies.store, USE_POSTGRES: false, DataStoreError: class extends Error {},
@@ -27,6 +28,12 @@ vi.mock('@/lib/listReads', () => ({
   getReservationsForList: () => dependencies.store.getReservations(),
   getQuestionnairesForList: () => dependencies.store.getQuestionnaires(),
 }))
+vi.mock('@/lib/checkinHandoffStore', () => ({
+  listCheckinHandoffs: dependencies.listHandoffs,
+  enqueueCheckinHandoff: dependencies.enqueueHandoff,
+  dismissCheckinHandoff: dependencies.dismissHandoff,
+  isSheetsStore: () => false,
+}))
 
 
 import * as customers from '@/app/api/customers/route'
@@ -38,6 +45,7 @@ import * as reservationImport from '@/app/api/reservations/import/route'
 import * as reservationEmailRetry from '@/app/api/reservations/email-retry/route'
 import * as questionnaires from '@/app/api/questionnaires/route'
 import * as checkin from '@/app/api/questionnaires/checkin/route'
+import * as handoff from '@/app/api/checkin-handoff/route'
 
 const secret = 'staff-api-test-secret-never-use-in-production'
 const actions = [
@@ -58,10 +66,14 @@ const actions = [
   { path: '/api/questionnaires', method: 'POST', handler: questionnaires.POST, body: null, status: 400 },
   { path: '/api/questionnaires', method: 'PATCH', handler: questionnaires.PATCH, body: {}, status: 400 },
   { path: '/api/questionnaires/checkin', method: 'GET', handler: checkin.GET, status: 400 }, { path: '/api/questionnaires/checkin', method: 'POST', handler: checkin.POST, body: {}, status: 400 },
+  { path: '/api/checkin-handoff', method: 'GET', handler: handoff.GET, status: 200 },
+  { path: '/api/checkin-handoff', method: 'POST', handler: handoff.POST, body: {}, status: 400 },
+  { path: '/api/checkin-handoff', method: 'DELETE', handler: handoff.DELETE, body: {}, status: 400 },
 ] as const
 
 const allBusinessCalls = () => [
   ...Object.values(dependencies.store), dependencies.lock, dependencies.initializeSheets, dependencies.importBookings,
+  dependencies.listHandoffs, dependencies.enqueueHandoff, dependencies.dismissHandoff,
 ]
 
 function request(action: typeof actions[number], token?: string, malformed = false, bypass = false) {
@@ -69,6 +81,7 @@ function request(action: typeof actions[number], token?: string, malformed = fal
     method: action.method,
     headers: {
       'content-type': 'application/json',
+      origin: 'http://localhost',
       ...(token ? { cookie: `${SESSION_COOKIE}=${token}` } : {}),
       ...(bypass ? { 'x-middleware-subrequest': Array(5).fill('src/middleware').join(':') } : {}),
     },
@@ -93,6 +106,7 @@ beforeEach(() => {
   dependencies.lock.mockImplementation(async (work: () => Promise<unknown>) => work())
   dependencies.initializeSheets.mockResolvedValue({ migrated: true })
   dependencies.importBookings.mockResolvedValue({ errors: [] })
+  dependencies.listHandoffs.mockResolvedValue([])
 })
 afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks() })
 

@@ -3,6 +3,7 @@ import { SignJWT } from 'jose'
 import { NextRequest } from 'next/server'
 import { createSessionToken, verifySessionToken, SESSION_COOKIE, SessionConfigurationError } from '../session'
 import { requireStaffSession, staffJson } from '../staffAuth'
+import { staffLoginUrl } from '../staffLoginDestination'
 import { proxy as middleware } from '@/proxy'
 import { GET as currentUser, POST as login, DELETE as logout } from '@/app/api/auth/route'
 
@@ -95,7 +96,7 @@ describe('page and API authentication boundaries', () => {
     'redirects anonymous page requests to login: %s', async (url) => {
       const response = await middleware(request(url))
       expect(response.status).toBe(307)
-      expect(response.headers.get('location')).toBe('http://localhost/login')
+      expect(response.headers.get('location')).toBe(`http://localhost${staffLoginUrl(url)}`)
     },
   )
 

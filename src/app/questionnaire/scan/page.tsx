@@ -4,6 +4,9 @@ import { useCallback, useEffect, useRef, useState, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import StaffQuestionnaireCheck from '@/components/StaffQuestionnaireCheck'
 import Navigation from '@/components/Navigation'
+import CheckinInbox from '@/components/CheckinInbox'
+import MobileCheckinSetup from '@/components/MobileCheckinSetup'
+import { staffLoginUrl } from '@/lib/staffLoginDestination'
 import { useAuth } from '@/lib/authContext'
 import { addRoster, fetchCustomers, fetchQuestionnaireById, fetchQuestionnaires, fetchReservations } from '@/lib/api'
 import type { Customer, QuestionnaireData, Reservation } from '@/types'
@@ -59,6 +62,7 @@ function ScanContent() {
   const [cameraOn, setCameraOn] = useState(false)
   const [added, setAdded] = useState(false)
   const [adding, setAdding] = useState(false)
+  const [inboxRevision, setInboxRevision] = useState(0)
   const [checkInMethod, setCheckInMethod] = useState<'QR読取' | '手動照合'>(
     '手動照合'
   )
@@ -89,7 +93,7 @@ function ScanContent() {
   useEffect(() => {
     if (user === undefined) return
     if (!user) {
-      router.push('/login')
+      router.push(staffLoginUrl('/questionnaire/scan'))
       return
     }
     load()
@@ -176,6 +180,7 @@ function ScanContent() {
   }, [questionnaires, searchParams, lookup])
 
   async function startCamera() {
+    lookupSequenceRef.current++
     setCameraError('')
     const DetectorClass = (window as DetectorWindow).BarcodeDetector
     if (!DetectorClass) {
@@ -239,6 +244,7 @@ function ScanContent() {
 
   function manualSearch(e: React.FormEvent) {
     e.preventDefault()
+    lookupSequenceRef.current++
     const term = query.trim()
     if (!term) {
       setError('氏名または電話番号を入力してください。')
@@ -282,6 +288,7 @@ function ScanContent() {
       })
       setAdded(true)
       setResult({ ...result, qrUsed: true })
+      setInboxRevision(value => value + 1)
       setQuestionnaires((current) => current.map((item) =>
         item.id === result.id ? { ...item, qrUsed: true } : item,
       ))
@@ -289,6 +296,27 @@ function ScanContent() {
       setError(error instanceof Error ? error.message : '名簿への追加に失敗しました。時間をおいて再度お試しください。')
     } finally {
       setAdding(false)
+    }
+  }
+
+  async function selectIncoming(id: string) {
+    const sequence = ++lookupSequenceRef.current
+    stopCamera()
+    setError('')
+    setResult(null)
+    setCandidates([])
+    setAdded(false)
+    setResolveError('')
+    setCustomerLoadError(false)
+    try {
+      // 新しく提出された問診も取得し、mainの既存QR照合で予約状態を再確認する。
+      const current = await fetchQuestionnaireById(id)
+      if (sequence !== lookupSequenceRef.current) return
+      if (!current.qrToken) throw new Error('受付QRが見つかりませんでした。')
+      await lookup(current.qrToken, 'QR読取')
+    } catch (cause) {
+      if (sequence !== lookupSequenceRef.current) return
+      setError(cause instanceof Error ? cause.message : '問診情報を取得できませんでした。')
     }
   }
 
@@ -350,6 +378,8 @@ function ScanContent() {
             更新
           </button>
         </div>
+        <CheckinInbox onSelect={selectIncoming} disabled={adding || resolving} refreshKey={inboxRevision} />
+        <MobileCheckinSetup />
         <section className="bg-white rounded-xl border p-4 space-y-3">
           <button
             onClick={cameraOn ? stopCamera : startCamera}

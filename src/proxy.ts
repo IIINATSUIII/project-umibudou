@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { SESSION_COOKIE } from '@/lib/session'
 import { requireStaffSession } from '@/lib/staffAuth'
+import { staffLoginUrl } from '@/lib/staffLoginDestination'
 
 // ログイン不要のパス
 const PUBLIC_PATHS = [
@@ -38,7 +39,7 @@ export async function proxy(req: NextRequest) {
   if (pathname === '/api' || pathname.startsWith('/api/') || auth.response.status !== 401) return auth.response
 
   // Only page requests redirect; API callers receive JSON from the guard.
-  const res = NextResponse.redirect(new URL('/login', req.url))
+  const res = NextResponse.redirect(new URL(staffLoginUrl(pathname), req.url))
   res.headers.set('Cache-Control', 'no-store')
   if (req.cookies.has(SESSION_COOKIE)) res.cookies.delete(SESSION_COOKIE)
   return res
