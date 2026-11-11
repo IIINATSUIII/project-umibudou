@@ -1,59 +1,38 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { useRouter } from 'next/navigation'
 import { login } from '@/lib/auth'
-import { useAuthRefresh } from '@/lib/authContext'
 
 export default function LoginPage() {
-  const router = useRouter()
-  const refreshAuth = useAuthRefresh()
   const [mode, setMode] = useState<'login' | 'register'>('login')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [passwordConfirmation, setPasswordConfirmation] = useState('')
   const [displayName, setDisplayName] = useState('')
-  const [inviteToken, setInviteToken] = useState('')
-  const [inviteState, setInviteState] = useState<'idle' | 'loading' | 'valid' | 'invalid'>('idle')
-  const [inviteLoading, setInviteLoading] = useState(false)
+  const [setupCode, setSetupCode] = useState('')
+  const [adminSetupAvailable, setAdminSetupAvailable] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
-  const [noticeTone, setNoticeTone] = useState<'success' | 'warning'>('success')
   const [loading, setLoading] = useState(false)
 
+  // 管理者が0人のときだけ、最初の管理者を作るための初期設定コード欄を出す。
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search)
-    if (params.get('registered') === '1') {
-      setMode('login')
-      if (params.get('mail') === 'sent') {
-        setNotice('アカウントを作成し、登録したメールアドレスへ案内メールを送信しました。')
-        setNoticeTone('success')
-      } else {
-        setNotice('アカウントは作成されましたが、案内メールを送信できませんでした。管理者に確認してください。')
-        setNoticeTone('warning')
-      }
-    }
-    const token = params.get('invite')
-    if (!token) return
-    setInviteToken(token)
-    setInviteState('loading')
-    setMode('register')
-    setInviteLoading(true)
-    fetch(`/api/auth/invitations/preview?token=${encodeURIComponent(token)}`, { cache: 'no-store' })
-      .then(async (res) => {
-        const data = await res.json().catch(() => ({}))
-        if (!res.ok) throw new Error(data.error || '招待リンクが無効または期限切れです')
-        setEmail(data.email || '')
-        setInviteState('valid')
-      })
-      .catch((err: unknown) => {
-        setInviteToken('')
-        setInviteState('invalid')
-        setError(err instanceof Error ? err.message : '招待リンクを確認できません')
-      })
-      .finally(() => setInviteLoading(false))
+    fetch('/api/auth/register', { cache: 'no-store' })
+      .then((res) => res.ok ? res.json() : null)
+      .then((data) => setAdminSetupAvailable(data?.adminSetupAvailable === true))
+      .catch(() => setAdminSetupAvailable(false))
   }, [])
+
+  /**
+   * ログイン後はページを読み込み直して遷移する。
+   * ログアウト直後は、未ログイン時の「/dashboard → /login」リダイレクトがクライアントのルーターに
+   * 残っていることがあり、router.push では /login に戻されてしまうため。
+   * 読み込み直すと AuthProvider もCookieから状態を取り直す。
+   */
+  function goToDashboard() {
+    window.location.assign('/dashboard')
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -66,10 +45,11 @@ export default function LoginPage() {
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify({
-          ...(inviteToken ? { token: inviteToken } : { email }),
+          email,
           displayName,
           password,
           passwordConfirmation,
+          ...(adminSetupAvailable && setupCode.trim() ? { setupCode } : {}),
         }),
       })
       const data = await response.json().catch(() => ({}))
@@ -78,26 +58,29 @@ export default function LoginPage() {
         setError(data.error || 'アカウントを作成できませんでした')
         return
       }
-      const mailStatus = data.mail?.sent === true
-        ? 'sent'
-        : data.mail?.reason === 'not_configured'
-          ? 'not-configured'
-          : 'send-failed'
-      await refreshAuth()
-      router.push(`/dashboard?registered=1&mail=${mailStatus}`)
+      if (data.admin) {
+        // 初期設定コードで最初の管理者を作成した場合は、そのままログイン済みになる。
+        goToDashboard()
+        return
+      }
+      // 承認前なのでログイン状態にはしない。ログインタブに戻して案内を出す。
+      setMode('login')
+      setPassword('')
+      setPasswordConfirmation('')
+      setDisplayName('')
+      setShowPassword(false)
+      setNotice('登録を受け付けました。管理者が承認するとログインできるようになります。')
       return
     }
 
-    const ok = await login(email, password)
-    setLoading(false)
-    if (ok) {
-      // AuthProvider はルートレイアウトで一度しかマウントされないため、
-      // 遷移前にコンテキストを更新しないと user が null のまま /login に戻される
-      await refreshAuth()
-      router.push('/dashboard')
-    } else {
-      setError('メールアドレスまたはパスワードが正しくありません')
+    const result = await login(email, password)
+    if (result.ok) {
+      // 遷移が終わるまでボタンは「ログイン中…」のままにする。
+      goToDashboard()
+      return
     }
+    setLoading(false)
+    setError(result.error || 'メールアドレスまたはパスワードが正しくありません')
   }
 
   return (
@@ -118,19 +101,15 @@ export default function LoginPage() {
           </button>
         </div>
 
-        {notice && <p className={`mb-4 rounded-lg px-3 py-2 text-sm ${noticeTone === 'success' ? 'bg-green-50 text-green-800' : 'bg-amber-50 text-amber-800'}`}>{notice}</p>}
+        {notice && <p role="status" className="mb-4 rounded-lg px-3 py-2 text-sm bg-green-50 text-green-800">{notice}</p>}
 
         <form onSubmit={handleSubmit} className="space-y-4">
           {mode === 'register' && (
-            <div className={`rounded-lg text-sm px-3 py-2 ${inviteState === 'valid' ? 'bg-blue-50 text-blue-800' : inviteState === 'invalid' ? 'bg-amber-50 text-amber-800' : 'bg-green-50 text-green-800'}`}>
-              {inviteState === 'loading'
-                ? '招待リンクを確認中…'
-                : inviteState === 'valid'
-                  ? '招待リンクを確認しました。登録内容を入力してください。'
-                  : inviteState === 'invalid'
-                    ? '招待リンクは無効または期限切れです。管理者へ新しいリンクを依頼してください。'
-                    : 'スタッフ登録には管理者からの招待リンクが必要です。'}
-            </div>
+            <p className={`rounded-lg text-sm px-3 py-2 ${adminSetupAvailable ? 'bg-amber-50 text-amber-900' : 'bg-blue-50 text-blue-800'}`}>
+              {adminSetupAvailable
+                ? 'まだ管理者が登録されていません。最初の管理者として登録し、初期設定コードを入力してください。'
+                : '登録後、管理者が承認するとログインできるようになります。'}
+            </p>
           )}
           {mode === 'register' && (
             <div>
@@ -147,11 +126,9 @@ export default function LoginPage() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="staff@okidive.com"
-              readOnly={mode === 'register' && inviteState === 'valid'}
               required
-              className={`w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ocean-500 ${mode === 'register' && inviteState === 'valid' ? 'bg-gray-100' : ''}`}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ocean-500"
             />
-            {mode === 'register' && inviteLoading && <p className="text-xs text-gray-400 mt-1">招待を確認中…</p>}
           </div>
 
           <div>
@@ -178,6 +155,13 @@ export default function LoginPage() {
                 <input type="checkbox" checked={showPassword} onChange={(e) => setShowPassword(e.target.checked)} /> パスワードを表示
               </label>
               <p className="text-xs text-gray-400">5文字以上で設定してください。</p>
+              {adminSetupAvailable && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-3">
+                  <label htmlFor="setup-code" className="block text-sm font-medium text-amber-900 mb-1">初期設定コード（最初の管理者のみ）</label>
+                  <input id="setup-code" type="password" value={setupCode} onChange={(e) => setSetupCode(e.target.value)} autoComplete="off" className="w-full border border-amber-300 bg-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ocean-500" />
+                  <p className="text-xs text-amber-800 mt-1">サーバーに設定した初期設定コード（ADMIN_SETUP_CODE）を入力すると、管理者として登録してすぐにログインできます。</p>
+                </div>
+              )}
             </>
           )}
 
@@ -187,7 +171,7 @@ export default function LoginPage() {
 
           <button
             type="submit"
-            disabled={loading || (mode === 'register' && inviteState !== 'valid')}
+            disabled={loading}
             className="w-full bg-ocean-600 text-white py-2.5 rounded-lg font-medium text-sm hover:bg-ocean-700 transition-colors disabled:opacity-50"
           >
             {loading ? (mode === 'register' ? '作成中…' : 'ログイン中…') : (mode === 'register' ? 'アカウントを作成' : 'ログイン')}

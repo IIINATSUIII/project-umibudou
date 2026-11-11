@@ -1,18 +1,18 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { sendStaffRegistrationEmail } from '../staffEmail'
+import { sendStaffApprovalEmail } from '../staffEmail'
 
 afterEach(() => {
   vi.restoreAllMocks()
   vi.unstubAllEnvs()
 })
 
-describe('スタッフ登録完了メール', () => {
+describe('スタッフ承認メール', () => {
   it('送信設定がない場合は外部APIを呼ばず未送信を返す', async () => {
     vi.stubEnv('RESEND_API_KEY', '')
     vi.stubEnv('EMAIL_FROM', '')
     const fetchMock = vi.spyOn(globalThis, 'fetch')
 
-    await expect(sendStaffRegistrationEmail({
+    await expect(sendStaffApprovalEmail({
       to: 'staff@example.com',
       displayName: 'テストスタッフ',
       role: 'staff',
@@ -28,7 +28,7 @@ describe('スタッフ登録完了メール', () => {
       new Response(JSON.stringify({ id: 'email-id' }), { status: 200 }),
     )
 
-    await expect(sendStaffRegistrationEmail({
+    await expect(sendStaffApprovalEmail({
       to: 'staff@example.com',
       displayName: 'テストスタッフ',
       role: 'staff',
@@ -44,6 +44,7 @@ describe('スタッフ登録完了メール', () => {
     expect(body.to).toEqual(['staff@example.com'])
     expect(body.text).toContain('登録メールアドレス: staff@example.com')
     expect(body.text).toContain('https://example.com/login')
+    expect(body.text).toContain('承認')
     expect(body.html).toContain('テストスタッフ')
     expect(body.text).not.toContain('password')
   })
@@ -53,7 +54,7 @@ describe('スタッフ登録完了メール', () => {
     vi.stubEnv('EMAIL_FROM', 'noreply@example.com')
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('bad request', { status: 400 }))
 
-    await expect(sendStaffRegistrationEmail({
+    await expect(sendStaffApprovalEmail({
       to: 'staff@example.com',
       displayName: 'テストスタッフ',
       role: 'staff',

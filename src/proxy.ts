@@ -18,7 +18,7 @@ function isPublic(pathname: string): boolean {
   if (pathname === '/questionnaire/scan' || pathname.startsWith('/questionnaire/scan/')) return false
   // The handler still requires its own CRON_SECRET bearer token.
   if (pathname === '/api/cron/sheets-outbox' || pathname === '/api/cron/reservation-emails') return true
-  if (pathname === '/api/auth' || pathname === '/api/auth/register' || pathname.startsWith('/api/auth/invitations/preview') || pathname.startsWith('/api/public/')) return true
+  if (pathname === '/api/auth' || pathname === '/api/auth/register' || pathname.startsWith('/api/public/')) return true
   if (pathname === '/favicon.ico' || pathname === '/line-rich-menu.png') return true
   // おさかな図鑑の判定に使う、モデルと実行用ファイル（静的ファイル。ログイン不要の /line-menu/fish が読み込む）
   if (pathname.startsWith('/models/fish/') || pathname.startsWith('/ort/')) return true
