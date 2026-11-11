@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { login } from '@/lib/auth'
 import { useAuthRefresh } from '@/lib/authContext'
@@ -13,47 +13,10 @@ export default function LoginPage() {
   const [password, setPassword] = useState('')
   const [passwordConfirmation, setPasswordConfirmation] = useState('')
   const [displayName, setDisplayName] = useState('')
-  const [inviteToken, setInviteToken] = useState('')
-  const [inviteState, setInviteState] = useState<'idle' | 'loading' | 'valid' | 'invalid'>('idle')
-  const [inviteLoading, setInviteLoading] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
-  const [noticeTone, setNoticeTone] = useState<'success' | 'warning'>('success')
   const [loading, setLoading] = useState(false)
-
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search)
-    if (params.get('registered') === '1') {
-      setMode('login')
-      if (params.get('mail') === 'sent') {
-        setNotice('アカウントを作成し、登録したメールアドレスへ案内メールを送信しました。')
-        setNoticeTone('success')
-      } else {
-        setNotice('アカウントは作成されましたが、案内メールを送信できませんでした。管理者に確認してください。')
-        setNoticeTone('warning')
-      }
-    }
-    const token = params.get('invite')
-    if (!token) return
-    setInviteToken(token)
-    setInviteState('loading')
-    setMode('register')
-    setInviteLoading(true)
-    fetch(`/api/auth/invitations/preview?token=${encodeURIComponent(token)}`, { cache: 'no-store' })
-      .then(async (res) => {
-        const data = await res.json().catch(() => ({}))
-        if (!res.ok) throw new Error(data.error || '招待リンクが無効または期限切れです')
-        setEmail(data.email || '')
-        setInviteState('valid')
-      })
-      .catch((err: unknown) => {
-        setInviteToken('')
-        setInviteState('invalid')
-        setError(err instanceof Error ? err.message : '招待リンクを確認できません')
-      })
-      .finally(() => setInviteLoading(false))
-  }, [])
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -66,7 +29,7 @@ export default function LoginPage() {
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify({
-          ...(inviteToken ? { token: inviteToken } : { email }),
+          email,
           displayName,
           password,
           passwordConfirmation,
@@ -78,25 +41,25 @@ export default function LoginPage() {
         setError(data.error || 'アカウントを作成できませんでした')
         return
       }
-      const mailStatus = data.mail?.sent === true
-        ? 'sent'
-        : data.mail?.reason === 'not_configured'
-          ? 'not-configured'
-          : 'send-failed'
-      await refreshAuth()
-      router.push(`/dashboard?registered=1&mail=${mailStatus}`)
+      // 承認前なのでログイン状態にはしない。ログインタブに戻して案内を出す。
+      setMode('login')
+      setPassword('')
+      setPasswordConfirmation('')
+      setDisplayName('')
+      setShowPassword(false)
+      setNotice('登録を受け付けました。管理者が承認するとログインできるようになります。')
       return
     }
 
-    const ok = await login(email, password)
+    const result = await login(email, password)
     setLoading(false)
-    if (ok) {
+    if (result.ok) {
       // AuthProvider はルートレイアウトで一度しかマウントされないため、
       // 遷移前にコンテキストを更新しないと user が null のまま /login に戻される
       await refreshAuth()
       router.push('/dashboard')
     } else {
-      setError('メールアドレスまたはパスワードが正しくありません')
+      setError(result.error || 'メールアドレスまたはパスワードが正しくありません')
     }
   }
 
@@ -118,19 +81,13 @@ export default function LoginPage() {
           </button>
         </div>
 
-        {notice && <p className={`mb-4 rounded-lg px-3 py-2 text-sm ${noticeTone === 'success' ? 'bg-green-50 text-green-800' : 'bg-amber-50 text-amber-800'}`}>{notice}</p>}
+        {notice && <p role="status" className="mb-4 rounded-lg px-3 py-2 text-sm bg-green-50 text-green-800">{notice}</p>}
 
         <form onSubmit={handleSubmit} className="space-y-4">
           {mode === 'register' && (
-            <div className={`rounded-lg text-sm px-3 py-2 ${inviteState === 'valid' ? 'bg-blue-50 text-blue-800' : inviteState === 'invalid' ? 'bg-amber-50 text-amber-800' : 'bg-green-50 text-green-800'}`}>
-              {inviteState === 'loading'
-                ? '招待リンクを確認中…'
-                : inviteState === 'valid'
-                  ? '招待リンクを確認しました。登録内容を入力してください。'
-                  : inviteState === 'invalid'
-                    ? '招待リンクは無効または期限切れです。管理者へ新しいリンクを依頼してください。'
-                    : 'スタッフ登録には管理者からの招待リンクが必要です。'}
-            </div>
+            <p className="rounded-lg text-sm px-3 py-2 bg-blue-50 text-blue-800">
+              登録後、管理者が承認するとログインできるようになります。
+            </p>
           )}
           {mode === 'register' && (
             <div>
@@ -147,11 +104,9 @@ export default function LoginPage() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="staff@okidive.com"
-              readOnly={mode === 'register' && inviteState === 'valid'}
               required
-              className={`w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ocean-500 ${mode === 'register' && inviteState === 'valid' ? 'bg-gray-100' : ''}`}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ocean-500"
             />
-            {mode === 'register' && inviteLoading && <p className="text-xs text-gray-400 mt-1">招待を確認中…</p>}
           </div>
 
           <div>
@@ -187,7 +142,7 @@ export default function LoginPage() {
 
           <button
             type="submit"
-            disabled={loading || (mode === 'register' && inviteState !== 'valid')}
+            disabled={loading}
             className="w-full bg-ocean-600 text-white py-2.5 rounded-lg font-medium text-sm hover:bg-ocean-700 transition-colors disabled:opacity-50"
           >
             {loading ? (mode === 'register' ? '作成中…' : 'ログイン中…') : (mode === 'register' ? 'アカウントを作成' : 'ログイン')}

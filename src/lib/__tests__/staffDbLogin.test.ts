@@ -50,4 +50,30 @@ describe('DB-managed staff login without legacy credentials', () => {
     expect(await unknown.json()).toEqual(await known.json())
     expect(staff.ensureLegacyStaffUser).not.toHaveBeenCalled()
   })
+
+  it('承認待ちのアカウントは正しいパスワードでもログインできず、承認待ちと案内する', async () => {
+    staff.getStaffUserByEmail.mockResolvedValue({
+      user: { id: 'STU-1', email: 'pending@example.com', role: 'staff', status: 'suspended', sessionVersion: 0, lastLoginAt: null },
+      passwordHash: 'stored-hash',
+    })
+    staff.verifyStaffPassword.mockResolvedValue(true)
+
+    const response = await login('pending@example.com')
+
+    expect(response.status).toBe(403)
+    expect((await response.json()).error).toContain('承認待ち')
+    expect(response.headers.get('set-cookie')).toBeNull()
+  })
+
+  it('承認待ちのアカウントでもパスワードが違えば、未登録と同じ401を返す', async () => {
+    staff.getStaffUserByEmail.mockImplementation(async (email: string) => email === 'pending@example.com'
+      ? { user: { status: 'suspended' }, passwordHash: 'stored-hash' }
+      : null)
+
+    const pending = await login('pending@example.com')
+    const unknown = await login('unknown@example.com')
+
+    expect(pending.status).toBe(401)
+    expect(await pending.json()).toEqual(await unknown.json())
+  })
 })

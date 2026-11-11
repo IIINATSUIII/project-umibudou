@@ -31,7 +31,16 @@ function invalidLoginRequest() {
   )
 }
 
-async function authenticateStaff(email: string, password: string): Promise<StaffUser | null> {
+/** 'inactive' はパスワードは正しいが、承認待ち・停止中でログインできないアカウント。 */
+type AuthResult = StaffUser | 'inactive' | null
+
+async function checkStoredAccount(record: { user: StaffUser; passwordHash: string } | null, password: string): Promise<AuthResult | undefined> {
+  if (!record) return undefined
+  if (!await verifyStaffPassword(password, record.passwordHash)) return null
+  return record.user.status === 'active' ? record.user : 'inactive'
+}
+
+async function authenticateStaff(email: string, password: string): Promise<AuthResult> {
   const legacyUser = (): StaffUser | null => validateCredentials(email, password) ? {
     id: '',
     email,
@@ -43,17 +52,14 @@ async function authenticateStaff(email: string, password: string): Promise<Staff
   } : null
 
   if (!hasStaffDatabase()) {
-    const local = await getLocalStaffUserByEmail(email)
-    if (local && local.user.status === 'active' && await verifyStaffPassword(password, local.passwordHash)) return local.user
+    const local = await checkStoredAccount(await getLocalStaffUserByEmail(email), password)
+    if (local) return local
     return legacyUser()
   }
 
   try {
-    const record = await getStaffUserByEmail(email)
-    if (record) {
-      if (record.user.status !== 'active') return null
-      return await verifyStaffPassword(password, record.passwordHash) ? record.user : null
-    }
+    const stored = await checkStoredAccount(await getStaffUserByEmail(email), password)
+    if (stored !== undefined) return stored
 
     // 既存の環境変数アカウントを、最初のログイン時にハッシュ化してDBへ移行する。
     // STAFF_ADMIN_EMAILを設定したアカウントだけが移行後の管理者になる。
@@ -71,8 +77,8 @@ async function authenticateStaff(email: string, password: string): Promise<Staff
     // 開発環境では、DBが未起動でもローカル登録済みアカウント／環境変数アカウントを使える。
     // 本番ではDB障害を認証成功として扱わない。
     if (!canUseLocalStaffAuth()) throw error
-    const local = await getLocalStaffUserByEmail(email)
-    if (local && local.user.status === 'active' && await verifyStaffPassword(password, local.passwordHash)) return local.user
+    const local = await checkStoredAccount(await getLocalStaffUserByEmail(email), password)
+    if (local) return local
     return legacyUser()
   }
 }
@@ -99,6 +105,13 @@ export async function POST(req: NextRequest) {
       return staffJson({ error: '試行回数が多すぎます。しばらく待ってから再度お試しください' }, { status: 429 })
     }
     const user = await authenticateStaff(email, password)
+    if (user === 'inactive') {
+      if (process.env.NODE_ENV !== 'test') clearLoginFailures(email)
+      return staffJson(
+        { error: 'このアカウントは管理者の承認待ち、または利用停止中です。管理者に確認してください' },
+        { status: 403 }
+      )
+    }
     if (!user) {
       if (process.env.NODE_ENV !== 'test') recordLoginFailure(email)
       return staffJson(

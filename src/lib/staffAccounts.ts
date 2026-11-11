@@ -1,4 +1,4 @@
-import { createHash, randomBytes, scrypt, timingSafeEqual } from 'node:crypto'
+import { randomBytes, scrypt, timingSafeEqual } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import type { PoolClient, QueryResultRow } from 'pg'
@@ -8,7 +8,6 @@ import type { StaffRole } from '@/lib/session'
 const PASSWORD_MIN_LENGTH = 5
 const PASSWORD_MAX_LENGTH = 256
 const DISPLAY_NAME_MAX_LENGTH = 100
-const INVITATION_TTL_MS = 24 * 60 * 60 * 1000
 const SCRYPT_N = 131072
 const SCRYPT_R = 8
 const SCRYPT_P = 1
@@ -26,16 +25,6 @@ export type StaffUser = {
   lastLoginAt: string | null
 }
 
-export type StaffInvitation = {
-  id: string
-  email: string
-  role: StaffRole
-  expiresAt: string
-  usedAt: string | null
-  revokedAt: string | null
-  createdAt: string
-}
-
 export class StaffAuthDatabaseError extends Error {
   constructor(message = 'Staff auth database is unavailable') {
     super(message)
@@ -47,20 +36,6 @@ export class DuplicateStaffAccountError extends Error {
   constructor() {
     super('A staff account already exists for this email')
     this.name = 'DuplicateStaffAccountError'
-  }
-}
-
-export class DuplicateInvitationError extends Error {
-  constructor() {
-    super('An active invitation already exists for this email')
-    this.name = 'DuplicateInvitationError'
-  }
-}
-
-export class InvalidInvitationError extends Error {
-  constructor() {
-    super('The invitation is invalid, expired, used, or revoked')
-    this.name = 'InvalidInvitationError'
   }
 }
 
@@ -82,17 +57,6 @@ type StaffUserRow = QueryResultRow & {
   last_login_at: Date | string | null
 }
 
-type InvitationRow = QueryResultRow & {
-  id: string
-  email: string
-  normalized_email: string
-  role: StaffRole
-  expires_at: Date | string
-  used_at: Date | string | null
-  revoked_at: Date | string | null
-  created_at: Date | string
-}
-
 function asIso(value: Date | string | null): string | null {
   if (value === null) return null
   return value instanceof Date ? value.toISOString() : new Date(value).toISOString()
@@ -107,18 +71,6 @@ function mapUser(row: StaffUserRow): StaffUser {
     status: row.status,
     sessionVersion: Number(row.session_version),
     lastLoginAt: asIso(row.last_login_at),
-  }
-}
-
-function mapInvitation(row: InvitationRow): StaffInvitation {
-  return {
-    id: row.id,
-    email: row.email,
-    role: row.role,
-    expiresAt: asIso(row.expires_at)!,
-    usedAt: asIso(row.used_at),
-    revokedAt: asIso(row.revoked_at),
-    createdAt: asIso(row.created_at)!,
   }
 }
 
@@ -268,10 +220,6 @@ function id(prefix: string): string {
   return `${prefix}-${randomBytes(12).toString('hex')}`
 }
 
-function tokenHash(token: string): string {
-  return createHash('sha256').update(token).digest('hex')
-}
-
 function ensureDatabase(): void {
   if (!hasStaffDatabase()) throw new StaffAuthDatabaseError('DATABASE_URL is not configured')
 }
@@ -324,106 +272,30 @@ export async function touchStaffLogin(userId: string): Promise<void> {
   await query('UPDATE staff_users SET last_login_at = now() WHERE id = $1', [userId])
 }
 
-function invitationIsUsable(row: InvitationRow): boolean {
-  return !row.used_at && !row.revoked_at && new Date(row.expires_at).getTime() > Date.now()
-}
-
-export async function findInvitationByToken(token: string): Promise<StaffInvitation | null> {
-  ensureDatabase()
-  const result = await query<InvitationRow>(
-    `SELECT id, email, normalized_email, role, expires_at, used_at, revoked_at, created_at
-       FROM staff_invitations WHERE token_hash = $1`, [tokenHash(token)]
-  )
-  return result.rows[0] ? mapInvitation(result.rows[0]) : null
-}
-
-export async function createStaffInvitation(input: { email: string; role: StaffRole; createdBy: string }): Promise<{ invitation: StaffInvitation; token: string }> {
-  ensureDatabase()
-  const normalizedEmail = normalizeStaffEmail(input.email)
-  const token = randomBytes(32).toString('base64url')
-  const expiresAt = new Date(Date.now() + INVITATION_TTL_MS)
-  try {
-    return await withTransaction(async (client) => {
-      // 同じメールへの招待を並行発行しても二重作成しない。
-      await client.query('SELECT pg_advisory_xact_lock(1902592026, hashtext($1))', [normalizedEmail])
-      const existingUser = await client.query('SELECT 1 FROM staff_users WHERE normalized_email = $1', [normalizedEmail])
-      const existingInvitation = await client.query(
-        `SELECT 1 FROM staff_invitations
-          WHERE normalized_email = $1 AND used_at IS NULL AND revoked_at IS NULL AND expires_at > now()`, [normalizedEmail]
-      )
-      if (existingUser.rowCount || existingInvitation.rowCount) throw new DuplicateInvitationError()
-      const result = await client.query<InvitationRow>(
-        `INSERT INTO staff_invitations
-           (id, email, normalized_email, role, token_hash, expires_at, created_by)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
-         RETURNING id, email, normalized_email, role, expires_at, used_at, revoked_at, created_at`,
-        [id('INV'), normalizedEmail, normalizedEmail, input.role, tokenHash(token), expiresAt, input.createdBy]
-      )
-      return { invitation: mapInvitation(result.rows[0]), token }
-    })
-  } catch (error) {
-    if ((error as { code?: string }).code === '23505') throw new DuplicateInvitationError()
-    throw error
-  }
-}
-
-export async function listStaffInvitations(): Promise<StaffInvitation[]> {
-  ensureDatabase()
-  const result = await query<InvitationRow>(
-    `SELECT id, email, normalized_email, role, expires_at, used_at, revoked_at, created_at
-       FROM staff_invitations
-      WHERE used_at IS NULL AND revoked_at IS NULL AND expires_at > now()
-      ORDER BY created_at DESC`
-  )
-  return result.rows.map(mapInvitation)
-}
-
-export async function revokeStaffInvitation(invitationId: string): Promise<boolean> {
-  ensureDatabase()
-  const result = await query(
-    `UPDATE staff_invitations SET revoked_at = now()
-      WHERE id = $1 AND used_at IS NULL AND revoked_at IS NULL`, [invitationId]
-  )
-  return (result.rowCount ?? 0) > 0
-}
-
-export async function redeemStaffInvitation(input: {
-  token: string
+/**
+ * 招待なしのスタッフ登録。権限は常に staff、管理者が承認するまで suspended のまま作成する。
+ */
+export async function registerStaffAccount(input: {
+  email: string
   displayName: string
   password: string
 }): Promise<StaffUser> {
   ensureDatabase()
-  const preflight = await findInvitationByToken(input.token)
-  if (!preflight || preflight.usedAt || preflight.revokedAt || new Date(preflight.expiresAt).getTime() <= Date.now()) {
-    throw new InvalidInvitationError()
-  }
+  const normalizedEmail = normalizeStaffEmail(input.email)
   const passwordHash = await hashStaffPassword(input.password)
-  return withTransaction(async (client) => {
-    const invitationResult = await client.query<InvitationRow>(
-      `SELECT id, email, normalized_email, role, expires_at, used_at, revoked_at, created_at
-         FROM staff_invitations WHERE token_hash = $1 FOR UPDATE`, [tokenHash(input.token)]
+  try {
+    const result = await query<StaffUserRow>(
+      `INSERT INTO staff_users
+         (id, email, normalized_email, display_name, password_hash, role, status)
+       VALUES ($1, $2, $3, $4, $5, 'staff', 'suspended')
+       RETURNING id, email, display_name, password_hash, role, status, session_version, last_login_at`,
+      [id('STU'), normalizedEmail, normalizedEmail, input.displayName.trim(), passwordHash]
     )
-    const invitation = invitationResult.rows[0]
-    if (!invitation || !invitationIsUsable(invitation)) throw new InvalidInvitationError()
-
-    const duplicate = await client.query('SELECT 1 FROM staff_users WHERE normalized_email = $1', [invitation.normalized_email])
-    if (duplicate.rowCount) throw new DuplicateStaffAccountError()
-
-    try {
-      const result = await client.query<StaffUserRow>(
-        `INSERT INTO staff_users
-           (id, email, normalized_email, display_name, password_hash, role, status)
-         VALUES ($1, $2, $3, $4, $5, $6, 'active')
-         RETURNING id, email, display_name, password_hash, role, status, session_version, last_login_at`,
-        [id('STU'), invitation.email, invitation.normalized_email, input.displayName.trim(), passwordHash, invitation.role]
-      )
-      await client.query('UPDATE staff_invitations SET used_at = now() WHERE id = $1', [invitation.id])
-      return mapUser(result.rows[0])
-    } catch (error) {
-      if ((error as { code?: string }).code === '23505') throw new DuplicateStaffAccountError()
-      throw error
-    }
-  })
+    return mapUser(result.rows[0])
+  } catch (error) {
+    if ((error as { code?: string }).code === '23505') throw new DuplicateStaffAccountError()
+    throw error
+  }
 }
 
 export async function listStaffUsers(): Promise<StaffUser[]> {
@@ -439,7 +311,7 @@ export async function updateStaffUser(input: {
   id: string
   role?: StaffRole
   status?: StaffStatus
-}): Promise<StaffUser> {
+}): Promise<{ staff: StaffUser; approved: boolean }> {
   ensureDatabase()
   return withTransaction(async (client) => {
     // Serialize role/status changes so concurrent admin demotions cannot remove every admin.
@@ -463,7 +335,9 @@ export async function updateStaffUser(input: {
       RETURNING id, email, display_name, password_hash, role, status, session_version, last_login_at`,
       [input.id, nextRole, nextStatus]
     )
-    return mapUser(updated.rows[0])
+    // 一度もログインしていない承認待ちアカウントを有効にした場合だけ「承認」とみなす。
+    const approved = target.status === 'suspended' && nextStatus === 'active' && target.last_login_at === null
+    return { staff: mapUser(updated.rows[0]), approved }
   })
 }
 
