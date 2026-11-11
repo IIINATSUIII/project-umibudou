@@ -102,8 +102,10 @@ export default function LoginPage() {
 
         <form onSubmit={handleSubmit} className="space-y-4">
           {mode === 'register' && (
-            <p className="rounded-lg text-sm px-3 py-2 bg-blue-50 text-blue-800">
-              登録後、管理者が承認するとログインできるようになります。
+            <p className={`rounded-lg text-sm px-3 py-2 ${adminSetupAvailable ? 'bg-amber-50 text-amber-900' : 'bg-blue-50 text-blue-800'}`}>
+              {adminSetupAvailable
+                ? 'まだ管理者が登録されていません。最初の管理者として登録し、初期設定コードを入力してください。'
+                : '登録後、管理者が承認するとログインできるようになります。'}
             </p>
           )}
           {mode === 'register' && (
@@ -154,7 +156,7 @@ export default function LoginPage() {
                 <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-3">
                   <label htmlFor="setup-code" className="block text-sm font-medium text-amber-900 mb-1">初期設定コード（最初の管理者のみ）</label>
                   <input id="setup-code" type="password" value={setupCode} onChange={(e) => setSetupCode(e.target.value)} autoComplete="off" className="w-full border border-amber-300 bg-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ocean-500" />
-                  <p className="text-xs text-amber-800 mt-1">管理者がまだ登録されていません。サーバーに設定した初期設定コードを入力すると、管理者として登録してすぐにログインできます。スタッフとして登録する場合は空欄のままにしてください。</p>
+                  <p className="text-xs text-amber-800 mt-1">サーバーに設定した初期設定コード（ADMIN_SETUP_CODE）を入力すると、管理者として登録してすぐにログインできます。</p>
                 </div>
               )}
             </>
