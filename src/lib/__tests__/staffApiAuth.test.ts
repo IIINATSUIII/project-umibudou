@@ -190,7 +190,8 @@ it('classifies every exported API operation so a newly added route cannot silent
   const nonStaff = [
     'GET /api/auth', 'POST /api/auth', 'DELETE /api/auth',
     // 招待なしのスタッフ登録申請。作成されたアカウントは管理者の承認までログインできない。
-    'POST /api/auth/register',
+    // GETは初期設定コード欄を出すかどうかだけを返す。
+    'GET /api/auth/register', 'POST /api/auth/register',
     // 管理APIは各ハンドラー内でrequireAdminSessionを実行するため、認証分類上明示する。
     'GET /api/auth/staff', 'PATCH /api/auth/staff',
     'POST /api/public/bookings', 'GET /api/public/questionnaires', 'POST /api/public/questionnaires',

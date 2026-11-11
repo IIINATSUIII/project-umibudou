@@ -39,6 +39,13 @@ export class DuplicateStaffAccountError extends Error {
   }
 }
 
+export class AdminAlreadyExistsError extends Error {
+  constructor() {
+    super('An active administrator already exists')
+    this.name = 'AdminAlreadyExistsError'
+  }
+}
+
 export class LastAdminError extends Error {
   constructor() {
     super('The last active administrator cannot be suspended or demoted')
@@ -292,6 +299,46 @@ export async function registerStaffAccount(input: {
       [id('STU'), normalizedEmail, normalizedEmail, input.displayName.trim(), passwordHash]
     )
     return mapUser(result.rows[0])
+  } catch (error) {
+    if ((error as { code?: string }).code === '23505') throw new DuplicateStaffAccountError()
+    throw error
+  }
+}
+
+/** 有効な管理者がいるかどうか。初期設定コードによる管理者登録を出すかの判定に使う。 */
+export async function hasActiveAdmin(): Promise<boolean> {
+  ensureDatabase()
+  const result = await query("SELECT 1 FROM staff_users WHERE role = 'admin' AND status = 'active' LIMIT 1")
+  return (result.rowCount ?? 0) > 0
+}
+
+/**
+ * 有効な管理者が1人もいないときだけ、最初の管理者を承認済みで作成する。
+ * 呼び出し側で初期設定コードを確認してから使う。
+ */
+export async function registerInitialAdmin(input: {
+  email: string
+  displayName: string
+  password: string
+}): Promise<StaffUser> {
+  ensureDatabase()
+  const normalizedEmail = normalizeStaffEmail(input.email)
+  const passwordHash = await hashStaffPassword(input.password)
+  try {
+    return await withTransaction(async (client) => {
+      // 権限変更と同じロックで直列化し、同時に2人が最初の管理者になるのを防ぐ。
+      await client.query('SELECT pg_advisory_xact_lock(1902592027, 0)')
+      const admins = await client.query("SELECT 1 FROM staff_users WHERE role = 'admin' AND status = 'active' LIMIT 1")
+      if (admins.rowCount) throw new AdminAlreadyExistsError()
+      const result = await client.query<StaffUserRow>(
+        `INSERT INTO staff_users
+           (id, email, normalized_email, display_name, password_hash, role, status)
+         VALUES ($1, $2, $3, $4, $5, 'admin', 'active')
+         RETURNING id, email, display_name, password_hash, role, status, session_version, last_login_at`,
+        [id('STU'), normalizedEmail, normalizedEmail, input.displayName.trim(), passwordHash]
+      )
+      return mapUser(result.rows[0])
+    })
   } catch (error) {
     if ((error as { code?: string }).code === '23505') throw new DuplicateStaffAccountError()
     throw error

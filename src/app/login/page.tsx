@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { login } from '@/lib/auth'
 import { useAuthRefresh } from '@/lib/authContext'
@@ -13,10 +13,20 @@ export default function LoginPage() {
   const [password, setPassword] = useState('')
   const [passwordConfirmation, setPasswordConfirmation] = useState('')
   const [displayName, setDisplayName] = useState('')
+  const [setupCode, setSetupCode] = useState('')
+  const [adminSetupAvailable, setAdminSetupAvailable] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [loading, setLoading] = useState(false)
+
+  // 管理者が0人のときだけ、最初の管理者を作るための初期設定コード欄を出す。
+  useEffect(() => {
+    fetch('/api/auth/register', { cache: 'no-store' })
+      .then((res) => res.ok ? res.json() : null)
+      .then((data) => setAdminSetupAvailable(data?.adminSetupAvailable === true))
+      .catch(() => setAdminSetupAvailable(false))
+  }, [])
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -33,12 +43,19 @@ export default function LoginPage() {
           displayName,
           password,
           passwordConfirmation,
+          ...(adminSetupAvailable && setupCode.trim() ? { setupCode } : {}),
         }),
       })
       const data = await response.json().catch(() => ({}))
       setLoading(false)
       if (!response.ok) {
         setError(data.error || 'アカウントを作成できませんでした')
+        return
+      }
+      if (data.admin) {
+        // 初期設定コードで最初の管理者を作成した場合は、そのままログイン済みになる。
+        await refreshAuth()
+        router.push('/dashboard')
         return
       }
       // 承認前なのでログイン状態にはしない。ログインタブに戻して案内を出す。
@@ -133,6 +150,13 @@ export default function LoginPage() {
                 <input type="checkbox" checked={showPassword} onChange={(e) => setShowPassword(e.target.checked)} /> パスワードを表示
               </label>
               <p className="text-xs text-gray-400">5文字以上で設定してください。</p>
+              {adminSetupAvailable && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-3">
+                  <label htmlFor="setup-code" className="block text-sm font-medium text-amber-900 mb-1">初期設定コード（最初の管理者のみ）</label>
+                  <input id="setup-code" type="password" value={setupCode} onChange={(e) => setSetupCode(e.target.value)} autoComplete="off" className="w-full border border-amber-300 bg-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ocean-500" />
+                  <p className="text-xs text-amber-800 mt-1">管理者がまだ登録されていません。サーバーに設定した初期設定コードを入力すると、管理者として登録してすぐにログインできます。スタッフとして登録する場合は空欄のままにしてください。</p>
+                </div>
+              )}
             </>
           )}
 
