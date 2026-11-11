@@ -1,13 +1,9 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { useRouter } from 'next/navigation'
 import { login } from '@/lib/auth'
-import { useAuthRefresh } from '@/lib/authContext'
 
 export default function LoginPage() {
-  const router = useRouter()
-  const refreshAuth = useAuthRefresh()
   const [mode, setMode] = useState<'login' | 'register'>('login')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -27,6 +23,16 @@ export default function LoginPage() {
       .then((data) => setAdminSetupAvailable(data?.adminSetupAvailable === true))
       .catch(() => setAdminSetupAvailable(false))
   }, [])
+
+  /**
+   * ログイン後はページを読み込み直して遷移する。
+   * ログアウト直後は、未ログイン時の「/dashboard → /login」リダイレクトがクライアントのルーターに
+   * 残っていることがあり、router.push では /login に戻されてしまうため。
+   * 読み込み直すと AuthProvider もCookieから状態を取り直す。
+   */
+  function goToDashboard() {
+    window.location.assign('/dashboard')
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -54,8 +60,7 @@ export default function LoginPage() {
       }
       if (data.admin) {
         // 初期設定コードで最初の管理者を作成した場合は、そのままログイン済みになる。
-        await refreshAuth()
-        router.push('/dashboard')
+        goToDashboard()
         return
       }
       // 承認前なのでログイン状態にはしない。ログインタブに戻して案内を出す。
@@ -69,15 +74,13 @@ export default function LoginPage() {
     }
 
     const result = await login(email, password)
-    setLoading(false)
     if (result.ok) {
-      // AuthProvider はルートレイアウトで一度しかマウントされないため、
-      // 遷移前にコンテキストを更新しないと user が null のまま /login に戻される
-      await refreshAuth()
-      router.push('/dashboard')
-    } else {
-      setError(result.error || 'メールアドレスまたはパスワードが正しくありません')
+      // 遷移が終わるまでボタンは「ログイン中…」のままにする。
+      goToDashboard()
+      return
     }
+    setLoading(false)
+    setError(result.error || 'メールアドレスまたはパスワードが正しくありません')
   }
 
   return (
