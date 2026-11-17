@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { hashStaffPassword, validateStaffPassword, verifyStaffPassword } from '../staffAccounts'
 
-describe('招待スタッフのパスワード保護', () => {
+describe('スタッフのパスワード保護', () => {
   it('5文字未満を拒否し、scryptハッシュを保存する', async () => {
     expect(validateStaffPassword('1234')).toBe(false)
     expect(validateStaffPassword('12345')).toBe(true)

@@ -1,8 +1,8 @@
-export type StaffRegistrationEmailResult =
+export type StaffApprovalEmailResult =
   | { sent: true; provider: 'resend' }
   | { sent: false; reason: 'not_configured' | 'send_failed' }
 
-type StaffRegistrationEmailInput = {
+type StaffApprovalEmailInput = {
   to: string
   displayName: string
   role: 'admin' | 'staff'
@@ -18,17 +18,18 @@ function escapeHtml(value: string): string {
     .replaceAll("'", '&#39;')
 }
 
-function roleLabel(role: StaffRegistrationEmailInput['role']): string {
+function roleLabel(role: StaffApprovalEmailInput['role']): string {
   return role === 'admin' ? '管理者' : 'スタッフ'
 }
 
 /**
- * Resend経由でスタッフ登録完了メールを送信する。
- * パスワードや招待トークンはメールに含めない。
+ * Resend経由で、管理者がスタッフアカウントを承認したことを本人へ知らせる。
+ * 登録申請の時点では送らない（本人確認なしの宛先へメールを送れてしまうため）。
+ * パスワードはメールに含めない。
  */
-export async function sendStaffRegistrationEmail(
-  input: StaffRegistrationEmailInput,
-): Promise<StaffRegistrationEmailResult> {
+export async function sendStaffApprovalEmail(
+  input: StaffApprovalEmailInput,
+): Promise<StaffApprovalEmailResult> {
   const apiKey = process.env.RESEND_API_KEY?.trim()
   const from = process.env.EMAIL_FROM?.trim()
   if (!apiKey || !from) return { sent: false, reason: 'not_configured' }
@@ -40,22 +41,22 @@ export async function sendStaffRegistrationEmail(
   const text = [
     `${input.displayName} 様`,
     '',
-    '沖ダイブ・パートナーのスタッフアカウントが作成されました。',
+    '沖ダイブ・パートナーのスタッフアカウントが管理者に承認され、ログインできるようになりました。',
     `登録メールアドレス: ${input.to}`,
     `権限: ${roleLabel(input.role)}`,
     '',
     `ログイン: ${input.loginUrl}`,
     '',
     'このメールにパスワードは記載していません。',
-    '心当たりがない場合は管理者へ連絡してください。',
+    '登録に心当たりがない場合は管理者へ連絡してください。',
   ].join('\n')
   const html = `
     <p>${safeName} 様</p>
-    <p>沖ダイブ・パートナーのスタッフアカウントが作成されました。</p>
+    <p>沖ダイブ・パートナーのスタッフアカウントが管理者に承認され、ログインできるようになりました。</p>
     <p>登録メールアドレス: ${safeEmail}</p>
     <p>権限: ${safeRole}</p>
     <p><a href="${safeLoginUrl}">ログイン画面を開く</a></p>
-    <p>このメールにパスワードは記載していません。心当たりがない場合は管理者へ連絡してください。</p>
+    <p>このメールにパスワードは記載していません。登録に心当たりがない場合は管理者へ連絡してください。</p>
   `
 
   try {
@@ -68,7 +69,7 @@ export async function sendStaffRegistrationEmail(
       body: JSON.stringify({
         from,
         to: [input.to],
-        subject: 'スタッフアカウントが作成されました',
+        subject: 'スタッフアカウントが承認されました',
         text,
         html,
       }),
