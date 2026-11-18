@@ -57,12 +57,18 @@ export async function POST(req: NextRequest) {
   if (!isValidDisplayName(displayName)) return staffJson({ error: '氏名を入力してください' }, { status: 400 })
   if (!validateStaffPassword(password)) return staffJson({ error: 'パスワードは5文字以上256文字以内で入力してください' }, { status: 400 })
   if (password !== confirmation) return staffJson({ error: 'パスワード確認が一致しません' }, { status: 400 })
+  // 正しい初期設定コードは回数制限の対象外にする。登録スパムで全体の上限が埋まっても、
+  // 最初の管理者を作れなくならないようにするため（誤ったコードは数えるので総当たりは制限される）。
+  const setupCodeAccepted = setupCode !== '' && verifyAdminSetupCode(setupCode)
   // 入力ミスは数えず、アカウント作成や初期設定コードの照合に進む試行だけを数える。
-  if (process.env.NODE_ENV !== 'test' && consumeRegistrationAttempt(registrationClientKey(req))) {
+  if (!setupCodeAccepted && process.env.NODE_ENV !== 'test' && consumeRegistrationAttempt(registrationClientKey(req))) {
     return staffJson({ error: '登録の試行回数が多すぎます。しばらく待ってから再度お試しください' }, { status: 429 })
   }
 
-  if (setupCode) return registerAdmin({ email, displayName, password, setupCode })
+  if (setupCode) {
+    if (!setupCodeAccepted) return staffJson({ error: SETUP_REJECTED }, { status: 403 })
+    return registerAdmin({ email, displayName, password })
+  }
 
   const accepted = staffJson({ ok: true, pending: true }, { status: 202 })
   // 環境変数で移行する初期管理者のメールアドレスを先に登録され、管理者が作れなくなるのを防ぐ。
@@ -79,8 +85,8 @@ export async function POST(req: NextRequest) {
   }
 }
 
-async function registerAdmin(input: { email: string; displayName: string; password: string; setupCode: string }) {
-  if (!verifyAdminSetupCode(input.setupCode)) return staffJson({ error: SETUP_REJECTED }, { status: 403 })
+/** 初期設定コードを確認済みの登録だけを渡す。 */
+async function registerAdmin(input: { email: string; displayName: string; password: string }) {
   try {
     const user = await registerInitialAdmin(input)
     const sessionToken = await createSessionToken(user.email, {

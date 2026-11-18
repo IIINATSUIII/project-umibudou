@@ -188,6 +188,18 @@ describe('初期設定コードによる最初の管理者登録', () => {
     expect(deps.registerInitialAdmin).not.toHaveBeenCalled()
   })
 
+  it('全体の回数上限に達していても、正しいコードなら最初の管理者を作れる（誤ったコードは429）', async () => {
+    vi.stubEnv('NODE_ENV', 'production')
+    for (let i = 0; i < 30; i += 1) consumeRegistrationAttempt(`198.51.100.${i}`)
+
+    const wrong = await registerRequest({ ...adminBody, setupCode: 'wrong-setup-code-1234' })
+    const correct = await registerRequest(adminBody)
+
+    expect(wrong.status).toBe(429)
+    expect(correct.status).toBe(201)
+    expect(deps.registerInitialAdmin).toHaveBeenCalledTimes(1)
+  })
+
   it('すでに管理者がいれば、正しいコードでも403', async () => {
     deps.registerInitialAdmin.mockRejectedValue(new AdminAlreadyExistsError())
 
