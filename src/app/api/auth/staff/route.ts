@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server'
 import { requireAdminSession, staffJson } from '@/lib/staffAuth'
 import { sendStaffApprovalEmail } from '@/lib/staffEmail'
 import {
+  deletePendingStaffUser,
   hasStaffDatabase,
   listStaffUsers,
   LastAdminError,
@@ -62,3 +63,23 @@ export async function PATCH(req: NextRequest) {
   }
 }
 
+/** DELETE /api/auth/staff — 承認待ちの登録を却下して削除する（管理者のみ）。 */
+export async function DELETE(req: NextRequest) {
+  const auth = await requireAdminSession(req)
+  if (!auth.ok) return auth.response
+  let body: unknown
+  try { body = await req.json() } catch { return staffJson({ error: '入力形式が不正です' }, { status: 400 }) }
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) return staffJson({ error: '入力形式が不正です' }, { status: 400 })
+  const id = typeof (body as Record<string, unknown>).id === 'string' ? (body as Record<string, string>).id : ''
+  if (!id) return staffJson({ error: '削除対象が不正です' }, { status: 400 })
+  if (!hasStaffDatabase()) return staffJson({ error: 'AUTH_UNAVAILABLE' }, { status: 503 })
+  try {
+    if (!await deletePendingStaffUser(id)) {
+      return staffJson({ error: '承認待ちのアカウントが見つかりません' }, { status: 404 })
+    }
+    return staffJson({ ok: true })
+  } catch {
+    console.error('[DELETE /api/auth/staff] AUTH_INTERNAL_ERROR')
+    return staffJson({ error: '登録を却下できませんでした' }, { status: 503 })
+  }
+}

@@ -3,6 +3,7 @@ import { NextRequest } from 'next/server'
 
 const deps = vi.hoisted(() => ({
   registerStaffAccount: vi.fn(),
+  deletePendingStaffUser: vi.fn(),
   registerInitialAdmin: vi.fn(),
   hasActiveAdmin: vi.fn(),
   updateStaffUser: vi.fn(),
@@ -13,6 +14,7 @@ const deps = vi.hoisted(() => ({
 vi.mock('@/lib/staffAccounts', async (importOriginal) => ({
   ...await importOriginal<typeof import('@/lib/staffAccounts')>(),
   registerStaffAccount: deps.registerStaffAccount,
+  deletePendingStaffUser: deps.deletePendingStaffUser,
   registerInitialAdmin: deps.registerInitialAdmin,
   hasActiveAdmin: deps.hasActiveAdmin,
   updateStaffUser: deps.updateStaffUser,
@@ -25,10 +27,10 @@ vi.mock('@/lib/staffAuth', async (importOriginal) => ({
 }))
 
 import { GET as adminSetupStatus, POST as register } from '@/app/api/auth/register/route'
-import { PATCH as updateStaff } from '@/app/api/auth/staff/route'
+import { DELETE as rejectStaff, PATCH as updateStaff } from '@/app/api/auth/staff/route'
 import { AdminAlreadyExistsError, DuplicateStaffAccountError } from '@/lib/staffAccounts'
 import { SESSION_COOKIE } from '@/lib/session'
-import { consumeRegistrationAttempt, resetRegistrationAttempts } from '@/lib/registerRateLimit'
+import { consumeRegistrationAttempt, registrationClientKey, resetRegistrationAttempts } from '@/lib/registerRateLimit'
 
 const validBody = {
   email: ' New.Staff@Example.com ',
@@ -54,6 +56,7 @@ function patchRequest(body: unknown) {
 }
 
 beforeEach(() => {
+  deps.deletePendingStaffUser.mockReset()
   deps.registerStaffAccount.mockReset().mockResolvedValue({
     id: 'STU-1', email: 'new.staff@example.com', displayName: '新人スタッフ',
     role: 'staff', status: 'suspended', sessionVersion: 0, lastLoginAt: null,
@@ -185,6 +188,18 @@ describe('初期設定コードによる最初の管理者登録', () => {
     expect(deps.registerInitialAdmin).not.toHaveBeenCalled()
   })
 
+  it('全体の回数上限に達していても、正しいコードなら最初の管理者を作れる（誤ったコードは429）', async () => {
+    vi.stubEnv('NODE_ENV', 'production')
+    for (let i = 0; i < 30; i += 1) consumeRegistrationAttempt(`198.51.100.${i}`)
+
+    const wrong = await registerRequest({ ...adminBody, setupCode: 'wrong-setup-code-1234' })
+    const correct = await registerRequest(adminBody)
+
+    expect(wrong.status).toBe(429)
+    expect(correct.status).toBe(201)
+    expect(deps.registerInitialAdmin).toHaveBeenCalledTimes(1)
+  })
+
   it('すでに管理者がいれば、正しいコードでも403', async () => {
     deps.registerInitialAdmin.mockRejectedValue(new AdminAlreadyExistsError())
 
@@ -196,12 +211,74 @@ describe('初期設定コードによる最初の管理者登録', () => {
 })
 
 describe('登録の試行回数制限', () => {
+  const hour = 60 * 60 * 1000
+
   it('同じ送信元から1時間に5回を超える登録を拒否し、時間が経てば戻る', () => {
     const now = 1_000_000
     for (let i = 0; i < 5; i += 1) expect(consumeRegistrationAttempt('203.0.113.1', now)).toBe(false)
     expect(consumeRegistrationAttempt('203.0.113.1', now)).toBe(true)
     expect(consumeRegistrationAttempt('203.0.113.2', now)).toBe(false)
-    expect(consumeRegistrationAttempt('203.0.113.1', now + 60 * 60 * 1000)).toBe(false)
+    expect(consumeRegistrationAttempt('203.0.113.1', now + hour)).toBe(false)
+  })
+
+  it('送信元を毎回変えても、全体で1時間30回を超えたら拒否する', () => {
+    const now = 1_000_000
+    for (let i = 0; i < 30; i += 1) expect(consumeRegistrationAttempt(`198.51.100.${i}`, now)).toBe(false)
+    expect(consumeRegistrationAttempt('198.51.100.200', now)).toBe(true)
+    expect(consumeRegistrationAttempt(null, now)).toBe(true)
+    expect(consumeRegistrationAttempt('198.51.100.200', now + hour)).toBe(false)
+  })
+
+  it('拒否された試行は数えない', () => {
+    const now = 1_000_000
+    for (let i = 0; i < 5; i += 1) consumeRegistrationAttempt('203.0.113.1', now)
+    for (let i = 0; i < 10; i += 1) expect(consumeRegistrationAttempt('203.0.113.1', now)).toBe(true)
+    // 拒否分が全体の回数を使っていなければ、残り25回は他の送信元が使える。
+    for (let i = 0; i < 25; i += 1) expect(consumeRegistrationAttempt(`198.51.100.${i}`, now)).toBe(false)
+  })
+
+  it('送信元IPは Vercel 上でだけ x-real-ip から取り、それ以外ではヘッダーを信用しない', () => {
+    const req = new NextRequest('http://localhost/api/auth/register', {
+      headers: { 'x-real-ip': '203.0.113.9', 'x-forwarded-for': '1.2.3.4' },
+    })
+    vi.stubEnv('VERCEL', '')
+    expect(registrationClientKey(req)).toBeNull()
+    vi.stubEnv('VERCEL', '1')
+    expect(registrationClientKey(req)).toBe('203.0.113.9')
+  })
+})
+
+describe('承認待ちの却下', () => {
+  function deleteRequest(body: unknown) {
+    return rejectStaff(new NextRequest('http://localhost/api/auth/staff', {
+      method: 'DELETE',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    }))
+  }
+
+  it('承認待ちのアカウントを削除する', async () => {
+    deps.deletePendingStaffUser.mockResolvedValue(true)
+
+    const response = await deleteRequest({ id: 'STU-1' })
+
+    expect(response.status).toBe(200)
+    expect(deps.deletePendingStaffUser).toHaveBeenCalledWith('STU-1')
+  })
+
+  it('承認待ちでない（または存在しない）アカウントは404で、削除扱いにしない', async () => {
+    deps.deletePendingStaffUser.mockResolvedValue(false)
+
+    const response = await deleteRequest({ id: 'STU-active' })
+
+    expect(response.status).toBe(404)
+  })
+
+  it('IDがなければ400', async () => {
+    const response = await deleteRequest({})
+
+    expect(response.status).toBe(400)
+    expect(deps.deletePendingStaffUser).not.toHaveBeenCalled()
   })
 })
 

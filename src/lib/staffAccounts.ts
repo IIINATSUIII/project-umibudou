@@ -345,6 +345,20 @@ export async function registerInitialAdmin(input: {
   }
 }
 
+/**
+ * 承認待ちの登録を却下して削除する。
+ * 対象は staff 権限・停止中・一度もログインしていないアカウントだけで、それ以外は削除しない。
+ */
+export async function deletePendingStaffUser(userId: string): Promise<boolean> {
+  ensureDatabase()
+  const result = await query(
+    `DELETE FROM staff_users
+      WHERE id = $1 AND role = 'staff' AND status = 'suspended' AND last_login_at IS NULL`,
+    [userId]
+  )
+  return (result.rowCount ?? 0) > 0
+}
+
 export async function listStaffUsers(): Promise<StaffUser[]> {
   ensureDatabase()
   const result = await query<StaffUserRow>(
