@@ -52,6 +52,16 @@ export default function StaffPage() {
     await load()
   }
 
+  async function rejectStaff(member: Staff) {
+    if (!window.confirm(`${member.displayName}（${member.email}）の登録を却下して削除します。元に戻せません。よろしいですか？`)) return
+    setError(''); setMessage('')
+    const response = await fetch('/api/auth/staff', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: member.id }) })
+    const data = await response.json().catch(() => ({}))
+    if (!response.ok) { setError(data.error || '登録を却下できません'); return }
+    setMessage(`${member.displayName}（${member.email}）の登録を却下しました。`)
+    await load()
+  }
+
   if (user === undefined || !user || user.role !== 'admin') return <div className="min-h-screen flex items-center justify-center text-gray-400">読み込み中…</div>
 
   const pending = staff.filter(isPendingApproval)
@@ -67,11 +77,14 @@ export default function StaffPage() {
 
         <section className="bg-white rounded-xl shadow-sm p-5">
           <h2 className="font-semibold text-gray-800 mb-1">承認待ち（{pending.length}件）</h2>
-          <p className="text-xs text-gray-500 mb-3">ログイン画面の「アカウント作成」から登録された人です。本人であることを確認してから承認してください。承認するとスタッフ権限でログインできるようになります。</p>
+          <p className="text-xs text-gray-500 mb-3">ログイン画面の「アカウント作成」から登録された人です。本人であることを確認してから承認してください。心当たりのない登録は「却下」で削除できます。承認するとスタッフ権限でログインできるようになります。</p>
           {pending.length === 0 ? <p className="text-sm text-gray-400">承認待ちのアカウントはありません。</p> : <div className="divide-y">
             {pending.map((member) => <div key={member.id} className="py-3 flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
               <div className="flex-1"><p className="text-sm font-medium">{member.displayName}</p><p className="text-xs text-gray-500">{member.email}</p></div>
-              <button onClick={() => updateStaff(member.id, { status: 'active' })} className="bg-ocean-600 text-white rounded-lg px-4 py-1.5 text-sm hover:bg-ocean-700">承認</button>
+              <div className="flex gap-2">
+                <button onClick={() => updateStaff(member.id, { status: 'active' })} className="flex-1 sm:flex-none bg-ocean-600 text-white rounded-lg px-4 py-1.5 text-sm hover:bg-ocean-700">承認</button>
+                <button onClick={() => rejectStaff(member)} className="flex-1 sm:flex-none border border-red-300 text-red-700 rounded-lg px-4 py-1.5 text-sm hover:bg-red-50">却下</button>
+              </div>
             </div>)}
           </div>}
         </section>

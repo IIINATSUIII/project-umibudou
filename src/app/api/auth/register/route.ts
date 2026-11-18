@@ -41,10 +41,6 @@ export async function GET() {
  * 管理者が0人のときに正しい初期設定コードを添えた場合だけ、承認済みの管理者として作成してログインさせる。
  */
 export async function POST(req: NextRequest) {
-  if (process.env.NODE_ENV !== 'test' && consumeRegistrationAttempt(registrationClientKey(req))) {
-    return staffJson({ error: '登録の試行回数が多すぎます。しばらく待ってから再度お試しください' }, { status: 429 })
-  }
-
   let body: unknown
   try { body = await req.json() } catch { return staffJson({ error: '入力形式が不正です' }, { status: 400 }) }
   if (typeof body !== 'object' || body === null || Array.isArray(body)) {
@@ -61,6 +57,10 @@ export async function POST(req: NextRequest) {
   if (!isValidDisplayName(displayName)) return staffJson({ error: '氏名を入力してください' }, { status: 400 })
   if (!validateStaffPassword(password)) return staffJson({ error: 'パスワードは5文字以上256文字以内で入力してください' }, { status: 400 })
   if (password !== confirmation) return staffJson({ error: 'パスワード確認が一致しません' }, { status: 400 })
+  // 入力ミスは数えず、アカウント作成や初期設定コードの照合に進む試行だけを数える。
+  if (process.env.NODE_ENV !== 'test' && consumeRegistrationAttempt(registrationClientKey(req))) {
+    return staffJson({ error: '登録の試行回数が多すぎます。しばらく待ってから再度お試しください' }, { status: 429 })
+  }
 
   if (setupCode) return registerAdmin({ email, displayName, password, setupCode })
 

@@ -207,7 +207,7 @@ it('classifies every exported API operation so a newly added route cannot silent
     // GETは初期設定コード欄を出すかどうかだけを返す。
     'GET /api/auth/register', 'POST /api/auth/register',
     // 管理APIは各ハンドラー内でrequireAdminSessionを実行するため、認証分類上明示する。
-    'GET /api/auth/staff', 'PATCH /api/auth/staff',
+    'GET /api/auth/staff', 'PATCH /api/auth/staff', 'DELETE /api/auth/staff',
     'POST /api/public/bookings', 'GET /api/public/questionnaires', 'POST /api/public/questionnaires',
     'POST /api/public/checkin-qr', 'GET /api/cron/sheets-outbox', 'POST /api/cron/sheets-outbox',
     'GET /api/cron/reservation-emails', 'POST /api/cron/reservation-emails',
