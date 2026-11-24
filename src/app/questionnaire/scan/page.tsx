@@ -438,6 +438,12 @@ function ScanContent() {
         )}
         {result && (
           <section className="space-y-4">
+            {reservation?.cancellationRequestStatus === 'pending' && (
+              <div role="alert" className="bg-rose-50 border border-rose-300 rounded-xl p-4 text-sm text-rose-900">
+                <p className="font-semibold">この予約にはお客様からのキャンセル申請があります（未対応）</p>
+                <p className="mt-1">参加されるか本人に確認してから受付してください。参加しない場合は予約管理で申請を承認してください。</p>
+              </div>
+            )}
             {result.staffReviewStatus === '要対応' && (
               <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 space-y-3">
                 <p className="text-sm text-amber-900">

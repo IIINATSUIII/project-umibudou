@@ -7,6 +7,8 @@ const source = () => ({
     id: 'R-1', diveDate: '2026-10-28', guestCount: 1, customerId: 'C-1',
     questionnaireId: 'Q-1', publicRequestKey: 'key-1', cancellationPhase: 'after',
     cancelledAt: '2026-10-28T10:00:00.000Z', cancellationReason: '悪天候',
+    cancellationRequestStatus: 'approved', cancellationRequestedAt: '2026-10-27T10:00:00.000Z',
+    cancellationRequestNote: '体調不良', cancellationRequestResolvedAt: '2026-10-28T10:00:00.000Z',
   }],
   questionnaires: [{ id: 'Q-1', reservationId: 'R-1', submittedAt: '2026-10-28T09:00:00.000Z' }],
   roster: [{
@@ -32,6 +34,8 @@ describe('legacy PostgreSQL import', () => {
     expect(rows.reservations[0]).toMatchObject({
       public_request_key: 'key-1', cancellation_phase: 'after',
       cancelled_at: '2026-10-28T10:00:00.000Z', cancellation_reason: '悪天候',
+      cancellation_request_status: 'approved', cancellation_requested_at: '2026-10-27T10:00:00.000Z',
+      cancellation_request_note: '体調不良', cancellation_request_resolved_at: '2026-10-28T10:00:00.000Z',
     })
     expect(rows.roster[0]).toMatchObject({
       reservation_id: 'R-1', questionnaire_id: 'Q-1', checked_in_at: '2026-10-28T09:30:00.000Z',

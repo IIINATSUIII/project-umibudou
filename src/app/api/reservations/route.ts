@@ -23,6 +23,7 @@ import {
   isCancelledReservationStatus,
   isCancellableReservationStatus,
 } from '@/lib/reservationStatus'
+import { cancellationReasonFromRequest, hasPendingCancellationRequest } from '@/lib/cancellationRequest'
 import { generateQuestionnaireToken, getQuestionnaireExpiry } from '@/lib/questionnaireToken'
 import { RateLimitedError } from '@/lib/withRetry'
 import { StoreBusyError, withStoreWriteLock } from '@/lib/storeLock'
@@ -162,7 +163,7 @@ export async function PATCH(req: NextRequest) {
     const expectedUpdatedAt = typeof values.expectedUpdatedAt === 'string' ? values.expectedUpdatedAt : undefined
     if (!id) return staffJson({ error: '予約IDを指定してください' }, { status: 400 })
     if (!expectedUpdatedAt) return staffJson({ error: '読込時の更新日時が必要です' }, { status: 400 })
-    const allowed = ['status', 'staffId', 'staffNote', 'divePoint', 'diveDate', 'date', 'time', 'timeSlot', 'courseId', 'courseName', 'course', 'guestName', 'guestPhone', 'phone', 'guestEmail', 'guestCount', 'notes', 'cancellationReason']
+    const allowed = ['status', 'staffId', 'staffNote', 'divePoint', 'diveDate', 'date', 'time', 'timeSlot', 'courseId', 'courseName', 'course', 'guestName', 'guestPhone', 'phone', 'guestEmail', 'guestCount', 'notes', 'cancellationReason', 'cancellationRequestStatus']
     const rawDelta = Object.fromEntries(Object.entries(values).filter(([key]) => allowed.includes(key)))
     if (Object.keys(rawDelta).length === 0) {
       return staffJson({ error: '更新項目がありません' }, { status: 400 })
@@ -178,6 +179,18 @@ export async function PATCH(req: NextRequest) {
         || ['pending', 'confirmed', 'cancelled', 'canceled'].includes(delta.status)
       if (!knownStatus) return staffJson({ error: 'ステータスが不正です' }, { status: 400 })
     }
+    if (delta.cancellationRequestStatus !== undefined) {
+      // スタッフが変更できるのは「申請の却下」だけ。承認はキャンセル操作（status）で行う。
+      if (delta.cancellationRequestStatus !== 'rejected' || delta.status !== undefined) {
+        return staffJson({ error: 'キャンセル申請の更新内容が不正です' }, { status: 400 })
+      }
+      const current = (await store.getReservations()).find((reservation) => reservation.id === id)
+      if (!current) return staffJson({ error: '予約が見つかりません' }, { status: 404 })
+      if (!hasPendingCancellationRequest(current)) {
+        return staffJson({ error: '対応待ちのキャンセル申請がありません' }, { status: 409 })
+      }
+      delta = { ...delta, cancellationRequestResolvedAt: new Date().toISOString() }
+    }
     if (isCancelledReservationStatus(delta.status ?? '')) {
       const current = (await store.getReservations()).find((reservation) => reservation.id === id)
       if (!current) return staffJson({ error: '予約が見つかりません' }, { status: 404 })
@@ -188,14 +201,21 @@ export async function PATCH(req: NextRequest) {
       if (!cancellationPhase) {
         return staffJson({ error: 'キャンセル時点を判定できません' }, { status: 409 })
       }
+      const cancelledAt = new Date().toISOString()
+      const staffReason = typeof delta.cancellationReason === 'string' ? delta.cancellationReason.trim() : ''
+      const fromRequest = hasPendingCancellationRequest(current)
       delta = {
         ...delta,
         status: cancelledReservationStatus(current),
         cancellationPhase,
-        cancelledAt: new Date().toISOString(),
-        ...(typeof delta.cancellationReason === 'string' && delta.cancellationReason.trim()
-          ? { cancellationReason: delta.cancellationReason.trim() }
-          : {}),
+        cancelledAt,
+        ...(staffReason ? { cancellationReason: staffReason } : {}),
+        // お客様の申請中にキャンセルした場合は、申請を承認したものとして記録する。
+        ...(fromRequest ? {
+          cancellationRequestStatus: 'approved' as const,
+          cancellationRequestResolvedAt: cancelledAt,
+          cancellationReason: cancellationReasonFromRequest(current, staffReason),
+        } : {}),
       }
     }
     const updatedAt = await patchReservation(id, delta, expectedUpdatedAt)

@@ -21,6 +21,7 @@ import {
   reservationStatusStyle,
   type ReservationCategory,
 } from '@/lib/reservationStatus'
+import { hasPendingCancellationRequest } from '@/lib/cancellationRequest'
 import QuestionnaireUrlButton from '@/components/QuestionnaireUrlButton'
 import OtaCsvImport from '@/components/OtaCsvImport'
 import type { Reservation, QuestionnaireData } from '@/types'
@@ -67,7 +68,9 @@ export default function ReservationsPage() {
   const [category, setCategory] = useState<ReservationCategory>('all')
 
   useEffect(() => {
-    if (new URLSearchParams(window.location.search).get('saved') === '1') {
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('category') === 'cancelRequest') setCategory('cancelRequest')
+    if (params.get('saved') === '1') {
       setSuccessMessage('保存しました。')
       window.history.replaceState({}, '', '/reservations')
     }
@@ -90,13 +93,32 @@ export default function ReservationsPage() {
       TIME_SLOT_ORDER[a.timeSlot] - TIME_SLOT_ORDER[b.timeSlot] ||
       (a.time ?? '').localeCompare(b.time ?? ''))
 
+  const cancelRequestCount = reservations.filter((r) => reservationMatchesCategory(r, 'cancelRequest')).length
+
   async function handleCancel(id: string) {
-    if (!confirm('この予約をキャンセルしますか？')) return
     const reservation = reservations.find((item) => item.id === id)
     if (!reservation || !isCancellableReservationStatus(reservation.status)) return
+    const message = hasPendingCancellationRequest(reservation)
+      ? 'お客様のキャンセル申請を承認し、この予約をキャンセルしますか？\nお客様へキャンセル成立のご連絡もお願いします。'
+      : 'この予約をキャンセルしますか？'
+    if (!confirm(message)) return
     try {
       const status = cancelledReservationStatus(reservation)
       await patchReservation(id, { status }, reservation.updatedAt ?? '')
+      await reloadReservationsFresh()
+      setActionError('')
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : '保存できませんでした')
+      if (err instanceof ApiRequestError && err.status === 409) await reloadReservationsFresh()
+    }
+  }
+
+  async function handleRejectRequest(id: string) {
+    const reservation = reservations.find((item) => item.id === id)
+    if (!reservation || !hasPendingCancellationRequest(reservation)) return
+    if (!confirm('キャンセル申請を却下しますか？予約はそのまま残ります。\nお客様へは電話などで事情をお伝えください。')) return
+    try {
+      await patchReservation(id, { cancellationRequestStatus: 'rejected' }, reservation.updatedAt ?? '')
       await reloadReservationsFresh()
       setActionError('')
     } catch (err) {
@@ -158,7 +180,8 @@ export default function ReservationsPage() {
         <div role="group" aria-label="予約ステータスで絞り込み" className="flex flex-wrap gap-2">
           {([['all', 'すべて'], ['confirmed', '承認済み（確定）'],
             ['progress', '進行中（受付・確認中）'], ['before', 'キャンセル／却下（確定前）'],
-            ['after', '承認後キャンセル']] as const).map(([value, label]) => (
+            ['after', '承認後キャンセル'],
+            ['cancelRequest', `キャンセル申請（対応待ち ${cancelRequestCount}件）`]] as const).map(([value, label]) => (
             <button key={value} type="button" aria-pressed={category === value}
               onClick={() => setCategory(value)}
               className={`rounded-lg border px-3 py-1.5 text-sm ${category === value ? 'bg-ocean-600 text-white border-ocean-600' : 'bg-white text-gray-700 border-gray-300'}`}>
@@ -202,6 +225,16 @@ export default function ReservationsPage() {
                         </div>
                         <div className="text-sm text-gray-600">{r.courseName}</div>
                         <div className="text-xs text-gray-400 mt-0.5">📞 {r.guestPhone}</div>
+                        {hasPendingCancellationRequest(r) && (
+                          <div className="text-xs text-amber-900 bg-amber-50 border border-amber-200 rounded px-2 py-1 mt-1">
+                            ⚠ お客様からキャンセル申請あり（{formatCancellationDate(r.cancellationRequestedAt)}）
+                            {r.cancellationRequestNote && ` · 理由: ${r.cancellationRequestNote}`}
+                            <div className="text-amber-800">確認後、「申請を承認してキャンセル」か「申請を却下」を選んでください。</div>
+                          </div>
+                        )}
+                        {r.cancellationRequestStatus === 'rejected' && !isCancelledReservationStatus(r.status) && (
+                          <div className="text-xs text-gray-500 mt-1">キャンセル申請を却下済み（{formatCancellationDate(r.cancellationRequestResolvedAt)}）</div>
+                        )}
                         {isCancelledReservationStatus(r.status) && (
                           <div className="text-xs text-red-700 mt-1">
                             {cancellationPhaseFor(r)
@@ -230,7 +263,13 @@ export default function ReservationsPage() {
                         {isCancellableReservationStatus(r.status) && (
                           <button onClick={() => handleCancel(r.id)}
                             className="text-xs text-red-500 hover:text-red-700 px-2 py-1 border border-red-200 rounded hover:bg-red-50">
-                            キャンセル
+                            {hasPendingCancellationRequest(r) ? '申請を承認してキャンセル' : 'キャンセル'}
+                          </button>
+                        )}
+                        {hasPendingCancellationRequest(r) && (
+                          <button onClick={() => handleRejectRequest(r.id)}
+                            className="text-xs text-gray-600 hover:text-gray-800 px-2 py-1 border border-gray-300 rounded hover:bg-gray-50">
+                            申請を却下
                           </button>
                         )}
                       </div>

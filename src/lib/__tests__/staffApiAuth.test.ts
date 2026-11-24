@@ -209,7 +209,10 @@ it('classifies every exported API operation so a newly added route cannot silent
     // 管理APIは各ハンドラー内でrequireAdminSessionを実行するため、認証分類上明示する。
     'GET /api/auth/staff', 'PATCH /api/auth/staff', 'DELETE /api/auth/staff',
     'POST /api/public/bookings', 'GET /api/public/questionnaires', 'POST /api/public/questionnaires',
-    'POST /api/public/checkin-qr', 'GET /api/cron/sheets-outbox', 'POST /api/cron/sheets-outbox',
+    'POST /api/public/checkin-qr',
+    // お客様のキャンセル申請。予約番号と推測困難な確認コードの両方で本人確認し、申請だけではキャンセルを成立させない。
+    'POST /api/public/cancellation-requests',
+    'GET /api/cron/sheets-outbox', 'POST /api/cron/sheets-outbox',
     'GET /api/cron/reservation-emails', 'POST /api/cron/reservation-emails',
   ]
   expect(exported.sort()).toEqual([...actions.map(action => `${action.method} ${action.path}`), ...nonStaff].sort())

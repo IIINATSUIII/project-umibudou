@@ -16,6 +16,7 @@ import {
   reservationStatusLabel,
   reservationStatusStyle,
 } from '@/lib/reservationStatus'
+import { hasPendingCancellationRequest } from '@/lib/cancellationRequest'
 import QuestionnaireUrlButton from '@/components/QuestionnaireUrlButton'
 import type { Reservation, QuestionnaireData } from '@/types'
 
@@ -90,6 +91,10 @@ export default function DashboardPage() {
   const pendingRes = reservations
     .filter((r) => isPendingReservationStatus(r.status))
     .sort((a, b) => a.diveDate.localeCompare(b.diveDate) || byTimeSlot(a, b))
+  // お客様からのキャンセル申請（Issue #97）。通知の正はこの一覧で、見落とさないよう最上部に出す。
+  const cancelRequests = reservations
+    .filter(hasPendingCancellationRequest)
+    .sort((a, b) => a.diveDate.localeCompare(b.diveDate) || byTimeSlot(a, b))
   const totalGuests = todayRes.reduce((s, r) => s + r.guestCount, 0)
   const withQr = todayRes.filter((r) =>
     r.questionnaireCompleted || r.questionnaireId || r.questionnaireIds || questionnaireIdFor(r, questionnaires)
@@ -112,6 +117,34 @@ export default function DashboardPage() {
             <Link href="/checkin/mobile" className="rounded-lg border border-ocean-600 px-4 py-3 text-center font-medium text-ocean-700">このスマホでQRを読み取る</Link>
           </div>
         </section>
+
+        {cancelRequests.length > 0 && (
+          <section aria-label="キャンセル申請" className="bg-rose-50 border border-rose-300 rounded-xl overflow-hidden">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-rose-200">
+              <h2 className="font-semibold text-rose-900">
+                ⚠ お客様からのキャンセル申請（{cancelRequests.length}件）
+              </h2>
+              <Link href="/reservations?category=cancelRequest" className="text-xs text-rose-800 underline hover:text-rose-950">
+                予約管理で対応する
+              </Link>
+            </div>
+            <div className="divide-y divide-rose-100">
+              {cancelRequests.map((r) => (
+                <div key={r.id} className="px-4 py-3 flex items-center gap-3">
+                  <div className="text-sm font-mono font-semibold text-rose-900 shrink-0">
+                    {r.diveDate.slice(5).replace('-', '/')} {displayTime(r)}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="font-medium text-gray-800 text-sm">{r.guestName}（{r.guestCount}名）</div>
+                    <div className="text-xs text-gray-500 truncate">
+                      {r.courseName}{r.cancellationRequestNote ? ` ／ 理由: ${r.cancellationRequestNote}` : ''}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
 
         {pendingRes.length > 0 && (
           <div className="bg-yellow-50 border border-yellow-300 rounded-xl overflow-hidden">

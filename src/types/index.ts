@@ -1,6 +1,8 @@
 export type ReservationTimeSlot = 'morning' | 'afternoon' | 'full' | 'unspecified'
 export type ReservationChannel = 'hp' | 'email' | 'phone' | 'ota' | 'sns' | 'google_form'
 export type ReservationCancellationPhase = 'before' | 'after'
+/** お客様からのキャンセル申請。申請中は予約ステータスを変えず、承認でキャンセルが成立する。 */
+export type CancellationRequestStatus = 'pending' | 'approved' | 'rejected'
 
 /** 正準予約データ。旧API/シート名は ReservationInput の境界変換で吸収する。 */
 export interface Reservation {
@@ -43,6 +45,14 @@ export interface Reservation {
   cancelledAt?: string
   /** スタッフが任意で残すキャンセル理由。 */
   cancellationReason?: string
+  /** お客様からのキャンセル申請の状態（Issue #97）。申請がなければ未設定。 */
+  cancellationRequestStatus?: CancellationRequestStatus
+  /** キャンセル申請を受け付けた日時（ISO 8601）。 */
+  cancellationRequestedAt?: string
+  /** お客様が申請時に入力した理由。 */
+  cancellationRequestNote?: string
+  /** スタッフが申請を承認または却下した日時（ISO 8601）。 */
+  cancellationRequestResolvedAt?: string
 }
 
 /** 旧 date/course/phone/notes 入力を許す移行期間中のAPI境界型。 */
