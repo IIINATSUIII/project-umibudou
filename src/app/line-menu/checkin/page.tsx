@@ -12,6 +12,7 @@ import {
   saveCheckin,
   type CheckinCredential,
 } from '@/lib/checkinLink'
+import { buildCancellationRequestPath } from '@/lib/cancellationRequest'
 
 type CheckinParticipant = { name: string; token?: string; expiresAt?: string; used: boolean }
 type LookupResult = {
@@ -19,6 +20,8 @@ type LookupResult = {
   participants: CheckinParticipant[]
   questionnaireUrl?: string
   incompleteCount: number
+  /** 画面側で付ける。予約番号がわかる場合だけキャンセル申請へのリンクを出す。 */
+  cancelPath?: string
 }
 type LookupOutcome = { ok: true; data: LookupResult } | { ok: false; error: string }
 
@@ -65,7 +68,13 @@ function CheckinQr() {
     setLoading(true)
     const outcomes = await Promise.all(credentials.map(fetchCheckin))
     if (generation !== lookupGeneration.current) return
-    const shown = outcomes.flatMap((outcome) => (outcome.ok ? [outcome.data] : []))
+    const shown = outcomes.flatMap((outcome, index) => {
+      if (!outcome.ok) return []
+      const { reservationId, reservationToken } = credentials[index]
+      return [reservationId
+        ? { ...outcome.data, cancelPath: buildCancellationRequestPath(reservationId, reservationToken) }
+        : outcome.data]
+    })
     setResults(shown)
     if (shown.length === 0) {
       const failed = outcomes.find((outcome) => !outcome.ok)
@@ -168,6 +177,9 @@ function CheckinQr() {
                 )}
                 {result.participants.length > 0 && !result.participants.some((participant) => participant.token && !participant.used) && !result.participants.every((participant) => participant.used) && result.incompleteCount === 0 && (
                   <p className="rounded-xl bg-amber-50 p-4 text-sm text-amber-900">受付QRの有効期限が切れている可能性があります。ショップへお問い合わせください。</p>
+                )}
+                {result.cancelPath && (
+                  <a href={result.cancelPath} className="block text-center text-xs text-slate-500 underline">この予約のキャンセルを申請する</a>
                 )}
               </div>
             ))}

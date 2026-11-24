@@ -3,6 +3,7 @@
 import { useRef, useState } from 'react'
 import { QRCodeCanvas } from 'qrcode.react'
 import { buildCheckinPath, saveCheckin } from '@/lib/checkinLink'
+import { buildCancellationRequestPath, CANCELLATION_REQUEST_CUTOFF_HOUR_JST } from '@/lib/cancellationRequest'
 import { COURSES } from '@/lib/masters'
 import type { Reservation } from '@/types'
 
@@ -131,6 +132,10 @@ export default function BookingPage() {
           <p className="text-xs text-gray-400 mt-6">
             ご不明な点はお電話にてお問い合わせください。
           </p>
+          <a href={buildCancellationRequestPath(resId, questionnaireToken)}
+            className="mt-2 inline-block text-xs text-gray-500 underline">
+            キャンセルを申請する（前日{CANCELLATION_REQUEST_CUTOFF_HOUR_JST}:00まで）
+          </a>
         </div>
       </div>
     )

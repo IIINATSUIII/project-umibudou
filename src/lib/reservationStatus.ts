@@ -78,7 +78,7 @@ export function cancelledReservationStatus(current: Reservation): string {
     : 'cancelled'
 }
 
-export type ReservationCategory = 'all' | 'confirmed' | 'progress' | 'before' | 'after'
+export type ReservationCategory = 'all' | 'confirmed' | 'progress' | 'before' | 'after' | 'cancelRequest'
 
 /** Determine the cancellation phase from the status immediately before cancellation. */
 export function cancellationPhaseForStatus(status: string): ReservationCancellationPhase | null {
@@ -99,6 +99,10 @@ export function reservationMatchesCategory(
   if (category === 'all') return true
   if (category === 'confirmed') return isConfirmedReservationStatus(reservation.status)
   if (category === 'progress') return isPendingReservationStatus(reservation.status)
+  // お客様からのキャンセル申請でスタッフの対応待ちのもの（Issue #97）。
+  if (category === 'cancelRequest') {
+    return reservation.cancellationRequestStatus === 'pending' && isCancellableReservationStatus(reservation.status)
+  }
   return isCancelledReservationStatus(reservation.status) &&
     cancellationPhaseFor(reservation) === category
 }

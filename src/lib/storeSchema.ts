@@ -89,6 +89,10 @@ export const HEADERS = {
     'legacyTime',
     'legacyChannel',
     'publicRequestKey',
+    'cancellationRequestStatus',
+    'cancellationRequestedAt',
+    'cancellationRequestNote',
+    'cancellationRequestResolvedAt',
   ],
   QUESTIONNAIRES: [
     ...LEGACY_QUESTIONNAIRE_HEADERS,
@@ -293,6 +297,12 @@ export function normalizeReservation(v: RecordValue): Reservation {
       : undefined,
     cancelledAt: optional(v.cancelledAt),
     cancellationReason: optional(v.cancellationReason),
+    cancellationRequestStatus: ['pending', 'approved', 'rejected'].includes(text(v.cancellationRequestStatus))
+      ? (text(v.cancellationRequestStatus) as Reservation['cancellationRequestStatus'])
+      : undefined,
+    cancellationRequestedAt: optional(v.cancellationRequestedAt),
+    cancellationRequestNote: optional(v.cancellationRequestNote),
+    cancellationRequestResolvedAt: optional(v.cancellationRequestResolvedAt),
     legacyTime: optional(legacyTime),
     legacyChannel: optional(v.legacyChannel ?? v.channel),
     publicRequestKey: optional(v.publicRequestKey),

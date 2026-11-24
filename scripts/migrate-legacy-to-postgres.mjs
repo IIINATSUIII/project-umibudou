@@ -23,6 +23,8 @@ const RESERVATION_COLUMNS = [
   'staff_name', 'channel', 'questionnaire_id', 'questionnaire_ids', 'questionnaire_token',
   'questionnaire_token_expires_at', 'questionnaire_completed', 'dive_point', 'staff_note', 'raw_legacy',
   'public_request_key', 'cancellation_phase', 'cancelled_at', 'cancellation_reason',
+  'cancellation_request_status', 'cancellation_requested_at', 'cancellation_request_note',
+  'cancellation_request_resolved_at',
 ]
 const QUESTIONNAIRE_COLUMNS = [
   'id', 'reservation_id', 'customer_id', 'submission_id', 'submitted_at', 'last_name', 'first_name',
@@ -263,9 +265,16 @@ export function buildRows(sourceRows, sourceKind, issues) {
           cancellation_phase: optionalText(source.cancellationPhase),
           cancelled_at: parseTimestamp(source.cancelledAt, { entity, id, field: 'cancelledAt' }, issues),
           cancellation_reason: optionalText(source.cancellationReason),
+          cancellation_request_status: optionalText(source.cancellationRequestStatus),
+          cancellation_requested_at: parseTimestamp(source.cancellationRequestedAt, { entity, id, field: 'cancellationRequestedAt' }, issues),
+          cancellation_request_note: optionalText(source.cancellationRequestNote),
+          cancellation_request_resolved_at: parseTimestamp(source.cancellationRequestResolvedAt, { entity, id, field: 'cancellationRequestResolvedAt' }, issues),
         }
         if (row.cancellation_phase && !['before', 'after'].includes(row.cancellation_phase)) {
           issues.push({ entity, id, reason: 'invalid_cancellationPhase' })
+        }
+        if (row.cancellation_request_status && !['pending', 'approved', 'rejected'].includes(row.cancellation_request_status)) {
+          issues.push({ entity, id, reason: 'invalid_cancellationRequestStatus' })
         }
         rows.reservations.push(row)
       } else if (entity === 'questionnaires') {
@@ -740,9 +749,11 @@ async function ensureSchema(client) {
   const reservationColumns = await client.query(
     `SELECT column_name FROM information_schema.columns
      WHERE table_schema = 'public' AND table_name = 'reservations'
-       AND column_name IN ('public_request_key', 'cancellation_phase', 'cancelled_at', 'cancellation_reason')`,
+       AND column_name IN ('public_request_key', 'cancellation_phase', 'cancelled_at', 'cancellation_reason',
+         'cancellation_request_status', 'cancellation_requested_at', 'cancellation_request_note',
+         'cancellation_request_resolved_at')`,
   )
-  if (reservationColumns.rowCount !== 4) throw new Error('The reservation email and cancellation migrations are missing')
+  if (reservationColumns.rowCount !== 8) throw new Error('The reservation email, cancellation and cancellation request migrations are missing')
 }
 
 function insertBatchSql(table, columns, rows) {

@@ -104,3 +104,91 @@ describe('Issue #79 cancellation metadata', () => {
     expect(mock.patchReservation).not.toHaveBeenCalled()
   })
 })
+
+describe('Issue #97 staff handling of a guest cancellation request', () => {
+  const requested = (status: string) => ({
+    ...current(status),
+    cancellationRequestStatus: 'pending',
+    cancellationRequestedAt: '2026-10-19T00:00:00.000Z',
+    cancellationRequestNote: '体調不良',
+  })
+
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-10-20T01:02:03.000Z'))
+    mock.getReservations.mockReset()
+    mock.patchReservation.mockReset().mockResolvedValue('2026-10-20T01:02:04.000Z')
+  })
+
+  afterEach(() => vi.useRealTimers())
+
+  it('approves a pending request when staff cancel the reservation', async () => {
+    mock.getReservations.mockResolvedValue([requested('STS-03')])
+
+    const response = await call({ id: 'R-1', status: 'STS-04', expectedUpdatedAt: '2026-10-20T00:00:00.000Z' })
+
+    expect(response.status).toBe(200)
+    expect(mock.patchReservation).toHaveBeenCalledWith('R-1', expect.objectContaining({
+      status: 'STS-04',
+      cancellationPhase: 'after',
+      cancelledAt: '2026-10-20T01:02:03.000Z',
+      cancellationRequestStatus: 'approved',
+      cancellationRequestResolvedAt: '2026-10-20T01:02:03.000Z',
+      cancellationReason: 'お客様からのキャンセル申請（体調不良）',
+    }), '2026-10-20T00:00:00.000Z')
+  })
+
+  it('keeps the staff reason when approving a request', async () => {
+    mock.getReservations.mockResolvedValue([requested('STS-01')])
+
+    await call({ id: 'R-1', status: 'STS-04', cancellationReason: '海況不良のため店側で中止', expectedUpdatedAt: '2026-10-20T00:00:00.000Z' })
+
+    expect(mock.patchReservation).toHaveBeenCalledWith('R-1', expect.objectContaining({
+      cancellationPhase: 'before',
+      cancellationRequestStatus: 'approved',
+      cancellationReason: '海況不良のため店側で中止',
+    }), '2026-10-20T00:00:00.000Z')
+  })
+
+  it('does not mark a request when there was none', async () => {
+    mock.getReservations.mockResolvedValue([current('STS-03')])
+
+    await call({ id: 'R-1', status: 'STS-04', expectedUpdatedAt: '2026-10-20T00:00:00.000Z' })
+
+    expect(mock.patchReservation.mock.calls[0][1]).not.toHaveProperty('cancellationRequestStatus')
+  })
+
+  it('rejects a pending request without changing the reservation status', async () => {
+    mock.getReservations.mockResolvedValue([requested('STS-03')])
+
+    const response = await call({ id: 'R-1', cancellationRequestStatus: 'rejected', expectedUpdatedAt: '2026-10-20T00:00:00.000Z' })
+
+    expect(response.status).toBe(200)
+    expect(mock.patchReservation).toHaveBeenCalledWith('R-1', {
+      cancellationRequestStatus: 'rejected',
+      cancellationRequestResolvedAt: '2026-10-20T01:02:03.000Z',
+    }, '2026-10-20T00:00:00.000Z')
+  })
+
+  it('refuses to reject when no request is waiting', async () => {
+    mock.getReservations.mockResolvedValue([current('STS-03')])
+
+    const response = await call({ id: 'R-1', cancellationRequestStatus: 'rejected', expectedUpdatedAt: '2026-10-20T00:00:00.000Z' })
+
+    expect(response.status).toBe(409)
+    expect(mock.patchReservation).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    { cancellationRequestStatus: 'approved' },
+    { cancellationRequestStatus: 'pending' },
+    { cancellationRequestStatus: 'rejected', status: 'STS-04' },
+  ])('refuses other request updates from staff: %o', async (body) => {
+    mock.getReservations.mockResolvedValue([requested('STS-03')])
+
+    const response = await call({ id: 'R-1', expectedUpdatedAt: '2026-10-20T00:00:00.000Z', ...body })
+
+    expect(response.status).toBe(400)
+    expect(mock.patchReservation).not.toHaveBeenCalled()
+  })
+})
